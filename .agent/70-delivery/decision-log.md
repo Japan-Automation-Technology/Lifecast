@@ -48,6 +48,10 @@
 - Stripe webhook dedupe baseline added with `processed_webhooks` table and route-level event parsing.
 - Contract tests added for support prepare/confirm/webhook flow, idempotency conflict, and webhook dedupe.
 - Migration/seed scripts wired (`db:migrate`, `db:seed`, `db:bootstrap`) with root aliases.
+- Stripe webhook signature verification added (`LIFECAST_STRIPE_WEBHOOK_SECRET` with HMAC v1 check).
+- Webhook event handlers expanded to include refund and dispute open/close transitions.
+- Journal coverage expanded for `refund`, `dispute_open`, `dispute_close`, `loss_booking`, and `payout_release`.
+- Reconciliation endpoint baseline added (`GET /v1/journal/reconciliation`) for provider-total delta checks.
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`

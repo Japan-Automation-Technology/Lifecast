@@ -2,12 +2,26 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { fail, ok } from "../response.js";
 import { store } from "../store/hybridStore.js";
+import { verifyStripeWebhookSignature } from "../stripeWebhook.js";
 
 export async function registerPaymentRoutes(app: FastifyInstance) {
   app.post("/v1/payments/webhooks/stripe", async (req, reply) => {
     const signature = req.headers["stripe-signature"];
     if (!signature || typeof signature !== "string") {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Missing Stripe-Signature header"));
+    }
+
+    const endpointSecret = process.env.LIFECAST_STRIPE_WEBHOOK_SECRET;
+    if (endpointSecret) {
+      const payloadText = JSON.stringify(req.body ?? {});
+      const verified = verifyStripeWebhookSignature({
+        signatureHeader: signature,
+        payload: payloadText,
+        endpointSecret,
+      });
+      if (!verified) {
+        return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid Stripe signature"));
+      }
     }
 
     const payload = req.body as Record<string, unknown>;

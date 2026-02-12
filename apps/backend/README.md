@@ -17,7 +17,9 @@ Current state:
   - Postgres-first for payouts/disputes/moderation reports/upload sessions.
   - In-memory fallback when DB is unavailable or bootstrap data is missing.
 - Adds idempotency handling for POST APIs via `Idempotency-Key` (DB-backed when available).
-- Adds Stripe webhook dedupe by provider event ID.
+- Adds Stripe webhook dedupe by provider event ID and signature verification via `LIFECAST_STRIPE_WEBHOOK_SECRET`.
+- Adds journal write handlers for `support_hold`, `refund`, `dispute_open`, `dispute_close`, `loss_booking`, and `payout_release`.
+- Adds reconciliation API baseline at `GET /v1/journal/reconciliation`.
 - Shapes and enums follow `packages/contracts/openapi/openapi.yaml`.
 - Ready for BE-001..BE-009 iterative implementation.
 
@@ -30,5 +32,5 @@ Commands:
 - `pnpm db:seed:backend`
 
 Next step:
-- Complete journal entry coverage (`payout_release` / `refund` / `dispute_*` / `loss_booking`).
-- Wire Stripe signature verification with secret-based validation.
+- Add provider-authenticated event bus publish for `payment_succeeded`.
+- Harden reconciliation rules against provider settlement exports and chargeback lifecycle edge cases.

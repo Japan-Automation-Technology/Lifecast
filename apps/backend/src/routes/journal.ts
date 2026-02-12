@@ -25,4 +25,20 @@ export async function registerJournalRoutes(app: FastifyInstance) {
       entries,
     });
   });
+
+  app.get("/v1/journal/reconciliation", async (req) => {
+    const query = req.query as { project_id?: string; currency?: string; provider_total_minor?: string };
+    const projectId = query.project_id && z.string().uuid().safeParse(query.project_id).success ? query.project_id : undefined;
+    const currency = query.currency;
+    const providerTotalMinor =
+      query.provider_total_minor !== undefined ? Number.parseInt(query.provider_total_minor, 10) : undefined;
+
+    const result = await store.getJournalReconciliation({
+      projectId,
+      currency,
+      providerTotalMinor: Number.isFinite(providerTotalMinor) ? providerTotalMinor : undefined,
+    });
+
+    return ok(result);
+  });
 }

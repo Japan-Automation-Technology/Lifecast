@@ -8,14 +8,14 @@ Status snapshot:
 - Backend route skeleton: completed.
 - Persistent DB integration:
   - Supports: in progress (hybrid DB + fallback + idempotency + status history implemented).
-  - Stripe webhook success path: in progress (journal `support_hold` + notification enqueue + event dedupe implemented).
+  - Stripe webhook success path: in progress (signature verify + event dedupe + support/refund/dispute handlers implemented).
   - Journal list read: completed (DB-backed query implemented).
-  - Payout read model: in progress (DB-backed schedule retrieval + lazy create implemented).
+  - Payout read model: in progress (DB-backed schedule retrieval + lazy create + release write path implemented).
   - Dispute read/recovery: in progress (DB-backed read + recovery event insert implemented).
   - Moderation report intake: completed for M1 baseline (DB-backed report + trust score trigger + idempotency).
   - Upload sessions: in progress (DB-backed create/complete/get implemented).
   - Notification queue: in progress (DB enqueue + worker dequeue skeleton implemented).
-  - Migration packaging: in progress (`0001` + `0002` added; DB endpoint DNS resolution currently blocking apply).
+  - Migration packaging: completed (`0001` + `0002` applied, `db:migrate` / `db:seed` confirmed on Supabase pooler URL).
 - Mobile/web client implementation: pending.
 
 ## Backend tickets
@@ -36,7 +36,7 @@ BE-003: Stripe webhook finalization
 - Implement `POST /v1/payments/webhooks/stripe`.
 - Verify signature, idempotent event handling, and dedupe by provider event ID.
 - Publish `payment_succeeded` server event after successful settlement confirmation.
-Status: in progress (event dedupe done, signature cryptographic verification + server event bus pending)
+Status: in progress (signature cryptographic verification + event dedupe done; server event bus pending)
 
 BE-004: Journal write path
 - Implement journal entries/lines for:
@@ -47,6 +47,7 @@ BE-004: Journal write path
   - dispute_close
   - loss_booking
 - Add reconciliation check endpoint against provider totals.
+Status: in progress (`support_hold/refund/dispute_open/dispute_close/loss_booking/payout_release` implemented; reconciliation endpoint added; provider settlement matching rules pending)
 
 BE-005: Payout scheduling and status
 - Implement `project_payouts` write/read logic and `GET /v1/projects/{projectId}/payouts`.
@@ -109,7 +110,7 @@ iOS-003: Upload reliability UX
 X-001: API contract tests
 - Add contract tests against OpenAPI for critical endpoints.
 - Include structured error mapping assertions.
-Status: in progress (`app.contract.test.ts` added, critical support/webhook/idempotency assertions passing)
+Status: in progress (`app.contract.test.ts` extended with signature-invalid and refund transition assertions)
 
 X-002: Migration packaging
 - Convert `db-schema-draft.sql` sections into ordered migrations.

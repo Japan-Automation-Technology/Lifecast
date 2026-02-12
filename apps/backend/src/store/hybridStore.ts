@@ -38,6 +38,10 @@ interface JournalEntryRow {
 const memory = new InMemoryStore();
 const webhookMemoryDedup = new Set<string>();
 
+function normalizeCurrency(value: string | undefined, fallback = "JPY") {
+  return (value ?? fallback).toUpperCase().slice(0, 3);
+}
+
 function toIso(value: Date | string) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
@@ -408,6 +412,449 @@ export class HybridStore {
     }
   }
 
+  async markSupportRefundedByWebhook(input: { supportId: string; providerRefundId?: string; reasonCode?: string }) {
+    if (!hasDb() || !dbPool) {
+      const existing = await memory.getSupport(input.supportId);
+      if (!existing) return null;
+      existing.status = "refunded";
+      return existing;
+    }
+
+    const client = await dbPool.connect();
+    try {
+      await client.query("begin");
+      const current = await client.query<{
+        id: string;
+        project_id: string;
+        plan_id: string;
+        supporter_user_id: string;
+        amount_minor: number;
+        currency: string;
+        status: SupportRecord["status"];
+        reward_type: "physical";
+        cancellation_window_hours: 48;
+      }>(
+        `
+        select id, project_id, plan_id, supporter_user_id, amount_minor, currency, status, reward_type, cancellation_window_hours
+        from support_transactions
+        where id = $1
+        for update
+      `,
+        [input.supportId],
+      );
+
+      if (current.rowCount === 0) {
+        await client.query("rollback");
+        return null;
+      }
+
+      const support = current.rows[0];
+      if (support.status === "refunded") {
+        await client.query("commit");
+        return {
+          supportId: support.id,
+          projectId: support.project_id,
+          planId: support.plan_id,
+          amountMinor: Number(support.amount_minor),
+          currency: support.currency,
+          status: support.status,
+          rewardType: support.reward_type,
+          cancellationWindowHours: support.cancellation_window_hours,
+        } satisfies SupportRecord;
+      }
+
+      await client.query(
+        `
+        update support_transactions
+        set status = 'refunded',
+            refunded_at = now(),
+            updated_at = now()
+        where id = $1
+      `,
+        [input.supportId],
+      );
+
+      await client.query(
+        `
+        insert into support_status_history (support_id, from_status, to_status, reason, actor, occurred_at)
+        values ($1, $2, 'refunded', 'webhook_refund_confirmed', 'system', now())
+      `,
+        [input.supportId, support.status],
+      );
+
+      await client.query(
+        `
+        insert into refund_records (
+          support_id, reason_code, amount_minor, currency, provider_refund_id, status, requested_at, completed_at
+        )
+        values ($1, $2, $3, $4, $5, 'succeeded', now(), now())
+        on conflict (support_id)
+        do update set
+          reason_code = excluded.reason_code,
+          provider_refund_id = coalesce(excluded.provider_refund_id, refund_records.provider_refund_id),
+          status = 'succeeded',
+          completed_at = now()
+      `,
+        [
+          input.supportId,
+          input.reasonCode ?? "refund_webhook",
+          Number(support.amount_minor),
+          support.currency,
+          input.providerRefundId ?? null,
+        ],
+      );
+
+      const entryId = randomUUID();
+      await client.query(
+        `
+        insert into journal_entries (id, entry_type, project_id, support_id, occurred_at, description)
+        values ($1, 'refund', $2, $3, now(), 'Support refund completed')
+      `,
+        [entryId, support.project_id, support.id],
+      );
+
+      await client.query(
+        `
+        insert into journal_lines (journal_entry_id, ledger_account_id, currency, debit_minor, credit_minor)
+        values
+          ($1, (select id from ledger_accounts where code = 'SUPPORT_LIABILITY'), $2, $3, 0),
+          ($1, (select id from ledger_accounts where code = 'CASH_CLEARING'), $2, 0, $3)
+      `,
+        [entryId, support.currency, Number(support.amount_minor)],
+      );
+
+      await client.query("commit");
+      return {
+        supportId: support.id,
+        projectId: support.project_id,
+        planId: support.plan_id,
+        amountMinor: Number(support.amount_minor),
+        currency: support.currency,
+        status: "refunded",
+        rewardType: support.reward_type,
+        cancellationWindowHours: support.cancellation_window_hours,
+      } satisfies SupportRecord;
+    } catch {
+      await client.query("rollback");
+      return null;
+    } finally {
+      client.release();
+    }
+  }
+
+  async createDisputeFromWebhook(input: {
+    providerDisputeId: string;
+    supportId: string;
+    amountMinor: number;
+    currency: string;
+    reason?: string;
+  }) {
+    if (!hasDb() || !dbPool) {
+      return null;
+    }
+
+    const client = await dbPool.connect();
+    try {
+      await client.query("begin");
+      const support = await client.query<{ id: string; project_id: string; currency: string }>(
+        `
+        select id, project_id, currency
+        from support_transactions
+        where id = $1
+      `,
+        [input.supportId],
+      );
+      if (!support.rowCount) {
+        await client.query("rollback");
+        return null;
+      }
+
+      const supportRow = support.rows[0];
+      const amountMinor = Math.max(1, input.amountMinor);
+      const currency = normalizeCurrency(input.currency || supportRow.currency);
+
+      const dispute = await client.query<{ id: string; project_id: string }>(
+        `
+        insert into disputes (
+          support_id, project_id, provider, provider_dispute_id, status, amount_minor, currency, opened_at, created_at, updated_at
+        )
+        values ($1, $2, 'stripe', $3, 'open', $4, $5, now(), now(), now())
+        on conflict (provider_dispute_id)
+        do update set updated_at = now()
+        returning id, project_id
+      `,
+        [input.supportId, supportRow.project_id, input.providerDisputeId, amountMinor, currency],
+      );
+
+      const disputeId = dispute.rows[0].id;
+      const entryId = randomUUID();
+      await client.query(
+        `
+        insert into journal_entries (id, entry_type, project_id, support_id, dispute_id, occurred_at, description)
+        values ($1, 'dispute_open', $2, $3, $4, now(), 'Dispute opened and reserve moved')
+      `,
+        [entryId, supportRow.project_id, input.supportId, disputeId],
+      );
+
+      await client.query(
+        `
+        insert into journal_lines (journal_entry_id, ledger_account_id, currency, debit_minor, credit_minor)
+        values
+          ($1, (select id from ledger_accounts where code = 'SUPPORT_LIABILITY'), $2, $3, 0),
+          ($1, (select id from ledger_accounts where code = 'DISPUTE_RESERVE'), $2, 0, $3)
+      `,
+        [entryId, currency, amountMinor],
+      );
+
+      await client.query(
+        `
+        insert into dispute_events (dispute_id, event_type, payload, occurred_at)
+        values ($1, 'dispute_opened', $2::jsonb, now())
+      `,
+        [disputeId, JSON.stringify({ reason: input.reason ?? "webhook_dispute_opened", amount_minor: amountMinor, currency })],
+      );
+
+      await client.query("commit");
+      return { disputeId };
+    } catch {
+      await client.query("rollback");
+      return null;
+    } finally {
+      client.release();
+    }
+  }
+
+  async closeDisputeFromWebhook(input: { providerDisputeId: string; outcome: "won" | "lost"; reason?: string }) {
+    if (!hasDb() || !dbPool) {
+      return null;
+    }
+
+    const client = await dbPool.connect();
+    try {
+      await client.query("begin");
+      const dispute = await client.query<{
+        id: string;
+        support_id: string;
+        project_id: string;
+        amount_minor: number;
+        currency: string;
+        status: DisputeRecord["status"];
+      }>(
+        `
+        select id, support_id, project_id, amount_minor, currency, status
+        from disputes
+        where provider_dispute_id = $1
+        for update
+      `,
+        [input.providerDisputeId],
+      );
+      if (!dispute.rowCount) {
+        await client.query("rollback");
+        return null;
+      }
+
+      const d = dispute.rows[0];
+      const nextStatus = input.outcome;
+      if (d.status === nextStatus || d.status === "closed") {
+        await client.query("commit");
+        return { disputeId: d.id };
+      }
+
+      await client.query(
+        `
+        update disputes
+        set status = $2, resolved_at = now(), updated_at = now(), final_liability = $3
+        where id = $1
+      `,
+        [d.id, nextStatus, nextStatus === "lost" ? "platform" : "unknown"],
+      );
+
+      const closeEntryId = randomUUID();
+      await client.query(
+        `
+        insert into journal_entries (id, entry_type, project_id, support_id, dispute_id, occurred_at, description)
+        values ($1, 'dispute_close', $2, $3, $4, now(), 'Dispute closed by webhook')
+      `,
+        [closeEntryId, d.project_id, d.support_id, d.id],
+      );
+
+      if (nextStatus === "won") {
+        await client.query(
+          `
+          insert into journal_lines (journal_entry_id, ledger_account_id, currency, debit_minor, credit_minor)
+          values
+            ($1, (select id from ledger_accounts where code = 'DISPUTE_RESERVE'), $2, $3, 0),
+            ($1, (select id from ledger_accounts where code = 'SUPPORT_LIABILITY'), $2, 0, $3)
+        `,
+          [closeEntryId, d.currency, Number(d.amount_minor)],
+        );
+      } else {
+        await client.query(
+          `
+          insert into journal_lines (journal_entry_id, ledger_account_id, currency, debit_minor, credit_minor)
+          values
+            ($1, (select id from ledger_accounts where code = 'DISPUTE_RESERVE'), $2, $3, 0),
+            ($1, (select id from ledger_accounts where code = 'CASH_CLEARING'), $2, 0, $3)
+        `,
+          [closeEntryId, d.currency, Number(d.amount_minor)],
+        );
+      }
+
+      await client.query(
+        `
+        insert into dispute_events (dispute_id, event_type, payload, occurred_at)
+        values ($1, $2, $3::jsonb, now())
+      `,
+        [
+          d.id,
+          nextStatus === "won" ? "dispute_resolved_won" : "dispute_resolved_lost",
+          JSON.stringify({ reason: input.reason ?? "webhook_dispute_closed", outcome: nextStatus }),
+        ],
+      );
+
+      if (nextStatus === "lost") {
+        const lossEntryId = randomUUID();
+        await client.query(
+          `
+          insert into journal_entries (id, entry_type, project_id, support_id, dispute_id, occurred_at, description)
+          values ($1, 'loss_booking', $2, $3, $4, now(), 'Dispute loss booked')
+        `,
+          [lossEntryId, d.project_id, d.support_id, d.id],
+        );
+
+        await client.query(
+          `
+          insert into journal_lines (journal_entry_id, ledger_account_id, currency, debit_minor, credit_minor)
+          values
+            ($1, (select id from ledger_accounts where code = 'DISPUTE_LOSS_EXPENSE'), $2, $3, 0),
+            ($1, (select id from ledger_accounts where code = 'SUPPORT_LIABILITY'), $2, 0, $3)
+        `,
+          [lossEntryId, d.currency, Number(d.amount_minor)],
+        );
+
+        await client.query(
+          `
+          insert into dispute_events (dispute_id, event_type, payload, occurred_at)
+          values ($1, 'recovery_failed_loss_booked', $2::jsonb, now())
+        `,
+          [d.id, JSON.stringify({ amount_minor: d.amount_minor, currency: d.currency })],
+        );
+      }
+
+      await client.query("commit");
+      return { disputeId: d.id };
+    } catch {
+      await client.query("rollback");
+      return null;
+    } finally {
+      client.release();
+    }
+  }
+
+  async recordPayoutRelease(input: { projectId: string; amountMinor: number; currency: string }) {
+    if (!hasDb() || !dbPool) {
+      return { projectId: input.projectId, ok: true };
+    }
+
+    const client = await dbPool.connect();
+    try {
+      await client.query("begin");
+      const project = await client.query(`select id from projects where id = $1`, [input.projectId]);
+      if (!project.rowCount) {
+        await client.query("rollback");
+        return null;
+      }
+
+      const amountMinor = Math.max(1, input.amountMinor);
+      const currency = normalizeCurrency(input.currency);
+      const entryId = randomUUID();
+      await client.query(
+        `
+        insert into journal_entries (id, entry_type, project_id, occurred_at, description)
+        values ($1, 'payout_release', $2, now(), 'Project payout released')
+      `,
+        [entryId, input.projectId],
+      );
+
+      await client.query(
+        `
+        insert into journal_lines (journal_entry_id, ledger_account_id, currency, debit_minor, credit_minor)
+        values
+          ($1, (select id from ledger_accounts where code = 'SUPPORT_LIABILITY'), $2, $3, 0),
+          ($1, (select id from ledger_accounts where code = 'CREATOR_PAYABLE'), $2, 0, $3),
+          ($1, (select id from ledger_accounts where code = 'CREATOR_PAYABLE'), $2, $3, 0),
+          ($1, (select id from ledger_accounts where code = 'CASH_CLEARING'), $2, 0, $3)
+      `,
+        [entryId, currency, amountMinor],
+      );
+
+      await client.query(
+        `
+        update project_payouts
+        set status = 'settled', settled_at = now(), updated_at = now()
+        where project_id = $1
+      `,
+        [input.projectId],
+      );
+
+      await client.query("commit");
+      return { projectId: input.projectId, ok: true };
+    } catch {
+      await client.query("rollback");
+      return null;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getJournalReconciliation(filters: { projectId?: string; currency?: string; providerTotalMinor?: number }) {
+    if (!hasDb() || !dbPool) {
+      return { currency: filters.currency ?? "JPY", cashClearingNetMinor: 0, deltaMinor: undefined };
+    }
+    const client = await dbPool.connect();
+    try {
+      const values: unknown[] = ["CASH_CLEARING"];
+      const where: string[] = ["la.code = $1"];
+      if (filters.projectId) {
+        values.push(filters.projectId);
+        where.push(`je.project_id = $${values.length}`);
+      }
+      if (filters.currency) {
+        values.push(normalizeCurrency(filters.currency));
+        where.push(`jl.currency = $${values.length}`);
+      }
+
+      const result = await client.query<{ net_minor: string; currency: string }>(
+        `
+        select
+          coalesce(sum(jl.debit_minor - jl.credit_minor), 0)::text as net_minor,
+          coalesce(max(jl.currency), $${values.length + 1}) as currency
+        from journal_lines jl
+        join journal_entries je on je.id = jl.journal_entry_id
+        join ledger_accounts la on la.id = jl.ledger_account_id
+        where ${where.join(" and ")}
+      `,
+        [...values, normalizeCurrency(filters.currency)],
+      );
+
+      const cashClearingNetMinor = Number(result.rows[0]?.net_minor ?? "0");
+      const currency = result.rows[0]?.currency ?? normalizeCurrency(filters.currency);
+      const deltaMinor =
+        typeof filters.providerTotalMinor === "number" ? cashClearingNetMinor - filters.providerTotalMinor : undefined;
+
+      return {
+        currency,
+        cashClearingNetMinor,
+        providerTotalMinor: filters.providerTotalMinor,
+        deltaMinor,
+      };
+    } catch {
+      return { currency: filters.currency ?? "JPY", cashClearingNetMinor: 0, deltaMinor: undefined };
+    } finally {
+      client.release();
+    }
+  }
+
   async processStripeWebhook(input: {
     eventId: string;
     eventType: string;
@@ -420,8 +867,16 @@ export class HybridStore {
         return { deduped: true, processed: false };
       }
       webhookMemoryDedup.add(dedupeKey);
-      if (input.supportId && input.eventType === "checkout.session.completed") {
+      if (input.supportId && ["checkout.session.completed", "payment_intent.succeeded"].includes(input.eventType)) {
         await this.markSupportSucceededByWebhook(input.supportId);
+        return { deduped: false, processed: true };
+      }
+      if (input.supportId && input.eventType === "charge.refunded") {
+        await this.markSupportRefundedByWebhook({
+          supportId: input.supportId,
+          providerRefundId: input.eventId,
+          reasonCode: "charge_refunded",
+        });
         return { deduped: false, processed: true };
       }
       return { deduped: false, processed: false };
@@ -443,8 +898,45 @@ export class HybridStore {
       }
 
       let processed = false;
+      const objectPayload = (input.payload.data as { object?: Record<string, unknown> } | undefined)?.object ?? {};
+      const metadata =
+        typeof objectPayload.metadata === "object" && objectPayload.metadata !== null
+          ? (objectPayload.metadata as Record<string, unknown>)
+          : undefined;
+      const metadataSupportId = metadata && typeof metadata.support_id === "string" ? metadata.support_id : undefined;
+      const webhookSupportId = input.supportId ?? metadataSupportId;
+
       if (input.supportId && ["checkout.session.completed", "payment_intent.succeeded"].includes(input.eventType)) {
         await this.markSupportSucceededByWebhook(input.supportId);
+        processed = true;
+      }
+      if (webhookSupportId && input.eventType === "charge.refunded") {
+        await this.markSupportRefundedByWebhook({
+          supportId: webhookSupportId,
+          providerRefundId: typeof objectPayload.id === "string" ? objectPayload.id : input.eventId,
+          reasonCode: "charge_refunded",
+        });
+        processed = true;
+      }
+      if (webhookSupportId && input.eventType === "charge.dispute.created") {
+        await this.createDisputeFromWebhook({
+          providerDisputeId: typeof objectPayload.id === "string" ? objectPayload.id : input.eventId,
+          supportId: webhookSupportId,
+          amountMinor: typeof objectPayload.amount === "number" ? objectPayload.amount : 1,
+          currency: normalizeCurrency(typeof objectPayload.currency === "string" ? objectPayload.currency : "JPY"),
+          reason: typeof objectPayload.reason === "string" ? objectPayload.reason : "dispute_created",
+        });
+        processed = true;
+      }
+      if (input.eventType === "charge.dispute.closed") {
+        const outcomeRaw = typeof objectPayload.status === "string" ? objectPayload.status : "";
+        const outcome: "won" | "lost" = outcomeRaw === "won" ? "won" : "lost";
+        const disputeId = typeof objectPayload.id === "string" ? objectPayload.id : input.eventId;
+        await this.closeDisputeFromWebhook({
+          providerDisputeId: disputeId,
+          outcome,
+          reason: "dispute_closed",
+        });
         processed = true;
       }
 
