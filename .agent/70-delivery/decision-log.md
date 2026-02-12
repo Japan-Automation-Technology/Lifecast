@@ -1,0 +1,21 @@
+# Decision Log
+
+## 2026-02-12
+- Product positioned as purchase-style crowdfunding with short-video-first UX.
+- Initial category focus fixed to toC creative process-heavy projects (game/hardware priority).
+- Funding mode fixed to all-or-nothing for MVP.
+- Support conversion canonical definition fixed as payment success only.
+- Funnel event sequence fixed with five required steps.
+- Platform fee set to 15 percent (temporary fixed assumption).
+- Payment processing fee assigned to creator.
+- Refund economics and cancellation window baseline documented.
+- Pre-publication checks, stop conditions, and 72-hour appeal baseline documented.
+- MVP in-scope and out-of-scope boundaries frozen for first build.
+
+Cross-reference:
+- `../00-executive/frozen-decisions.md`
+- `../30-business-policy/payment-refund-policy.md`
+- `../30-business-policy/trust-and-safety-policy.md`
+- `../50-data-analytics/funnel-definition.md`
+
+Last updated: 2026-02-12
