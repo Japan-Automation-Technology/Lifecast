@@ -3,6 +3,12 @@
 Goal:
 - Convert M1 contract freeze into immediately actionable implementation tickets.
 
+Status snapshot:
+- Workspace scaffolding: completed.
+- Backend route skeleton: completed (in-memory).
+- Persistent DB integration: pending.
+- Mobile/web client implementation: pending.
+
 ## Backend tickets
 
 BE-001: Support prepare API

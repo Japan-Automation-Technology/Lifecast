@@ -1,0 +1,11 @@
+{
+  "name": "lifecast",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev:backend": "pnpm --filter @lifecast/backend dev",
+    "build:backend": "pnpm --filter @lifecast/backend build",
+    "typecheck:backend": "pnpm --filter @lifecast/backend typecheck"
+  }
+}

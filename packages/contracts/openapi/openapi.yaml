@@ -1,0 +1,688 @@
+openapi: 3.2.0
+info:
+  title: LifeCast API (Draft)
+  version: 0.1.1-m1
+  summary: Short-video-first purchase-style crowdfunding API
+  description: >
+    Draft contract for MVP. Support conversion is authoritative only when
+    backend confirms payment webhook settlement.
+servers:
+  - url: https://api.lifecast.jp
+    description: Production
+  - url: https://staging-api.lifecast.jp
+    description: Staging
+tags:
+  - name: Supports
+  - name: Payments
+  - name: Uploads
+  - name: Journal
+  - name: Disputes
+  - name: Payouts
+  - name: Moderation
+security:
+  - bearerAuth: []
+paths:
+  /v1/projects/{projectId}/supports/prepare:
+    post:
+      tags: [Supports]
+      summary: Prepare support checkout session
+      operationId: prepareSupport
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan_id, quantity]
+              properties:
+                plan_id:
+                  $ref: '#/components/schemas/Uuid'
+                quantity:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+      responses:
+        '200':
+          description: Prepared successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponsePrepareSupport'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
+  /v1/supports/{supportId}/confirm:
+    post:
+      tags: [Supports]
+      summary: Confirm support after provider return
+      operationId: confirmSupport
+      parameters:
+        - $ref: '#/components/parameters/SupportId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, provider_session_id]
+              properties:
+                provider:
+                  type: string
+                  enum: [stripe]
+                provider_session_id:
+                  type: string
+                return_status:
+                  type: string
+                  enum: [success, canceled, failed]
+      responses:
+        '200':
+          description: Accepted; final status not guaranteed here
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseSupportStatus'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
+  /v1/supports/{supportId}:
+    get:
+      tags: [Supports]
+      summary: Get canonical support status
+      operationId: getSupport
+      parameters:
+        - $ref: '#/components/parameters/SupportId'
+      responses:
+        '200':
+          description: Support status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseSupportStatus'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
+  /v1/payments/webhooks/stripe:
+    post:
+      tags: [Payments]
+      summary: Stripe webhook receiver (server-to-server)
+      operationId: stripeWebhook
+      security: []
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Webhook accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseAck'
+        '400':
+          description: Invalid signature or payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+  /v1/videos/uploads:
+    post:
+      tags: [Uploads]
+      summary: Create upload session
+      operationId: createUploadSession
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file_name, content_type, file_size_bytes]
+              properties:
+                file_name:
+                  type: string
+                  maxLength: 255
+                content_type:
+                  type: string
+                  enum: [video/mp4, video/quicktime]
+                file_size_bytes:
+                  type: integer
+                  minimum: 1
+                content_hash_sha256:
+                  type: string
+                  pattern: '^[A-Fa-f0-9]{64}$'
+      responses:
+        '200':
+          description: Upload session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseUploadSession'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
+  /v1/videos/uploads/{uploadSessionId}/complete:
+    post:
+      tags: [Uploads]
+      summary: Complete upload and start processing
+      operationId: completeUploadSession
+      parameters:
+        - $ref: '#/components/parameters/UploadSessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [storage_object_key, content_hash_sha256]
+              properties:
+                storage_object_key:
+                  type: string
+                content_hash_sha256:
+                  type: string
+                  pattern: '^[A-Fa-f0-9]{64}$'
+      responses:
+        '200':
+          description: Processing started or deduplicated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseUploadSession'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
+  /v1/videos/uploads/{uploadSessionId}:
+    get:
+      tags: [Uploads]
+      summary: Get upload session status
+      operationId: getUploadSession
+      parameters:
+        - $ref: '#/components/parameters/UploadSessionId'
+      responses:
+        '200':
+          description: Upload session status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseUploadSession'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
+  /v1/journal/entries:
+    get:
+      tags: [Journal]
+      summary: List journal entries
+      operationId: listJournalEntries
+      parameters:
+        - name: project_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: support_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: entry_type
+          in: query
+          schema:
+            type: string
+            enum: [support_hold, payout_release, refund, dispute_open, dispute_close, loss_booking]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: Journal entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseJournalEntries'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
+  /v1/disputes/{disputeId}/recovery-attempts:
+    post:
+      tags: [Disputes]
+      summary: Record dispute recovery attempt
+      operationId: createDisputeRecoveryAttempt
+      parameters:
+        - $ref: '#/components/parameters/DisputeId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, amount_minor, currency]
+              properties:
+                action:
+                  type: string
+                  enum: [transfer_reversal_attempt, account_debit_attempt]
+                amount_minor:
+                  type: integer
+                  minimum: 1
+                currency:
+                  type: string
+                  minLength: 3
+                  maxLength: 3
+                note:
+                  type: string
+                  maxLength: 1024
+      responses:
+        '200':
+          description: Recovery attempt recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseAck'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
+  /v1/disputes/{disputeId}:
+    get:
+      tags: [Disputes]
+      summary: Get dispute status and SLA windows
+      operationId: getDispute
+      parameters:
+        - $ref: '#/components/parameters/DisputeId'
+      responses:
+        '200':
+          description: Dispute status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseDispute'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
+  /v1/projects/{projectId}/payouts:
+    get:
+      tags: [Payouts]
+      summary: Get payout schedule and status for a project
+      operationId: getProjectPayout
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project payout schedule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseProjectPayout'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
+  /v1/projects/{projectId}/reports:
+    post:
+      tags: [Moderation]
+      summary: Submit project report for trust-weighted review
+      operationId: createProjectReport
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason_code, details]
+              properties:
+                reason_code:
+                  type: string
+                  enum: [fraud, copyright, policy_violation, no_progress, other]
+                details:
+                  type: string
+                  maxLength: 2048
+      responses:
+        '200':
+          description: Report accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseAck'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 255
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    SupportId:
+      name: supportId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    UploadSessionId:
+      name: uploadSessionId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    DisputeId:
+      name: disputeId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+  responses:
+    Error4xx:
+      description: Client error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+    Error5xx:
+      description: Server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+    ApiResponseAck:
+      type: object
+      required: [request_id, server_time, result]
+      properties:
+        request_id:
+          type: string
+        server_time:
+          type: string
+          format: date-time
+        result:
+          type: object
+          properties:
+            ok:
+              type: boolean
+              default: true
+    ApiErrorEnvelope:
+      type: object
+      required: [request_id, server_time, error]
+      properties:
+        request_id:
+          type: string
+        server_time:
+          type: string
+          format: date-time
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - VALIDATION_ERROR
+                - AUTH_REQUIRED
+                - PERMISSION_DENIED
+                - RESOURCE_NOT_FOUND
+                - STATE_CONFLICT
+                - PAYMENT_FAILED
+                - PAYMENT_REQUIRES_ACTION
+                - PROJECT_STOPPED
+                - RATE_LIMITED
+                - INTERNAL_ERROR
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+    SupportStatus:
+      type: string
+      enum: [prepared, pending_confirmation, succeeded, failed, canceled, refunded]
+    UploadStatus:
+      type: string
+      enum: [created, uploading, processing, ready, failed]
+    ApiResponsePrepareSupport:
+      type: object
+      required: [request_id, server_time, result]
+      properties:
+        request_id:
+          type: string
+        server_time:
+          type: string
+          format: date-time
+        result:
+          type: object
+          required: [support_id, support_status, checkout_url, policy_snapshot]
+          properties:
+            support_id:
+              $ref: '#/components/schemas/Uuid'
+            support_status:
+              $ref: '#/components/schemas/SupportStatus'
+            checkout_url:
+              type: string
+              format: uri
+            policy_snapshot:
+              $ref: '#/components/schemas/SupportPolicySnapshot'
+    ApiResponseSupportStatus:
+      type: object
+      required: [request_id, server_time, result]
+      properties:
+        request_id:
+          type: string
+        server_time:
+          type: string
+          format: date-time
+        result:
+          type: object
+          required: [support_id, support_status, amount_minor, currency, project_id, plan_id]
+          properties:
+            support_id:
+              $ref: '#/components/schemas/Uuid'
+            support_status:
+              $ref: '#/components/schemas/SupportStatus'
+            amount_minor:
+              type: integer
+            currency:
+              type: string
+            project_id:
+              $ref: '#/components/schemas/Uuid'
+            plan_id:
+              $ref: '#/components/schemas/Uuid'
+            reward_type:
+              type: string
+              enum: [physical]
+            cancellation_window_hours:
+              type: integer
+              enum: [48]
+    ApiResponseUploadSession:
+      type: object
+      required: [request_id, server_time, result]
+      properties:
+        request_id:
+          type: string
+        server_time:
+          type: string
+          format: date-time
+        result:
+          type: object
+          required: [upload_session_id, status]
+          properties:
+            upload_session_id:
+              $ref: '#/components/schemas/Uuid'
+            status:
+              $ref: '#/components/schemas/UploadStatus'
+            upload_url:
+              type: string
+              format: uri
+            expires_at:
+              type: string
+              format: date-time
+            video_id:
+              $ref: '#/components/schemas/Uuid'
+    SupportPolicySnapshot:
+      type: object
+      required: [reward_type, cancellation_window_hours, refund_policy]
+      properties:
+        reward_type:
+          type: string
+          enum: [physical]
+        cancellation_window_hours:
+          type: integer
+          enum: [48]
+        refund_policy:
+          type: string
+          enum: [all_or_nothing_auto_refund]
+        delivery_estimate:
+          type: string
+    JournalLine:
+      type: object
+      required: [account_code, debit_minor, credit_minor, currency]
+      properties:
+        account_code:
+          type: string
+        debit_minor:
+          type: integer
+        credit_minor:
+          type: integer
+        currency:
+          type: string
+    JournalEntry:
+      type: object
+      required: [entry_id, entry_type, occurred_at, lines]
+      properties:
+        entry_id:
+          $ref: '#/components/schemas/Uuid'
+        entry_type:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+        support_id:
+          $ref: '#/components/schemas/Uuid'
+        project_id:
+          $ref: '#/components/schemas/Uuid'
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/JournalLine'
+    ApiResponseJournalEntries:
+      type: object
+      required: [request_id, server_time, result]
+      properties:
+        request_id:
+          type: string
+        server_time:
+          type: string
+          format: date-time
+        result:
+          type: object
+          required: [entries]
+          properties:
+            entries:
+              type: array
+              items:
+                $ref: '#/components/schemas/JournalEntry'
+    ProjectPayout:
+      type: object
+      required: [project_id, payout_status, execution_start_at, settlement_due_at, rolling_reserve_enabled]
+      properties:
+        project_id:
+          $ref: '#/components/schemas/Uuid'
+        payout_status:
+          type: string
+          enum: [scheduled, executing, settled, blocked]
+        execution_start_at:
+          type: string
+          format: date-time
+        settlement_due_at:
+          type: string
+          format: date-time
+        settled_at:
+          type: string
+          format: date-time
+        rolling_reserve_enabled:
+          type: boolean
+          enum: [false]
+    ApiResponseProjectPayout:
+      type: object
+      required: [request_id, server_time, result]
+      properties:
+        request_id:
+          type: string
+        server_time:
+          type: string
+          format: date-time
+        result:
+          $ref: '#/components/schemas/ProjectPayout'
+    DisputeView:
+      type: object
+      required: [dispute_id, status, opened_at, acknowledgement_due_at, triage_due_at, resolution_due_at]
+      properties:
+        dispute_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [open, won, lost, closed]
+        opened_at:
+          type: string
+          format: date-time
+        acknowledgement_due_at:
+          type: string
+          format: date-time
+        triage_due_at:
+          type: string
+          format: date-time
+        resolution_due_at:
+          type: string
+          format: date-time
+    ApiResponseDispute:
+      type: object
+      required: [request_id, server_time, result]
+      properties:
+        request_id:
+          type: string
+        server_time:
+          type: string
+          format: date-time
+        result:
+          $ref: '#/components/schemas/DisputeView'

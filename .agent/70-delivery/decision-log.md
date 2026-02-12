@@ -36,6 +36,8 @@
 - M1 OpenAPI draft elevated to include payout read model, moderation report intake, dispute SLA view, and support policy snapshot.
 - M1 DB draft elevated with payout schedules, moderation reports, notification events, and cancellation window enforcement.
 - M1 execution ticket set created for backend/data/iOS/cross-cutting implementation.
+- Monorepo workspace scaffold created for `apps/backend`, `apps/ios`, `apps/android`, `apps/web`, and `packages/contracts`.
+- M1 backend API skeleton implemented with Fastify route groups and in-memory state adapter.
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`
