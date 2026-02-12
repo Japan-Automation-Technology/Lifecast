@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import test from "node:test";
 
 process.env.LIFECAST_DATABASE_URL = "";
+process.env.LIFECAST_STRIPE_WEBHOOK_SECRET = "";
 
 const { buildApp } = await import("./app.js");
 

@@ -1,4 +1,7 @@
 import { Pool } from "pg";
+import { loadEnv } from "../env.js";
+
+loadEnv();
 
 const rawConnectionString = process.env.LIFECAST_DATABASE_URL;
 const connectionString = rawConnectionString?.includes("sslmode=require") &&
