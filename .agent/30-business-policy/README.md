@@ -9,6 +9,7 @@ When to read deeper:
 Key files:
 - `pricing-and-fees.md`
 - `payment-refund-policy.md`
+- `dispute-and-liability-policy.md`
 - `trust-and-safety-policy.md`
 - `creator-obligations.md`
 

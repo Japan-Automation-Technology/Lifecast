@@ -3,6 +3,7 @@
 Funding model:
 - Purchase-style crowdfunding only.
 - MVP uses all-or-nothing only.
+- MVP support is limited to physical return/reward outcomes.
 
 Success and failure behavior:
 - If goal reached under campaign rules: payout eligible.
@@ -14,7 +15,7 @@ Refund economics:
 - Payment processor actual cost may not be recoverable.
 
 Cancellation window:
-- Supporter may request cancellation within a 24-72 hour policy window after payment.
+- Supporter may request cancellation within 48 hours after payment.
 - Outside window: cancellation not guaranteed by default.
 - Exception handling is possible based on project-specific circumstances and policy criteria.
 

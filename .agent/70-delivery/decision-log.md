@@ -11,11 +11,21 @@
 - Refund economics and cancellation window baseline documented.
 - Pre-publication checks, stop conditions, and 72-hour appeal baseline documented.
 - MVP in-scope and out-of-scope boundaries frozen for first build.
+- Store policy boundary frozen: MVP support targets physical return/reward outcomes only.
+- Cancellation window fixed to 48 hours.
+- Accounting approach frozen to append-only journal plus derived views.
+- Full event sourcing rejected as MVP accounting source of truth.
+- Dispute lifecycle bookkeeping and loss allocation required from MVP start.
+- Managed video platform approach chosen for MVP (Cloudflare Stream baseline).
+- Upload reliability baseline frozen: resumable sessions, dedupe guard, stuck-processing failure fallback.
+- Payment error UX must map processor error categories to user actions.
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`
 - `../30-business-policy/payment-refund-policy.md`
+- `../30-business-policy/dispute-and-liability-policy.md`
 - `../30-business-policy/trust-and-safety-policy.md`
 - `../50-data-analytics/funnel-definition.md`
+- `../60-architecture/system-context.md`
 
 Last updated: 2026-02-12

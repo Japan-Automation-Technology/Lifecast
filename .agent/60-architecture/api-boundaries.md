@@ -6,6 +6,8 @@ Likely API groups:
 - Project and plan APIs.
 - Support checkout orchestration APIs.
 - Payment webhook and reconciliation APIs.
+- Accounting journal and settlement read APIs.
+- Dispute and recovery workflow APIs.
 - Social APIs (follow, comment, like, share metadata).
 - Moderation and appeals APIs.
 - Analytics ingestion APIs.

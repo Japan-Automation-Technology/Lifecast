@@ -11,6 +11,7 @@ These are current fixed decisions and should be treated as constraints unless ex
 - Product type: purchase-style crowdfunding (not investment product).
 - MVP support type: return-based support only.
 - Future option: no-return support and supporter-only content.
+- Store policy boundary for MVP: support is limited to physical return/reward outcomes.
 - Funding mode: all-or-nothing only.
 - Payout model: creator receives funds in one lump sum after success conditions.
 
@@ -21,7 +22,7 @@ These are current fixed decisions and should be treated as constraints unless ex
   - If goal not reached: automatic full refund to supporter principal.
   - Platform fee is not refunded.
   - Payment processor actual cost may be non-refundable.
-  - Allow cancellation request window: 24-72 hours after support completion.
+  - Allow cancellation request window: 48 hours after support completion.
   - After window: no cancellation by default, with explicit project-level exceptions.
 - Checkout strategy (MVP): external payment flow with Apple Pay support to reduce friction.
 
@@ -29,6 +30,21 @@ These are current fixed decisions and should be treated as constraints unless ex
 - KYC and anti-social checks required in full model.
 - MVP minimum: simplified identity verification before project publication.
 - Public policy stance: strict, explicit, and log-driven operations.
+
+## Accounting and settlement
+- Ledger implementation: append-only accounting journal with derived balance views.
+- Do not use full event sourcing as accounting source of truth for MVP.
+- Dispute and chargeback flows must be journaled from day one, including:
+  - dispute opened
+  - dispute won/lost
+  - post-payout recovery failure and loss allocation
+
+## Video platform and reliability
+- Initial video infrastructure: managed video platform (Cloudflare Stream baseline).
+- Upload flow uses resumable/chunked sessions with idempotent retries.
+- Upload/session state machine is required:
+  - created -> uploading -> processing -> ready | failed
+- Duplicate ingest prevention uses session identity plus content hash.
 
 ## Project and feed UX
 - Project page required basics: goal amount, deadline, minimum plan summary.
@@ -65,6 +81,8 @@ These are current fixed decisions and should be treated as constraints unless ex
 - Project progress display updates.
 - Basic notifications.
 - User activity and conversion logging.
+- Upload recovery UX for network interruption and processing failure.
+- Payment failure messaging mapped to processor error categories.
 
 ## Explicitly out of MVP
 - Long-form video.
