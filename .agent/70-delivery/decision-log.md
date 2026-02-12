@@ -33,6 +33,9 @@
 - Notification matrix defaults frozen for creator/supporter/ops role-event channels.
 - Dispute SLA defaults frozen (ack/triage/resolution/escalation targets).
 - Low-conversion bitrate cap thresholds and recovery window frozen.
+- M1 OpenAPI draft elevated to include payout read model, moderation report intake, dispute SLA view, and support policy snapshot.
+- M1 DB draft elevated with payout schedules, moderation reports, notification events, and cancellation window enforcement.
+- M1 execution ticket set created for backend/data/iOS/cross-cutting implementation.
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`
@@ -49,5 +52,6 @@ Cross-reference:
 - `./mcp-skills-and-secrets-setup.md`
 - `../40-mvp-spec/notification-matrix.md`
 - `../50-data-analytics/logging-retention.md`
+- `./m1-execution-tickets.md`
 
 Last updated: 2026-02-12

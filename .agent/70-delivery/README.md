@@ -13,5 +13,6 @@ Key files:
 - `question-backlog.md`
 - `implementation-workbreakdown.md`
 - `mcp-skills-and-secrets-setup.md`
+- `m1-execution-tickets.md`
 
 Last updated: 2026-02-12

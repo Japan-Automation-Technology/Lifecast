@@ -1,7 +1,7 @@
 openapi: 3.2.0
 info:
   title: LifeCast API (Draft)
-  version: 0.1.0
+  version: 0.1.1-m1
   summary: Short-video-first purchase-style crowdfunding API
   description: >
     Draft contract for MVP. Support conversion is authoritative only when
@@ -17,6 +17,8 @@ tags:
   - name: Uploads
   - name: Journal
   - name: Disputes
+  - name: Payouts
+  - name: Moderation
 security:
   - bearerAuth: []
 paths:
@@ -303,6 +305,75 @@ paths:
           $ref: '#/components/responses/Error4xx'
         '5XX':
           $ref: '#/components/responses/Error5xx'
+  /v1/disputes/{disputeId}:
+    get:
+      tags: [Disputes]
+      summary: Get dispute status and SLA windows
+      operationId: getDispute
+      parameters:
+        - $ref: '#/components/parameters/DisputeId'
+      responses:
+        '200':
+          description: Dispute status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseDispute'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
+  /v1/projects/{projectId}/payouts:
+    get:
+      tags: [Payouts]
+      summary: Get payout schedule and status for a project
+      operationId: getProjectPayout
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project payout schedule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseProjectPayout'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
+  /v1/projects/{projectId}/reports:
+    post:
+      tags: [Moderation]
+      summary: Submit project report for trust-weighted review
+      operationId: createProjectReport
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason_code, details]
+              properties:
+                reason_code:
+                  type: string
+                  enum: [fraud, copyright, policy_violation, no_progress, other]
+                details:
+                  type: string
+                  maxLength: 2048
+      responses:
+        '200':
+          description: Report accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseAck'
+        '4XX':
+          $ref: '#/components/responses/Error4xx'
+        '5XX':
+          $ref: '#/components/responses/Error5xx'
 components:
   securitySchemes:
     bearerAuth:
@@ -421,7 +492,7 @@ components:
           format: date-time
         result:
           type: object
-          required: [support_id, support_status, checkout_url]
+          required: [support_id, support_status, checkout_url, policy_snapshot]
           properties:
             support_id:
               $ref: '#/components/schemas/Uuid'
@@ -430,6 +501,8 @@ components:
             checkout_url:
               type: string
               format: uri
+            policy_snapshot:
+              $ref: '#/components/schemas/SupportPolicySnapshot'
     ApiResponseSupportStatus:
       type: object
       required: [request_id, server_time, result]
@@ -455,6 +528,12 @@ components:
               $ref: '#/components/schemas/Uuid'
             plan_id:
               $ref: '#/components/schemas/Uuid'
+            reward_type:
+              type: string
+              enum: [physical]
+            cancellation_window_hours:
+              type: integer
+              enum: [48]
     ApiResponseUploadSession:
       type: object
       required: [request_id, server_time, result]
@@ -480,6 +559,21 @@ components:
               format: date-time
             video_id:
               $ref: '#/components/schemas/Uuid'
+    SupportPolicySnapshot:
+      type: object
+      required: [reward_type, cancellation_window_hours, refund_policy]
+      properties:
+        reward_type:
+          type: string
+          enum: [physical]
+        cancellation_window_hours:
+          type: integer
+          enum: [48]
+        refund_policy:
+          type: string
+          enum: [all_or_nothing_auto_refund]
+        delivery_estimate:
+          type: string
     JournalLine:
       type: object
       required: [account_code, debit_minor, credit_minor, currency]
@@ -528,3 +622,67 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/JournalEntry'
+    ProjectPayout:
+      type: object
+      required: [project_id, payout_status, execution_start_at, settlement_due_at, rolling_reserve_enabled]
+      properties:
+        project_id:
+          $ref: '#/components/schemas/Uuid'
+        payout_status:
+          type: string
+          enum: [scheduled, executing, settled, blocked]
+        execution_start_at:
+          type: string
+          format: date-time
+        settlement_due_at:
+          type: string
+          format: date-time
+        settled_at:
+          type: string
+          format: date-time
+        rolling_reserve_enabled:
+          type: boolean
+          enum: [false]
+    ApiResponseProjectPayout:
+      type: object
+      required: [request_id, server_time, result]
+      properties:
+        request_id:
+          type: string
+        server_time:
+          type: string
+          format: date-time
+        result:
+          $ref: '#/components/schemas/ProjectPayout'
+    DisputeView:
+      type: object
+      required: [dispute_id, status, opened_at, acknowledgement_due_at, triage_due_at, resolution_due_at]
+      properties:
+        dispute_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [open, won, lost, closed]
+        opened_at:
+          type: string
+          format: date-time
+        acknowledgement_due_at:
+          type: string
+          format: date-time
+        triage_due_at:
+          type: string
+          format: date-time
+        resolution_due_at:
+          type: string
+          format: date-time
+    ApiResponseDispute:
+      type: object
+      required: [request_id, server_time, result]
+      properties:
+        request_id:
+          type: string
+        server_time:
+          type: string
+          format: date-time
+        result:
+          $ref: '#/components/schemas/DisputeView'

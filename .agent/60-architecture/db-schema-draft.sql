@@ -45,6 +45,27 @@ create type journal_entry_type as enum (
   'loss_booking'
 );
 
+create type payout_status as enum (
+  'scheduled',
+  'executing',
+  'settled',
+  'blocked'
+);
+
+create type moderation_report_status as enum (
+  'open',
+  'under_review',
+  'resolved',
+  'dismissed'
+);
+
+create type notification_channel as enum (
+  'push',
+  'in_app',
+  'email',
+  'ops_pager'
+);
+
 -- ---------- Minimal referenced tables ----------
 create table if not exists users (
   id uuid primary key default gen_random_uuid(),
@@ -88,6 +109,8 @@ create table if not exists support_transactions (
   amount_minor bigint not null check (amount_minor > 0),
   currency char(3) not null,
   status support_status not null default 'prepared',
+  reward_type text not null default 'physical' check (reward_type in ('physical')),
+  cancellation_window_hours int not null default 48 check (cancellation_window_hours = 48),
   provider text not null default 'stripe',
   provider_payment_intent_id text unique,
   provider_checkout_session_id text unique,
@@ -101,6 +124,7 @@ create table if not exists support_transactions (
   constraint chk_support_status_times check (
     (status != 'succeeded' or succeeded_at is not null)
     and (status != 'refunded' or refunded_at is not null)
+    and (cancellation_requested_at is null or cancellation_requested_at <= created_at + make_interval(hours => cancellation_window_hours))
   )
 );
 create index if not exists idx_support_project_status on support_transactions(project_id, status);
@@ -141,6 +165,9 @@ create table if not exists disputes (
   amount_minor bigint not null check (amount_minor > 0),
   currency char(3) not null,
   opened_at timestamptz not null default now(),
+  acknowledgement_due_at timestamptz not null default (now() + interval '24 hours'),
+  triage_due_at timestamptz not null default (now() + interval '72 hours'),
+  resolution_due_at timestamptz not null default (now() + interval '10 days'),
   resolved_at timestamptz,
   final_liability text not null check (final_liability in ('unknown', 'creator', 'platform', 'shared')) default 'unknown',
   created_at timestamptz not null default now(),
@@ -148,6 +175,23 @@ create table if not exists disputes (
 );
 create index if not exists idx_disputes_status on disputes(status, opened_at desc);
 create index if not exists idx_disputes_support on disputes(support_id);
+
+create table if not exists moderation_reports (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects(id),
+  reporter_user_id uuid not null references users(id),
+  reason_code text not null check (reason_code in ('fraud', 'copyright', 'policy_violation', 'no_progress', 'other')),
+  details text not null,
+  reporter_trust_weight numeric(6,2) not null default 1.00,
+  status moderation_report_status not null default 'open',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  resolved_at timestamptz
+);
+create index if not exists idx_reports_project_time on moderation_reports(project_id, created_at desc);
+create index if not exists idx_reports_project_weight on moderation_reports(project_id, reporter_trust_weight, created_at desc);
+create unique index if not exists uq_reports_project_reporter_day
+  on moderation_reports(project_id, reporter_user_id, date_trunc('day', created_at));
 
 create table if not exists dispute_events (
   id bigserial primary key,
@@ -193,6 +237,33 @@ create index if not exists idx_upload_sessions_status on video_upload_sessions(s
 create unique index if not exists uq_upload_hash_per_creator
   on video_upload_sessions(creator_user_id, content_hash_sha256)
   where content_hash_sha256 is not null and status in ('processing', 'ready');
+
+create table if not exists project_payouts (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null unique references projects(id) on delete cascade,
+  status payout_status not null default 'scheduled',
+  execution_start_at timestamptz not null,
+  settlement_due_at timestamptz not null,
+  settled_at timestamptz,
+  rolling_reserve_enabled boolean not null default false check (rolling_reserve_enabled = false),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint chk_payout_schedule check (settlement_due_at >= execution_start_at)
+);
+create index if not exists idx_project_payouts_status on project_payouts(status, settlement_due_at);
+
+create table if not exists notification_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references users(id),
+  channel notification_channel not null,
+  event_key text not null,
+  payload jsonb not null default '{}'::jsonb,
+  send_after timestamptz not null default now(),
+  sent_at timestamptz,
+  failed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_notification_events_pending on notification_events(channel, send_after) where sent_at is null and failed_at is null;
 
 -- ---------- Accounting journal ----------
 create table if not exists ledger_accounts (
@@ -309,7 +380,17 @@ create trigger trg_touch_disputes
 before update on disputes
 for each row execute function touch_updated_at();
 
+drop trigger if exists trg_touch_moderation_reports on moderation_reports;
+create trigger trg_touch_moderation_reports
+before update on moderation_reports
+for each row execute function touch_updated_at();
+
 drop trigger if exists trg_touch_video_upload_sessions on video_upload_sessions;
 create trigger trg_touch_video_upload_sessions
 before update on video_upload_sessions
+for each row execute function touch_updated_at();
+
+drop trigger if exists trg_touch_project_payouts on project_payouts;
+create trigger trg_touch_project_payouts
+before update on project_payouts
 for each row execute function touch_updated_at();
