@@ -1,6 +1,10 @@
 import { Pool } from "pg";
 
-const connectionString = process.env.LIFECAST_DATABASE_URL;
+const rawConnectionString = process.env.LIFECAST_DATABASE_URL;
+const connectionString = rawConnectionString?.includes("sslmode=require") &&
+  !rawConnectionString.includes("uselibpqcompat=")
+  ? `${rawConnectionString}&uselibpqcompat=true`
+  : rawConnectionString;
 
 export const dbPool = connectionString
   ? new Pool({

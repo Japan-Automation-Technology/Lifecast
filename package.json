@@ -7,6 +7,10 @@
     "dev:backend": "pnpm --filter @lifecast/backend dev",
     "dev:backend:worker:notifications": "pnpm --filter @lifecast/backend dev:worker:notifications",
     "build:backend": "pnpm --filter @lifecast/backend build",
-    "typecheck:backend": "pnpm --filter @lifecast/backend typecheck"
+    "typecheck:backend": "pnpm --filter @lifecast/backend typecheck",
+    "test:backend": "pnpm --filter @lifecast/backend test",
+    "db:migrate:backend": "pnpm --filter @lifecast/backend db:migrate",
+    "db:seed:backend": "pnpm --filter @lifecast/backend db:seed",
+    "db:bootstrap:backend": "pnpm --filter @lifecast/backend db:bootstrap"
   }
 }

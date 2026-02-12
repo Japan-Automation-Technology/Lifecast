@@ -11,11 +11,29 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
     }
 
     const payload = req.body as Record<string, unknown>;
-    const maybeSupportId = z.string().uuid().safeParse(payload?.support_id);
-    if (maybeSupportId.success) {
-      await store.markSupportSucceededByWebhook(maybeSupportId.data);
+    const eventId = z.string().min(1).safeParse(payload?.id);
+    const eventType = z.string().min(1).safeParse(payload?.type);
+    if (!eventId.success || !eventType.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid webhook payload"));
     }
 
-    return reply.send(ok({ ok: true }));
+    const metadataSupportId = z.string().uuid().safeParse(
+      (payload?.data as { object?: { metadata?: { support_id?: string } } } | undefined)?.object?.metadata?.support_id,
+    );
+    const topLevelSupportId = z.string().uuid().safeParse(payload?.support_id);
+    const supportId = metadataSupportId.success
+      ? metadataSupportId.data
+      : topLevelSupportId.success
+        ? topLevelSupportId.data
+        : undefined;
+
+    const result = await store.processStripeWebhook({
+      eventId: eventId.data,
+      eventType: eventType.data,
+      payload,
+      supportId,
+    });
+
+    return reply.send(ok({ ok: true, deduped: result.deduped, processed: result.processed }));
   });
 }

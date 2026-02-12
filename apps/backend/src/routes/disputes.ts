@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { getStoredIdempotentResponse, requestFingerprint, storeIdempotentResponse } from "../idempotency.js";
 import { fail, ok } from "../response.js";
 import { store } from "../store/hybridStore.js";
 
@@ -17,6 +18,20 @@ export async function registerDisputeRoutes(app: FastifyInstance) {
     if (!z.string().uuid().safeParse(disputeId).success || !body.success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid dispute recovery request"));
     }
+    const routeKey = "POST:/v1/disputes/:disputeId/recovery-attempts";
+    const idempotencyKeyHeader = req.headers["idempotency-key"];
+    const idempotencyKey = typeof idempotencyKeyHeader === "string" ? idempotencyKeyHeader : undefined;
+    const fingerprint = requestFingerprint(req.method, `${routeKey}:${disputeId}`, body.data);
+
+    if (idempotencyKey) {
+      const existing = await getStoredIdempotentResponse(routeKey, idempotencyKey);
+      if (existing) {
+        if (existing.fingerprint !== fingerprint) {
+          return reply.code(409).send(fail("STATE_CONFLICT", "Idempotency-Key reused with different payload"));
+        }
+        return reply.code(existing.response.statusCode).send(existing.response.payload);
+      }
+    }
 
     const recovery = await store.createDisputeRecoveryAttempt({
       disputeId,
@@ -27,10 +42,29 @@ export async function registerDisputeRoutes(app: FastifyInstance) {
     });
 
     if (!recovery) {
-      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Dispute not found"));
+      const notFound = fail("RESOURCE_NOT_FOUND", "Dispute not found");
+      if (idempotencyKey) {
+        await storeIdempotentResponse({
+          routeKey,
+          idempotencyKey,
+          fingerprint,
+          statusCode: 404,
+          payload: notFound,
+        });
+      }
+      return reply.code(404).send(notFound);
     }
-
-    return reply.send(ok({ ok: recovery.accepted, dispute_id: recovery.disputeId }));
+    const response = ok({ ok: recovery.accepted, dispute_id: recovery.disputeId });
+    if (idempotencyKey) {
+      await storeIdempotentResponse({
+        routeKey,
+        idempotencyKey,
+        fingerprint,
+        statusCode: 200,
+        payload: response,
+      });
+    }
+    return reply.send(response);
   });
 
   app.get("/v1/disputes/:disputeId", async (req, reply) => {

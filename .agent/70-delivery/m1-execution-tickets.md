@@ -7,15 +7,15 @@ Status snapshot:
 - Workspace scaffolding: completed.
 - Backend route skeleton: completed.
 - Persistent DB integration:
-  - Supports: in progress (hybrid DB + fallback implemented).
-  - Stripe webhook success path: in progress (journal `support_hold` + notification enqueue implemented).
+  - Supports: in progress (hybrid DB + fallback + idempotency + status history implemented).
+  - Stripe webhook success path: in progress (journal `support_hold` + notification enqueue + event dedupe implemented).
   - Journal list read: completed (DB-backed query implemented).
   - Payout read model: in progress (DB-backed schedule retrieval + lazy create implemented).
   - Dispute read/recovery: in progress (DB-backed read + recovery event insert implemented).
-  - Moderation report intake: in progress (DB-backed report + trust score trigger implemented).
+  - Moderation report intake: completed for M1 baseline (DB-backed report + trust score trigger + idempotency).
   - Upload sessions: in progress (DB-backed create/complete/get implemented).
   - Notification queue: in progress (DB enqueue + worker dequeue skeleton implemented).
-  - Remaining tables/routes: pending.
+  - Migration packaging: in progress (`0001` + `0002` added; DB endpoint DNS resolution currently blocking apply).
 - Mobile/web client implementation: pending.
 
 ## Backend tickets
@@ -24,16 +24,19 @@ BE-001: Support prepare API
 - Implement `POST /v1/projects/{projectId}/supports/prepare`.
 - Enforce `reward_type=physical`, `cancellation_window_hours=48`, and policy snapshot payload.
 - Add idempotency-key handling.
+Status: completed (M1 baseline)
 
 BE-002: Support confirm and canonical status
 - Implement `POST /v1/supports/{supportId}/confirm` and `GET /v1/supports/{supportId}`.
 - Keep payment finality webhook-authoritative only.
 - Emit state transition history for all status changes.
+Status: in progress (history implemented for prepare/confirm/succeeded; full transition matrix pending)
 
 BE-003: Stripe webhook finalization
 - Implement `POST /v1/payments/webhooks/stripe`.
 - Verify signature, idempotent event handling, and dedupe by provider event ID.
 - Publish `payment_succeeded` server event after successful settlement confirmation.
+Status: in progress (event dedupe done, signature cryptographic verification + server event bus pending)
 
 BE-004: Journal write path
 - Implement journal entries/lines for:
@@ -106,10 +109,12 @@ iOS-003: Upload reliability UX
 X-001: API contract tests
 - Add contract tests against OpenAPI for critical endpoints.
 - Include structured error mapping assertions.
+Status: in progress (`app.contract.test.ts` added, critical support/webhook/idempotency assertions passing)
 
 X-002: Migration packaging
 - Convert `db-schema-draft.sql` sections into ordered migrations.
 - Add rollback notes for non-destructive fallback.
+Status: in progress (`0001_m1_contract_freeze.sql`, `0002_idempotency_and_webhooks.sql`, `db:migrate`, `db:seed` wired)
 
 X-003: Runbook baseline
 - Add operational runbooks for:

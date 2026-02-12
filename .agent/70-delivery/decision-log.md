@@ -43,6 +43,11 @@
 - Webhook success path now enqueues creator/supporter notification events in DB transaction flow.
 - Upload session paths upgraded to hybrid persistence with DB-backed create/complete/get and memory fallback.
 - Notification worker skeleton added for DB-backed queue draining (`notification_events` -> `sent_at`).
+- Backend app bootstrap split into reusable `buildApp()` for testability and contract-test injection.
+- POST idempotency baseline added with `api_idempotency_keys` persistence + memory fallback.
+- Stripe webhook dedupe baseline added with `processed_webhooks` table and route-level event parsing.
+- Contract tests added for support prepare/confirm/webhook flow, idempotency conflict, and webhook dedupe.
+- Migration/seed scripts wired (`db:migrate`, `db:seed`, `db:bootstrap`) with root aliases.
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`

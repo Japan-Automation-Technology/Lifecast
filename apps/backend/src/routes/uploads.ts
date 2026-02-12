@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { getStoredIdempotentResponse, requestFingerprint, storeIdempotentResponse } from "../idempotency.js";
 import { fail, ok } from "../response.js";
 import { store } from "../store/hybridStore.js";
 
@@ -21,15 +22,38 @@ export async function registerUploadRoutes(app: FastifyInstance) {
     if (!body.success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid upload request"));
     }
+    const routeKey = "POST:/v1/videos/uploads";
+    const idempotencyKeyHeader = req.headers["idempotency-key"];
+    const idempotencyKey = typeof idempotencyKeyHeader === "string" ? idempotencyKeyHeader : undefined;
+    const fingerprint = requestFingerprint(req.method, routeKey, body.data);
+
+    if (idempotencyKey) {
+      const existing = await getStoredIdempotentResponse(routeKey, idempotencyKey);
+      if (existing) {
+        if (existing.fingerprint !== fingerprint) {
+          return reply.code(409).send(fail("STATE_CONFLICT", "Idempotency-Key reused with different payload"));
+        }
+        return reply.code(existing.response.statusCode).send(existing.response.payload);
+      }
+    }
+
     const session = await store.createUploadSession();
-    return reply.send(
-      ok({
-        upload_session_id: session.uploadSessionId,
-        status: session.status,
-        upload_url: session.uploadUrl,
-        expires_at: session.expiresAt,
-      }),
-    );
+    const response = ok({
+      upload_session_id: session.uploadSessionId,
+      status: session.status,
+      upload_url: session.uploadUrl,
+      expires_at: session.expiresAt,
+    });
+    if (idempotencyKey) {
+      await storeIdempotentResponse({
+        routeKey,
+        idempotencyKey,
+        fingerprint,
+        statusCode: 200,
+        payload: response,
+      });
+    }
+    return reply.send(response);
   });
 
   app.post("/v1/videos/uploads/:uploadSessionId/complete", async (req, reply) => {
@@ -38,18 +62,50 @@ export async function registerUploadRoutes(app: FastifyInstance) {
     if (!z.string().uuid().safeParse(uploadSessionId).success || !body.success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid upload complete request"));
     }
+    const routeKey = "POST:/v1/videos/uploads/:uploadSessionId/complete";
+    const idempotencyKeyHeader = req.headers["idempotency-key"];
+    const idempotencyKey = typeof idempotencyKeyHeader === "string" ? idempotencyKeyHeader : undefined;
+    const fingerprint = requestFingerprint(req.method, `${routeKey}:${uploadSessionId}`, body.data);
+
+    if (idempotencyKey) {
+      const existing = await getStoredIdempotentResponse(routeKey, idempotencyKey);
+      if (existing) {
+        if (existing.fingerprint !== fingerprint) {
+          return reply.code(409).send(fail("STATE_CONFLICT", "Idempotency-Key reused with different payload"));
+        }
+        return reply.code(existing.response.statusCode).send(existing.response.payload);
+      }
+    }
 
     const session = await store.completeUploadSession(uploadSessionId, body.data.content_hash_sha256);
     if (!session) {
-      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Upload session not found"));
+      const notFound = fail("RESOURCE_NOT_FOUND", "Upload session not found");
+      if (idempotencyKey) {
+        await storeIdempotentResponse({
+          routeKey,
+          idempotencyKey,
+          fingerprint,
+          statusCode: 404,
+          payload: notFound,
+        });
+      }
+      return reply.code(404).send(notFound);
     }
 
-    return reply.send(
-      ok({
-        upload_session_id: session.uploadSessionId,
-        status: session.status,
-      }),
-    );
+    const response = ok({
+      upload_session_id: session.uploadSessionId,
+      status: session.status,
+    });
+    if (idempotencyKey) {
+      await storeIdempotentResponse({
+        routeKey,
+        idempotencyKey,
+        fingerprint,
+        statusCode: 200,
+        payload: response,
+      });
+    }
+    return reply.send(response);
   });
 
   app.get("/v1/videos/uploads/:uploadSessionId", async (req, reply) => {

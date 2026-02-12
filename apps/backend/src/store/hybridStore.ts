@@ -36,6 +36,7 @@ interface JournalEntryRow {
 }
 
 const memory = new InMemoryStore();
+const webhookMemoryDedup = new Set<string>();
 
 function toIso(value: Date | string) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
@@ -92,6 +93,14 @@ export class HybridStore {
         [supportId, input.projectId, input.planId, devSupporter, amountMinor, currency, checkoutSessionId],
       );
 
+      await client.query(
+        `
+        insert into support_status_history (support_id, from_status, to_status, reason, actor, occurred_at)
+        values ($1, null, 'prepared', 'support_prepared', 'system', now())
+      `,
+        [supportId],
+      );
+
       return {
         supportId,
         projectId: input.projectId,
@@ -117,6 +126,24 @@ export class HybridStore {
 
     const client = await dbPool.connect();
     try {
+      const current = await client.query<{ status: SupportRecord["status"] }>(
+        `
+        select status
+        from support_transactions
+        where id = $1
+      `,
+        [supportId],
+      );
+
+      if (current.rowCount === 0) {
+        return null;
+      }
+
+      const fromStatus = current.rows[0].status;
+      if (fromStatus === "pending_confirmation" || fromStatus === "succeeded") {
+        return this.getSupport(supportId);
+      }
+
       const row = await client.query<{
         id: string;
         project_id: string;
@@ -141,6 +168,14 @@ export class HybridStore {
       if (row.rowCount === 0) {
         return null;
       }
+
+      await client.query(
+        `
+        insert into support_status_history (support_id, from_status, to_status, reason, actor, occurred_at)
+        values ($1, $2, 'pending_confirmation', 'support_confirmed', 'user', now())
+      `,
+        [supportId, fromStatus],
+      );
 
       const record = row.rows[0];
       return {
@@ -217,6 +252,46 @@ export class HybridStore {
     const client = await dbPool.connect();
     try {
       await client.query("begin");
+      const current = await client.query<{
+        id: string;
+        project_id: string;
+        plan_id: string;
+        supporter_user_id: string;
+        amount_minor: number;
+        currency: string;
+        status: SupportRecord["status"];
+        reward_type: "physical";
+        cancellation_window_hours: 48;
+      }>(
+        `
+        select id, project_id, plan_id, supporter_user_id, amount_minor, currency, status, reward_type, cancellation_window_hours
+        from support_transactions
+        where id = $1
+        for update
+      `,
+        [supportId],
+      );
+
+      if (current.rowCount === 0) {
+        await client.query("rollback");
+        return null;
+      }
+
+      const existing = current.rows[0];
+      if (existing.status === "succeeded") {
+        await client.query("commit");
+        return {
+          supportId: existing.id,
+          projectId: existing.project_id,
+          planId: existing.plan_id,
+          amountMinor: Number(existing.amount_minor),
+          currency: existing.currency,
+          status: existing.status,
+          rewardType: existing.reward_type,
+          cancellationWindowHours: existing.cancellation_window_hours,
+        } satisfies SupportRecord;
+      }
+
       const row = await client.query<{
         id: string;
         project_id: string;
@@ -249,9 +324,9 @@ export class HybridStore {
       await client.query(
         `
         insert into support_status_history (support_id, from_status, to_status, reason, actor, occurred_at)
-        values ($1, 'pending_confirmation', 'succeeded', 'webhook_confirmed', 'system', now())
+        values ($1, $2, 'succeeded', 'webhook_confirmed', 'system', now())
       `,
-        [support.id],
+        [support.id, existing.status],
       );
 
       const entryId = randomUUID();
@@ -333,7 +408,64 @@ export class HybridStore {
     }
   }
 
-  async listJournalEntries(filters: { projectId?: string; supportId?: string; limit?: number }) {
+  async processStripeWebhook(input: {
+    eventId: string;
+    eventType: string;
+    payload: Record<string, unknown>;
+    supportId?: string;
+  }) {
+    if (!hasDb() || !dbPool) {
+      const dedupeKey = `stripe:${input.eventId}`;
+      if (webhookMemoryDedup.has(dedupeKey)) {
+        return { deduped: true, processed: false };
+      }
+      webhookMemoryDedup.add(dedupeKey);
+      if (input.supportId && input.eventType === "checkout.session.completed") {
+        await this.markSupportSucceededByWebhook(input.supportId);
+        return { deduped: false, processed: true };
+      }
+      return { deduped: false, processed: false };
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const inserted = await client.query<{ id: number }>(
+        `
+        insert into processed_webhooks (provider, provider_event_id, event_type, payload, process_result)
+        values ('stripe', $1, $2, $3::jsonb, 'ignored')
+        on conflict (provider, provider_event_id) do nothing
+        returning id
+      `,
+        [input.eventId, input.eventType, JSON.stringify(input.payload)],
+      );
+      if (!inserted.rowCount) {
+        return { deduped: true, processed: false };
+      }
+
+      let processed = false;
+      if (input.supportId && ["checkout.session.completed", "payment_intent.succeeded"].includes(input.eventType)) {
+        await this.markSupportSucceededByWebhook(input.supportId);
+        processed = true;
+      }
+
+      await client.query(
+        `
+        update processed_webhooks
+        set process_result = $3
+        where provider = 'stripe' and provider_event_id = $1 and event_type = $2
+      `,
+        [input.eventId, input.eventType, processed ? "processed" : "ignored"],
+      );
+
+      return { deduped: false, processed };
+    } catch {
+      return { deduped: false, processed: false };
+    } finally {
+      client.release();
+    }
+  }
+
+  async listJournalEntries(filters: { projectId?: string; supportId?: string; entryType?: string; limit?: number }) {
     if (!hasDb() || !dbPool) {
       return [] as JournalEntryView[];
     }
@@ -349,6 +481,10 @@ export class HybridStore {
       if (filters.supportId) {
         values.push(filters.supportId);
         where.push(`je.support_id = $${values.length}`);
+      }
+      if (filters.entryType) {
+        values.push(filters.entryType);
+        where.push(`je.entry_type = $${values.length}`);
       }
       const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
       values.push(limit);
