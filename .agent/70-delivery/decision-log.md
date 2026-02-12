@@ -22,6 +22,9 @@
 - Native implementation split documented: independent iOS/Android lanes with shared backend contract governance.
 - API contract rules v1 added with structured errors, idempotency, and webhook-authoritative settlement.
 - Event contract v1 added with required fields, source-of-truth rules, and ingestion quality SLAs.
+- OpenAPI draft added for Supports/Payments/Uploads/Journal/Disputes.
+- PostgreSQL schema draft added for Support, UploadSession, Dispute, and double-entry Journal.
+- MCP/Skills/secrets setup checklist documented for implementation readiness.
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`
@@ -31,7 +34,10 @@ Cross-reference:
 - `../50-data-analytics/funnel-definition.md`
 - `../60-architecture/system-context.md`
 - `../60-architecture/api-contract-rules.md`
+- `../60-architecture/openapi-draft.yaml`
+- `../60-architecture/db-schema-draft.sql`
 - `./implementation-workbreakdown.md`
 - `../50-data-analytics/event-contract-v1.md`
+- `./mcp-skills-and-secrets-setup.md`
 
 Last updated: 2026-02-12

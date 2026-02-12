@@ -12,5 +12,6 @@ Key files:
 - `decision-log.md`
 - `question-backlog.md`
 - `implementation-workbreakdown.md`
+- `mcp-skills-and-secrets-setup.md`
 
 Last updated: 2026-02-12

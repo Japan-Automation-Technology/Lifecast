@@ -11,6 +11,8 @@ Key files:
 - `domain-model.md`
 - `api-boundaries.md`
 - `api-contract-rules.md`
+- `openapi-draft.yaml`
+- `db-schema-draft.sql`
 - `security-and-compliance.md`
 
 Last updated: 2026-02-12

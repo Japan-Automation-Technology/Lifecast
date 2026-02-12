@@ -11,7 +11,10 @@ Read order:
 6. `70-delivery/implementation-workbreakdown.md`
 7. `60-architecture/api-contract-rules.md`
 8. `50-data-analytics/event-contract-v1.md`
-9. Relevant deeper folders based on task
+9. `60-architecture/openapi-draft.yaml`
+10. `60-architecture/db-schema-draft.sql`
+11. `70-delivery/mcp-skills-and-secrets-setup.md`
+12. Relevant deeper folders based on task
 
 How to use this hierarchy:
 - Read this file first.
