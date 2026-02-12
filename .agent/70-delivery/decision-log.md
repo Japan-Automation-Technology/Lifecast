@@ -25,6 +25,14 @@
 - OpenAPI draft added for Supports/Payments/Uploads/Journal/Disputes.
 - PostgreSQL schema draft added for Support, UploadSession, Dispute, and double-entry Journal.
 - MCP/Skills/secrets setup checklist documented for implementation readiness.
+- Payout timing defaults frozen: next-business-day execution, target settlement within 2 business days, no rolling reserve in MVP.
+- Store compliance baseline frozen: support flow restricted to physical rewards with explicit pre-checkout disclosures.
+- High-trust report threshold and auto-review trigger defaults frozen.
+- Event contract governance defaults frozen: backend/data lead ownership and semantic versioning.
+- Log retention durations frozen by class (analytics, payments/journal, moderation/disputes, security audits).
+- Notification matrix defaults frozen for creator/supporter/ops role-event channels.
+- Dispute SLA defaults frozen (ack/triage/resolution/escalation targets).
+- Low-conversion bitrate cap thresholds and recovery window frozen.
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`
@@ -39,5 +47,7 @@ Cross-reference:
 - `./implementation-workbreakdown.md`
 - `../50-data-analytics/event-contract-v1.md`
 - `./mcp-skills-and-secrets-setup.md`
+- `../40-mvp-spec/notification-matrix.md`
+- `../50-data-analytics/logging-retention.md`
 
 Last updated: 2026-02-12

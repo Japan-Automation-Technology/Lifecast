@@ -19,6 +19,15 @@ Operating posture:
 - Material progress non-reporting.
 - Sufficient volume of high-trust reports.
 
+High-trust report criteria (MVP default):
+- Reporter trust score is weighted by account quality signals:
+  - verified account
+  - account age
+  - prior valid report ratio
+- Auto-review trigger threshold:
+  - trust-weighted score >= 5.0 within 24 hours
+  - and at least 3 unique reporting accounts
+
 ## Appeal flow
 - Stop notice is issued.
 - Creator has 72 hours to submit explanation.

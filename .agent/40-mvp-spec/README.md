@@ -11,5 +11,6 @@ Key files:
 - `core-flows.md`
 - `feature-requirements.md`
 - `non-functional-requirements.md`
+- `notification-matrix.md`
 
 Last updated: 2026-02-12

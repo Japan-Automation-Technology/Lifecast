@@ -15,6 +15,12 @@ General rules:
 - `event_id` is used for deduplication.
 - Missing required fields cause ingestion rejection to dead-letter queue.
 
+Governance defaults:
+- Contract owner: Backend/Data lead (single owner model for MVP).
+- Change control: semantic versioning (`major.minor.patch`).
+- Backward-compatible additions require minor bump and decision-log entry.
+- Breaking changes require major bump, migration plan, and dual-write period.
+
 Canonical funnel events:
 1. `video_watch_completed`
 2. `support_button_tapped`

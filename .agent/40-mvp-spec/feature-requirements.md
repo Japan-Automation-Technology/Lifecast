@@ -28,6 +28,10 @@
 - All-or-nothing funding settlement behavior.
 - Auto refund on failed target outcome.
 - Payment failure copy mapped by processor error category and shown with next actions.
+- Store compliance wording and UX baseline:
+  - Support is presented as purchase-style backing for physical rewards.
+  - No digital goods or digital access is sold in MVP support flow.
+  - Confirmation card must show reward type, delivery estimate, and refund conditions before checkout.
 
 ## Trust operations
 - Creator ID document upload for project creators.

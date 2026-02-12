@@ -25,11 +25,17 @@ These are current fixed decisions and should be treated as constraints unless ex
   - Allow cancellation request window: 48 hours after support completion.
   - After window: no cancellation by default, with explicit project-level exceptions.
 - Checkout strategy (MVP): external payment flow with Apple Pay support to reduce friction.
+- Payout timing default (MVP):
+  - next-business-day payout execution after successful campaign close
+  - target settlement within 2 business days
+  - no rolling reserve in MVP
 
 ## Trust and compliance
 - KYC and anti-social checks required in full model.
 - MVP minimum: simplified identity verification before project publication.
 - Public policy stance: strict, explicit, and log-driven operations.
+- High-trust report auto-review trigger default:
+  - trust-weighted score >= 5.0 within 24 hours and at least 3 unique reporters
 
 ## Accounting and settlement
 - Ledger implementation: append-only accounting journal with derived balance views.
@@ -64,6 +70,8 @@ These are current fixed decisions and should be treated as constraints unless ex
   - plan_selected
   - checkout_page_reached
   - payment_succeeded
+- Event governance default:
+  - backend/data lead owns contract and semantic versioning flow
 
 ## MVP must-have
 - Vertical short-video feed.

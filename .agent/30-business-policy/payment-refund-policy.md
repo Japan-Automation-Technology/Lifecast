@@ -9,6 +9,12 @@ Success and failure behavior:
 - If goal reached under campaign rules: payout eligible.
 - If goal not reached: automatic refund of supporter principal.
 
+Payout timing (MVP default):
+- Payout execution starts on the next business day after campaign success is finalized.
+- Target settlement to creator account: within 2 business days from execution start.
+- Reserve/hold rule for MVP: no rolling reserve by default.
+- Post-payout disputes follow dispute recovery policy and may trigger recovery attempts.
+
 Refund economics:
 - Supporter principal is returned in full on eligible automatic failure refunds.
 - Platform fee is not refunded.

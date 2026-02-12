@@ -24,4 +24,10 @@ Operational controls:
 - Keep dispute SLA targets documented in runbooks.
 - Expose dispute status to support tooling for transparent case handling.
 
+MVP dispute SLA defaults:
+- Case acknowledgment: within 24 hours of dispute_opened.
+- Initial triage decision: within 72 hours.
+- Standard resolution target: within 10 business days.
+- High-risk escalation target (fraud/safety indicators): within 24 hours.
+
 Last updated: 2026-02-12

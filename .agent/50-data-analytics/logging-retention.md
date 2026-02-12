@@ -11,7 +11,10 @@ Minimum logging principles:
 - Preserve evidence references for disputes.
 
 Retention policy:
-- Exact retention duration not finalized in this conversation.
-- Set duration by legal/compliance requirements and record final numbers in decision log.
+- Product analytics events: 13 months.
+- Payment lifecycle and accounting journal logs: 7 years.
+- Moderation/dispute evidence logs: 5 years.
+- Security and access audit logs: 1 year hot + 2 years cold archive.
+- Deletion and retention exceptions must be approved and recorded in decision log.
 
 Last updated: 2026-02-12
