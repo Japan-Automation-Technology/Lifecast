@@ -18,7 +18,19 @@ export async function registerDisputeRoutes(app: FastifyInstance) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid dispute recovery request"));
     }
 
-    return reply.send(ok({ ok: true }));
+    const recovery = await store.createDisputeRecoveryAttempt({
+      disputeId,
+      action: body.data.action,
+      amountMinor: body.data.amount_minor,
+      currency: body.data.currency,
+      note: body.data.note,
+    });
+
+    if (!recovery) {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Dispute not found"));
+    }
+
+    return reply.send(ok({ ok: recovery.accepted, dispute_id: recovery.disputeId }));
   });
 
   app.get("/v1/disputes/:disputeId", async (req, reply) => {
@@ -28,6 +40,10 @@ export async function registerDisputeRoutes(app: FastifyInstance) {
     }
 
     const dispute = await store.getOrCreateDispute(disputeId);
+    if (!dispute) {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Dispute not found"));
+    }
+
     return reply.send(
       ok({
         dispute_id: dispute.disputeId,

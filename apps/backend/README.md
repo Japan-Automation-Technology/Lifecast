@@ -14,12 +14,14 @@ Implemented route groups:
 Current state:
 - Uses hybrid store:
   - Postgres-first for supports/payments webhook success/journal reads.
+  - Postgres-first for payouts/disputes/moderation reports/upload sessions.
   - In-memory fallback when DB is unavailable or bootstrap data is missing.
 - Shapes and enums follow `packages/contracts/openapi/openapi.yaml`.
 - Ready for BE-001..BE-009 iterative implementation.
 
 Commands:
 - `pnpm dev:backend`
+- `pnpm dev:backend:worker:notifications`
 - `pnpm typecheck:backend`
 
 Next step:

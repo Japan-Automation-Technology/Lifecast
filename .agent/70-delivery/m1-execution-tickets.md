@@ -8,8 +8,13 @@ Status snapshot:
 - Backend route skeleton: completed.
 - Persistent DB integration:
   - Supports: in progress (hybrid DB + fallback implemented).
-  - Stripe webhook success path: in progress (journal `support_hold` write implemented).
-  - Journal list read: in progress (DB-backed query implemented).
+  - Stripe webhook success path: in progress (journal `support_hold` + notification enqueue implemented).
+  - Journal list read: completed (DB-backed query implemented).
+  - Payout read model: in progress (DB-backed schedule retrieval + lazy create implemented).
+  - Dispute read/recovery: in progress (DB-backed read + recovery event insert implemented).
+  - Moderation report intake: in progress (DB-backed report + trust score trigger implemented).
+  - Upload sessions: in progress (DB-backed create/complete/get implemented).
+  - Notification queue: in progress (DB enqueue + worker dequeue skeleton implemented).
   - Remaining tables/routes: pending.
 - Mobile/web client implementation: pending.
 

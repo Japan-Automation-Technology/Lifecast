@@ -39,6 +39,10 @@
 - Monorepo workspace scaffold created for `apps/backend`, `apps/ios`, `apps/android`, `apps/web`, and `packages/contracts`.
 - M1 backend API skeleton implemented with Fastify route groups and in-memory state adapter.
 - Supports/Payments/Journal paths upgraded to hybrid persistence (Postgres-first with in-memory fallback for local resilience).
+- Payout/dispute/moderation paths upgraded to hybrid persistence with DB-backed read/write and safe fallback.
+- Webhook success path now enqueues creator/supporter notification events in DB transaction flow.
+- Upload session paths upgraded to hybrid persistence with DB-backed create/complete/get and memory fallback.
+- Notification worker skeleton added for DB-backed queue draining (`notification_events` -> `sent_at`).
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`

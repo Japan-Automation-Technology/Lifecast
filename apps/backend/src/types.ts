@@ -50,3 +50,15 @@ export interface PayoutRecord {
   settledAt?: string;
   rollingReserveEnabled: false;
 }
+
+export interface ModerationReportResult {
+  reportId: string;
+  autoReviewTriggered: boolean;
+  trustScore24h: number;
+  uniqueReporters24h: number;
+}
+
+export interface DisputeRecoveryResult {
+  disputeId: string;
+  accepted: boolean;
+}

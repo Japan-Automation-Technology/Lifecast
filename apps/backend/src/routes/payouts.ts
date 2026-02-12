@@ -11,6 +11,10 @@ export async function registerPayoutRoutes(app: FastifyInstance) {
     }
 
     const payout = await store.getOrCreatePayout(projectId);
+    if (!payout) {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Project not found"));
+    }
+
     return reply.send(
       ok({
         project_id: payout.projectId,

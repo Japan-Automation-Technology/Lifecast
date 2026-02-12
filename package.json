@@ -5,6 +5,7 @@
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "dev:backend": "pnpm --filter @lifecast/backend dev",
+    "dev:backend:worker:notifications": "pnpm --filter @lifecast/backend dev:worker:notifications",
     "build:backend": "pnpm --filter @lifecast/backend build",
     "typecheck:backend": "pnpm --filter @lifecast/backend typecheck"
   }
