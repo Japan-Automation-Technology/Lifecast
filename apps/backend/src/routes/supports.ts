@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { fail, ok } from "../response.js";
-import { store } from "../store/inMemory.js";
+import { store } from "../store/hybridStore.js";
 
 const prepareBody = z.object({
   plan_id: z.string().uuid(),
@@ -22,11 +22,14 @@ export async function registerSupportRoutes(app: FastifyInstance) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid request payload"));
     }
 
-    const support = store.prepareSupport({
+    const support = await store.prepareSupport({
       projectId: projectId.data,
       planId: body.data.plan_id,
       quantity: body.data.quantity,
     });
+    if (!support) {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Project or plan not found"));
+    }
 
     return reply.send(
       ok({
@@ -50,7 +53,7 @@ export async function registerSupportRoutes(app: FastifyInstance) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid request payload"));
     }
 
-    const support = store.confirmSupport(supportId);
+    const support = await store.confirmSupport(supportId);
     if (!support) {
       return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Support not found"));
     }
@@ -75,7 +78,7 @@ export async function registerSupportRoutes(app: FastifyInstance) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid support id"));
     }
 
-    const support = store.getSupport(supportId);
+    const support = await store.getSupport(supportId);
     if (!support) {
       return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Support not found"));
     }

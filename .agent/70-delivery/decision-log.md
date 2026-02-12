@@ -38,6 +38,7 @@
 - M1 execution ticket set created for backend/data/iOS/cross-cutting implementation.
 - Monorepo workspace scaffold created for `apps/backend`, `apps/ios`, `apps/android`, `apps/web`, and `packages/contracts`.
 - M1 backend API skeleton implemented with Fastify route groups and in-memory state adapter.
+- Supports/Payments/Journal paths upgraded to hybrid persistence (Postgres-first with in-memory fallback for local resilience).
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`

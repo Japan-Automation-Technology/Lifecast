@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { fail, ok } from "../response.js";
-import { store } from "../store/inMemory.js";
+import { store } from "../store/hybridStore.js";
 
 const recoveryBody = z.object({
   action: z.enum(["transfer_reversal_attempt", "account_debit_attempt"]),
@@ -27,7 +27,7 @@ export async function registerDisputeRoutes(app: FastifyInstance) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid dispute id"));
     }
 
-    const dispute = store.getOrCreateDispute(disputeId);
+    const dispute = await store.getOrCreateDispute(disputeId);
     return reply.send(
       ok({
         dispute_id: dispute.disputeId,

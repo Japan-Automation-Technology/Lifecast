@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { fail, ok } from "../response.js";
-import { store } from "../store/inMemory.js";
+import { store } from "../store/hybridStore.js";
 
 const createUploadBody = z.object({
   file_name: z.string().min(1).max(255),
@@ -21,7 +21,7 @@ export async function registerUploadRoutes(app: FastifyInstance) {
     if (!body.success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid upload request"));
     }
-    const session = store.createUploadSession();
+    const session = await store.createUploadSession();
     return reply.send(
       ok({
         upload_session_id: session.uploadSessionId,
@@ -39,7 +39,7 @@ export async function registerUploadRoutes(app: FastifyInstance) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid upload complete request"));
     }
 
-    const session = store.completeUploadSession(uploadSessionId, body.data.content_hash_sha256);
+    const session = await store.completeUploadSession(uploadSessionId, body.data.content_hash_sha256);
     if (!session) {
       return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Upload session not found"));
     }
@@ -58,7 +58,7 @@ export async function registerUploadRoutes(app: FastifyInstance) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid upload session id"));
     }
 
-    const session = store.getUploadSession(uploadSessionId);
+    const session = await store.getUploadSession(uploadSessionId);
     if (!session) {
       return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Upload session not found"));
     }

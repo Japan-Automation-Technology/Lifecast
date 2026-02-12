@@ -12,7 +12,9 @@ Implemented route groups:
 - Moderation reports
 
 Current state:
-- Uses in-memory store only (no DB wiring yet).
+- Uses hybrid store:
+  - Postgres-first for supports/payments webhook success/journal reads.
+  - In-memory fallback when DB is unavailable or bootstrap data is missing.
 - Shapes and enums follow `packages/contracts/openapi/openapi.yaml`.
 - Ready for BE-001..BE-009 iterative implementation.
 
@@ -21,4 +23,4 @@ Commands:
 - `pnpm typecheck:backend`
 
 Next step:
-- Replace in-memory store with persistence adapters (`support_transactions`, `project_payouts`, `moderation_reports`, `journal_entries`).
+- Expand persistent adapters for payouts/disputes/moderation/notifications and remove fallback-only paths.

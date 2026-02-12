@@ -5,8 +5,12 @@ Goal:
 
 Status snapshot:
 - Workspace scaffolding: completed.
-- Backend route skeleton: completed (in-memory).
-- Persistent DB integration: pending.
+- Backend route skeleton: completed.
+- Persistent DB integration:
+  - Supports: in progress (hybrid DB + fallback implemented).
+  - Stripe webhook success path: in progress (journal `support_hold` write implemented).
+  - Journal list read: in progress (DB-backed query implemented).
+  - Remaining tables/routes: pending.
 - Mobile/web client implementation: pending.
 
 ## Backend tickets
