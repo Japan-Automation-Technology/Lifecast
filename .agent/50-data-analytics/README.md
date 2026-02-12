@@ -8,6 +8,7 @@ When to read deeper:
 
 Key files:
 - `event-taxonomy.md`
+- `event-contract-v1.md`
 - `funnel-definition.md`
 - `kpi-definitions.md`
 - `logging-retention.md`

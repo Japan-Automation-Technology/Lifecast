@@ -19,6 +19,9 @@
 - Managed video platform approach chosen for MVP (Cloudflare Stream baseline).
 - Upload reliability baseline frozen: resumable sessions, dedupe guard, stuck-processing failure fallback.
 - Payment error UX must map processor error categories to user actions.
+- Native implementation split documented: independent iOS/Android lanes with shared backend contract governance.
+- API contract rules v1 added with structured errors, idempotency, and webhook-authoritative settlement.
+- Event contract v1 added with required fields, source-of-truth rules, and ingestion quality SLAs.
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`
@@ -27,5 +30,8 @@ Cross-reference:
 - `../30-business-policy/trust-and-safety-policy.md`
 - `../50-data-analytics/funnel-definition.md`
 - `../60-architecture/system-context.md`
+- `../60-architecture/api-contract-rules.md`
+- `./implementation-workbreakdown.md`
+- `../50-data-analytics/event-contract-v1.md`
 
 Last updated: 2026-02-12

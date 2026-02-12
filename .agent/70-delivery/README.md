@@ -11,5 +11,6 @@ Key files:
 - `milestones.md`
 - `decision-log.md`
 - `question-backlog.md`
+- `implementation-workbreakdown.md`
 
 Last updated: 2026-02-12

@@ -10,6 +10,7 @@ Key files:
 - `system-context.md`
 - `domain-model.md`
 - `api-boundaries.md`
+- `api-contract-rules.md`
 - `security-and-compliance.md`
 
 Last updated: 2026-02-12

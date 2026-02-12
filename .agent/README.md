@@ -8,7 +8,10 @@ Read order:
 3. `40-mvp-spec/scope-in-out.md`
 4. `50-data-analytics/funnel-definition.md`
 5. `30-business-policy/trust-and-safety-policy.md`
-6. Relevant deeper folders based on task
+6. `70-delivery/implementation-workbreakdown.md`
+7. `60-architecture/api-contract-rules.md`
+8. `50-data-analytics/event-contract-v1.md`
+9. Relevant deeper folders based on task
 
 How to use this hierarchy:
 - Read this file first.
@@ -25,7 +28,7 @@ Folder map:
 - `40-mvp-spec/`: MVP in/out scope, core flows, requirements.
 - `50-data-analytics/`: Event taxonomy, funnel, KPI definitions, retention.
 - `60-architecture/`: System context, domain model, API boundaries, security baseline.
-- `70-delivery/`: Roadmap, milestones, decision log, question backlog.
+- `70-delivery/`: Roadmap, milestones, implementation breakdown, decision log, question backlog.
 - `templates/`: Reusable templates for PRD and ADR.
 
 Last updated: 2026-02-12
