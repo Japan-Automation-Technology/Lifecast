@@ -130,12 +130,14 @@ struct SupportFlowDemoView: View {
                 Task {
                     await refreshMyVideos()
                 }
+            }, onOpenProjectTab: {
+                selectedTab = 3
             })
                 .tabItem { Label("Create", systemImage: "plus.square") }
                 .tag(2)
 
             MeTabView(
-                plans: plans,
+                client: client,
                 myVideos: myVideos,
                 myVideosError: myVideosError,
                 onRefreshVideos: {
@@ -143,11 +145,10 @@ struct SupportFlowDemoView: View {
                         await refreshMyVideos()
                     }
                 },
-                onProjectSupportTap: {
-                    supportEntryPoint = .project
-                    selectedPlan = nil
-                    supportStep = .planSelect
-                    showSupportFlow = true
+                onProjectChanged: {
+                    Task {
+                        await refreshMyVideos()
+                    }
                 }
             )
             .tabItem { Label("Me", systemImage: "person") }
@@ -659,11 +660,11 @@ struct CreatorProfileView: View {
 }
 
 struct MeTabView: View {
-    let plans: [SupportPlan]
+    let client: LifeCastAPIClient
     let myVideos: [MyVideo]
     let myVideosError: String
     let onRefreshVideos: () -> Void
-    let onProjectSupportTap: () -> Void
+    let onProjectChanged: () -> Void
 
     @State private var selectedIndex = 0
 
@@ -682,29 +683,32 @@ struct MeTabView: View {
                 }
 
                 Picker("ProfileTabs", selection: $selectedIndex) {
-                    Text("Posted").tag(0)
-                    Text("Liked").tag(1)
-                    Text("Project").tag(2)
+                    Text("Project").tag(0)
+                    Text("Posts").tag(1)
+                    Text("Liked").tag(2)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
                 .onChange(of: selectedIndex) { _, newValue in
-                    if newValue == 0 {
+                    if newValue == 1 {
                         onRefreshVideos()
                     }
                 }
 
                 Group {
                     if selectedIndex == 0 {
+                        ProjectPageView(
+                            client: client,
+                            onProjectChanged: onProjectChanged
+                        )
+                    } else if selectedIndex == 1 {
                         PostedVideosListView(
                             videos: myVideos,
                             errorText: myVideosError,
                             onRefreshVideos: onRefreshVideos
                         )
-                    } else if selectedIndex == 1 {
-                        VideoGridPlaceholder(title: "Liked videos")
                     } else {
-                        ProjectPageView(plans: plans, onProjectSupportTap: onProjectSupportTap)
+                        VideoGridPlaceholder(title: "Liked videos")
                     }
                 }
                 .frame(maxHeight: .infinity)
@@ -718,48 +722,239 @@ struct MeTabView: View {
 }
 
 struct ProjectPageView: View {
-    let plans: [SupportPlan]
-    let onProjectSupportTap: () -> Void
+    let client: LifeCastAPIClient
+    let onProjectChanged: () -> Void
+
+    @State private var myProject: MyProjectResult?
+    @State private var projectHistory: [MyProjectResult] = []
+    @State private var projectLoading = false
+    @State private var projectErrorText = ""
+    @State private var projectTitle = ""
+    @State private var projectGoalMinor = "500000"
+    @State private var projectDurationDays = "14"
+    @State private var minimumPlanName = "Early Support"
+    @State private var minimumPlanPriceMinor = "1000"
+    @State private var minimumPlanRewardSummary = "Prototype update + thank-you card"
+    @State private var showEndConfirm = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Project page")
-                    .font(.headline)
-                Text("Portable game console - Gen2 prototype in progress")
-                ProgressView(value: 1.0)
-                    .tint(.green)
-                Text("100%+ funded")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text("Milestones")
-                    .font(.subheadline.weight(.semibold))
-                milestoneRow("Prototype finished")
-                milestoneRow("Thermal test complete")
-                milestoneRow("Mold preparation in progress")
-
-                if let first = plans.first {
-                    Text("Min plan: \(first.name) / \(first.priceMinor) JPY")
+                if let myProject {
+                    Text("Project page")
+                        .font(.headline)
+                    Text(myProject.title)
+                    ProgressView(value: 1.0)
+                        .tint(.green)
+                    Text("Goal: \(myProject.goal_amount_minor) \(myProject.currency)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if let minimumPlan = myProject.minimum_plan {
+                        Text("Min plan: \(minimumPlan.name) / \(minimumPlan.price_minor) \(minimumPlan.currency)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Status: \(myProject.status.uppercased())")
+                        .font(.caption2)
+                        .foregroundStyle(myProject.status == "stopped" ? .orange : .secondary)
+                    if myProject.status == "stopped" {
+                        Text("Ended project. Refund policy: full refund.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if myProject.status == "active" || myProject.status == "draft" {
+                        Button("End Project", role: .destructive) {
+                            showEndConfirm = true
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    if myProject.status == "draft" {
+                        Button("Delete Project", role: .destructive) {
+                            Task {
+                                await deleteProject(projectId: myProject.id)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    if myProject.status == "stopped" || myProject.status == "failed" || myProject.status == "succeeded" {
+                        Divider().padding(.vertical, 4)
+                        createProjectSection(buttonTitle: "Create New Project")
+                    }
+                } else {
+                    createProjectSection(buttonTitle: "Create Project")
                 }
 
-                Button("Support") {
-                    onProjectSupportTap()
+                if !projectHistory.isEmpty {
+                    Divider().padding(.top, 8)
+                    Text("Past projects")
+                        .font(.subheadline.weight(.semibold))
+                    ForEach(projectHistory, id: \.id) { project in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(project.title)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(project.status.uppercased())
+                                    .font(.caption2.bold())
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.secondary.opacity(0.15))
+                                    .clipShape(Capsule())
+                            }
+                            Text("Goal: \(project.goal_amount_minor) \(project.currency)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("Created: \(project.created_at)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(10)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
                 }
-                .buttonStyle(.borderedProminent)
+
+                if !projectErrorText.isEmpty {
+                    Text(projectErrorText)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
             }
             .padding(16)
         }
+        .task {
+            await loadMyProjects()
+        }
+        .alert("End this project?", isPresented: $showEndConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("End Project", role: .destructive) {
+                guard let projectId = myProject?.id else { return }
+                Task {
+                    await endProject(projectId: projectId)
+                }
+            }
+        } message: {
+            Text("Project will be marked as ended. Refund policy is fixed to full refund.")
+        }
     }
 
-    private func milestoneRow(_ title: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-            Text(title)
-                .font(.subheadline)
+    private func createProjectSection(buttonTitle: String) -> some View {
+        Group {
+            Text("Create your project")
+                .font(.headline)
+            TextField("Project title", text: $projectTitle)
+                .textFieldStyle(.roundedBorder)
+            TextField("Goal amount (JPY)", text: $projectGoalMinor)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.numberPad)
+            TextField("Duration days", text: $projectDurationDays)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.numberPad)
+            TextField("Minimum plan name", text: $minimumPlanName)
+                .textFieldStyle(.roundedBorder)
+            TextField("Minimum plan price (JPY)", text: $minimumPlanPriceMinor)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.numberPad)
+            TextField("Minimum plan reward summary", text: $minimumPlanRewardSummary)
+                .textFieldStyle(.roundedBorder)
+
+            Button(projectLoading ? "Creating..." : buttonTitle) {
+                Task {
+                    await createProject()
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(projectLoading)
+        }
+    }
+
+    private func loadMyProjects() async {
+        projectLoading = true
+        defer { projectLoading = false }
+        do {
+            let projects = try await client.listMyProjects()
+            await MainActor.run {
+                myProject = projects.first(where: { $0.status == "active" || $0.status == "draft" })
+                projectHistory = projects.filter { $0.status != "active" && $0.status != "draft" }
+                projectErrorText = ""
+            }
+        } catch {
+            await MainActor.run {
+                myProject = nil
+                projectHistory = []
+            }
+        }
+    }
+
+    private func createProject() async {
+        projectErrorText = ""
+        do {
+            guard !projectTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Project title is required"])
+            }
+            guard let goal = Int(projectGoalMinor), goal > 0 else {
+                throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Goal amount must be positive"])
+            }
+            guard let days = Int(projectDurationDays), days >= 1 else {
+                throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Duration must be at least 1 day"])
+            }
+            guard let minPrice = Int(minimumPlanPriceMinor), minPrice > 0 else {
+                throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Minimum plan price must be positive"])
+            }
+
+            let deadline = Calendar.current.date(byAdding: .day, value: days, to: Date()) ?? Date().addingTimeInterval(14 * 86400)
+            let iso = ISO8601DateFormatter().string(from: deadline)
+
+            let project = try await client.createProject(
+                title: projectTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+                goalAmountMinor: goal,
+                currency: "JPY",
+                deadlineAtISO8601: iso,
+                minimumPlanName: minimumPlanName.trimmingCharacters(in: .whitespacesAndNewlines),
+                minimumPlanPriceMinor: minPrice,
+                minimumPlanRewardSummary: minimumPlanRewardSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            await MainActor.run {
+                myProject = project
+                projectHistory = projectHistory.filter { $0.id != project.id }
+                projectErrorText = ""
+                onProjectChanged()
+            }
+        } catch {
+            await MainActor.run {
+                projectErrorText = (error as NSError).localizedDescription
+            }
+        }
+    }
+
+    private func deleteProject(projectId: UUID) async {
+        do {
+            try await client.deleteProject(projectId: projectId)
+            await MainActor.run {
+                myProject = nil
+                onProjectChanged()
+            }
+        } catch {
+            await MainActor.run {
+                projectErrorText = (error as NSError).localizedDescription
+            }
+        }
+    }
+
+    private func endProject(projectId: UUID) async {
+        do {
+            try await client.endProject(projectId: projectId, reason: "creator_manual_end")
+            await loadMyProjects()
+            await MainActor.run {
+                projectErrorText = ""
+                onProjectChanged()
+            }
+        } catch {
+            await MainActor.run {
+                projectErrorText = (error as NSError).localizedDescription
+            }
         }
     }
 }
@@ -842,11 +1037,6 @@ struct PostedVideosListView: View {
                                         startPoint: .top,
                                         endPoint: .bottom
                                     )
-                                    Text(video.file_name)
-                                        .font(.caption2)
-                                        .lineLimit(1)
-                                        .foregroundStyle(.white)
-                                        .padding(6)
                                 }
                                 .frame(maxWidth: .infinity)
                                 .aspectRatio(9.0 / 16.0, contentMode: .fit)
@@ -1049,7 +1239,6 @@ struct CreatorPostedFeedView: View {
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.9))
                         .lineLimit(2)
-                        .accessibilityIdentifier("posted-feed-filename")
 
                     fundingMeta(project: project)
                 }
@@ -1299,9 +1488,13 @@ struct DiscoverPlaceholderView: View {
 struct UploadCreateView: View {
     let client: LifeCastAPIClient
     let onUploadReady: () -> Void
+    let onOpenProjectTab: () -> Void
 
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var selectedUploadVideo: SelectedUploadVideo?
+    @State private var myProject: MyProjectResult?
+    @State private var projectLoading = false
+    @State private var projectErrorText = ""
     @State private var state: UploadFlowState = .idle
     @State private var uploadProgress: Double = 0
     @State private var uploadSessionId: UUID?
@@ -1312,86 +1505,141 @@ struct UploadCreateView: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Upload state machine demo")
+                Text("Create")
                     .font(.headline)
 
-                PhotosPicker(
-                    selection: $selectedPickerItem,
-                    matching: .videos,
-                    photoLibrary: .shared()
-                ) {
-                    Label(selectedUploadVideo == nil ? "Select Video" : "Change Video", systemImage: "video.badge.plus")
-                }
-                .buttonStyle(.bordered)
-
-                if let selectedUploadVideo {
-                    Text("Selected: \(selectedUploadVideo.fileName)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if let myProject {
+                    projectSummary(project: myProject)
+                    uploadSection
                 } else {
-                    Text("No video selected")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                statusPill
-
-                ProgressView(value: uploadProgress, total: 1)
-                    .tint(state == .failed ? .red : .blue)
-
-                Text(statusText)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                if let uploadSessionId {
-                    Text("Session: \(uploadSessionId.uuidString)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let videoId {
-                    Text("Video: \(videoId)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                if !errorText.isEmpty {
-                    Text(errorText)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-
-                HStack {
-                    Button("Start Upload") {
-                        Task {
-                            await startUploadFlow()
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(state == .uploading || state == .processing)
-
-                    Button("Retry") {
-                        Task {
-                            await retryOrResumeFlow()
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(uploadSessionId == nil || (state != .failed && state != .processing))
-
-                    Button("Reset") {
-                        reset()
-                    }
-                    .buttonStyle(.bordered)
+                    projectRequiredSection
                 }
 
                 Spacer()
             }
             .padding(16)
             .navigationTitle("Create")
+            .task {
+                await loadActiveProject()
+            }
             .onChange(of: selectedPickerItem) { _, newValue in
                 Task {
                     await loadSelectedVideo(from: newValue)
                 }
+            }
+        }
+    }
+
+    private var projectRequiredSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Project required")
+                .font(.subheadline.weight(.semibold))
+            Text("Create a project in Me > Project tab before uploading videos.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Button("Open Project Tab") {
+                onOpenProjectTab()
+            }
+            .buttonStyle(.borderedProminent)
+
+            if projectLoading {
+                ProgressView("Checking project...")
+                    .font(.caption)
+            }
+
+            if !projectErrorText.isEmpty {
+                Text(projectErrorText)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+        }
+    }
+
+    private var uploadSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PhotosPicker(
+                selection: $selectedPickerItem,
+                matching: .videos,
+                photoLibrary: .shared()
+            ) {
+                Label(selectedUploadVideo == nil ? "Select Video" : "Change Video", systemImage: "video.badge.plus")
+            }
+            .buttonStyle(.bordered)
+
+            if let selectedUploadVideo {
+                Text("Selected: \(selectedUploadVideo.fileName)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No video selected")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            statusPill
+
+            ProgressView(value: uploadProgress, total: 1)
+                .tint(state == .failed ? .red : .blue)
+
+            Text(statusText)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            if let uploadSessionId {
+                Text("Session: \(uploadSessionId.uuidString)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let videoId {
+                Text("Video: \(videoId)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !errorText.isEmpty {
+                Text(errorText)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            HStack {
+                Button("Start Upload") {
+                    Task {
+                        await startUploadFlow()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(state == .uploading || state == .processing)
+
+                Button("Retry") {
+                    Task {
+                        await retryOrResumeFlow()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(uploadSessionId == nil || (state != .failed && state != .processing))
+
+                Button("Reset") {
+                    reset()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private func projectSummary(project: MyProjectResult) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(project.title)
+                .font(.subheadline.weight(.semibold))
+            Text("Goal: \(project.goal_amount_minor) \(project.currency)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let minimumPlan = project.minimum_plan {
+                Text("Min plan: \(minimumPlan.name) / \(minimumPlan.price_minor) \(minimumPlan.currency)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -1434,7 +1682,11 @@ struct UploadCreateView: View {
 
             uploadProgress = 0.2
             statusText = "Creating upload session..."
+            guard let myProject else {
+                throw NSError(domain: "LifeCastUpload", code: -4, userInfo: [NSLocalizedDescriptionKey: "Project not created"])
+            }
             let create = try await client.createUploadSession(
+                projectId: myProject.id,
                 fileName: selectedUploadVideo.fileName,
                 contentType: selectedUploadVideo.contentType,
                 fileSizeBytes: selectedUploadVideo.data.count,
@@ -1613,6 +1865,23 @@ struct UploadCreateView: View {
     private func uniquePseudoSha256() -> String {
         let base = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         return base + base
+    }
+
+    private func loadActiveProject() async {
+        projectLoading = true
+        defer { projectLoading = false }
+        do {
+            let project = try await client.getMyProject()
+            await MainActor.run {
+                myProject = project
+                projectErrorText = ""
+            }
+        } catch {
+            await MainActor.run {
+                myProject = nil
+                projectErrorText = ""
+            }
+        }
     }
 
     private enum UploadErrorContext {

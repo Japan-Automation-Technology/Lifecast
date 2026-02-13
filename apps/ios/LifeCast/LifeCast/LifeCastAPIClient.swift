@@ -28,6 +28,7 @@ struct SupportStatusResult: Decodable {
 }
 
 struct UploadCreateRequest: Encodable {
+    let project_id: UUID
     let file_name: String
     let content_type: String
     let file_size_bytes: Int
@@ -67,6 +68,45 @@ struct MyVideo: Decodable, Identifiable {
 
 struct MyVideosResult: Decodable {
     let rows: [MyVideo]
+}
+
+struct ProjectPlanResult: Decodable {
+    let id: UUID
+    let name: String
+    let price_minor: Int
+    let reward_summary: String
+    let currency: String
+}
+
+struct MyProjectResult: Decodable {
+    let id: UUID
+    let creator_user_id: UUID
+    let title: String
+    let status: String
+    let goal_amount_minor: Int
+    let currency: String
+    let deadline_at: String
+    let created_at: String
+    let minimum_plan: ProjectPlanResult?
+}
+
+struct MyProjectsResult: Decodable {
+    let rows: [MyProjectResult]
+}
+
+struct CreateProjectRequest: Encodable {
+    struct MinimumPlan: Encodable {
+        let name: String
+        let price_minor: Int
+        let reward_summary: String
+        let currency: String
+    }
+
+    let title: String
+    let goal_amount_minor: Int
+    let currency: String
+    let deadline_at: String
+    let minimum_plan: MinimumPlan
 }
 
 struct DevSampleVideo {
@@ -114,8 +154,8 @@ final class LifeCastAPIClient {
         try await send(path: "/v1/supports/\(supportId.uuidString)", method: "GET", body: Optional<String>.none, idempotencyKey: nil)
     }
 
-    func createUploadSession(fileName: String, contentType: String, fileSizeBytes: Int, idempotencyKey: String) async throws -> UploadSessionResult {
-        let body = UploadCreateRequest(file_name: fileName, content_type: contentType, file_size_bytes: fileSizeBytes)
+    func createUploadSession(projectId: UUID, fileName: String, contentType: String, fileSizeBytes: Int, idempotencyKey: String) async throws -> UploadSessionResult {
+        let body = UploadCreateRequest(project_id: projectId, file_name: fileName, content_type: contentType, file_size_bytes: fileSizeBytes)
         return try await send(path: "/v1/videos/uploads", method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
@@ -188,6 +228,69 @@ final class LifeCastAPIClient {
             idempotencyKey: nil
         )
         return result.rows
+    }
+
+    func getMyProject() async throws -> MyProjectResult {
+        try await send(path: "/v1/me/project", method: "GET", body: Optional<String>.none, idempotencyKey: nil)
+    }
+
+    func listMyProjects() async throws -> [MyProjectResult] {
+        let result: MyProjectsResult = try await send(
+            path: "/v1/me/projects",
+            method: "GET",
+            body: Optional<String>.none,
+            idempotencyKey: nil
+        )
+        return result.rows
+    }
+
+    func createProject(
+        title: String,
+        goalAmountMinor: Int,
+        currency: String,
+        deadlineAtISO8601: String,
+        minimumPlanName: String,
+        minimumPlanPriceMinor: Int,
+        minimumPlanRewardSummary: String
+    ) async throws -> MyProjectResult {
+        let body = CreateProjectRequest(
+            title: title,
+            goal_amount_minor: goalAmountMinor,
+            currency: currency,
+            deadline_at: deadlineAtISO8601,
+            minimum_plan: .init(
+                name: minimumPlanName,
+                price_minor: minimumPlanPriceMinor,
+                reward_summary: minimumPlanRewardSummary,
+                currency: currency
+            )
+        )
+        return try await send(path: "/v1/projects", method: "POST", body: body, idempotencyKey: "ios-project-create-\(UUID().uuidString)")
+    }
+
+    func deleteProject(projectId: UUID) async throws {
+        struct DeleteProjectResult: Decodable {
+            let project_id: String
+            let status: String
+        }
+        _ = try await send(path: "/v1/projects/\(projectId.uuidString)", method: "DELETE", body: Optional<String>.none, idempotencyKey: nil) as DeleteProjectResult
+    }
+
+    func endProject(projectId: UUID, reason: String?) async throws {
+        struct EndProjectRequest: Encodable {
+            let reason: String?
+        }
+        struct EndProjectResult: Decodable {
+            let project_id: String
+            let status: String
+            let refund_policy: String
+        }
+        _ = try await send(
+            path: "/v1/projects/\(projectId.uuidString)/end",
+            method: "POST",
+            body: EndProjectRequest(reason: reason),
+            idempotencyKey: "ios-project-end-\(UUID().uuidString)"
+        ) as EndProjectResult
     }
 
     func deleteVideo(videoId: UUID) async throws {

@@ -8,6 +8,7 @@ import { fail, ok } from "../response.js";
 import { store } from "../store/hybridStore.js";
 
 const createUploadBody = z.object({
+  project_id: z.string().uuid(),
   file_name: z.string().min(1).max(255),
   content_type: z.enum(["video/mp4", "video/quicktime"]),
   file_size_bytes: z.number().int().positive(),
@@ -45,10 +46,14 @@ export async function registerUploadRoutes(app: FastifyInstance) {
     }
 
     const session = await store.createUploadSession({
+      projectId: body.data.project_id,
       fileName: body.data.file_name,
       contentType: body.data.content_type,
       fileSizeBytes: body.data.file_size_bytes,
     });
+    if (!session) {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Project not found for creator"));
+    }
     const response = ok({
       upload_session_id: session.uploadSessionId,
       status: session.status,

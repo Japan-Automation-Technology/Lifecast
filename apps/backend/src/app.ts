@@ -8,6 +8,7 @@ import { registerModerationRoutes } from "./routes/moderation.js";
 import { registerOpsRoutes } from "./routes/ops.js";
 import { registerPaymentRoutes } from "./routes/payments.js";
 import { registerPayoutRoutes } from "./routes/payouts.js";
+import { registerProjectRoutes } from "./routes/projects.js";
 import { registerSupportRoutes } from "./routes/supports.js";
 import { registerUploadRoutes } from "./routes/uploads.js";
 
@@ -30,6 +31,7 @@ export async function buildApp() {
   await registerEventRoutes(app);
   await registerAnalyticsRoutes(app);
   await registerPaymentRoutes(app);
+  await registerProjectRoutes(app);
   await registerUploadRoutes(app);
   await registerJournalRoutes(app);
   await registerDisputeRoutes(app);

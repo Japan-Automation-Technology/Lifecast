@@ -10,6 +10,23 @@ export class InMemoryStore {
   private readonly uploads = new Map<string, UploadSession>();
   private readonly payouts = new Map<string, PayoutRecord>();
   private readonly disputes = new Map<string, DisputeRecord>();
+  private readonly projectsById = new Map<string, {
+    id: string;
+    creatorUserId: string;
+    title: string;
+    status: string;
+    goalAmountMinor: number;
+    currency: string;
+    deadlineAt: string;
+    createdAt: string;
+    minimumPlan: {
+      id: string;
+      name: string;
+      priceMinor: number;
+      rewardSummary: string;
+      currency: string;
+    };
+  }>();
 
   prepareSupport(input: { projectId: string; planId: string; quantity: number }) {
     const supportId = randomUUID();
@@ -48,7 +65,12 @@ export class InMemoryStore {
     return record;
   }
 
-  createUploadSession(input?: { fileName?: string }) {
+  createUploadSession(input?: { fileName?: string; projectId?: string }) {
+    if (!input?.projectId) return null;
+    const project = this.projectsById.get(input.projectId);
+    if (!project) return null;
+    if (!(project.status === "active" || project.status === "draft")) return null;
+
     const uploadSessionId = randomUUID();
     const session: UploadSession = {
       uploadSessionId,
@@ -58,6 +80,82 @@ export class InMemoryStore {
     };
     this.uploads.set(uploadSessionId, session);
     return session;
+  }
+
+  getProjectByCreator(creatorUserId: string) {
+    const rows = Array.from(this.projectsById.values()).filter(
+      (p) => p.creatorUserId === creatorUserId && (p.status === "active" || p.status === "draft"),
+    );
+    if (rows.length === 0) return null;
+    rows.sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));
+    return rows[0];
+  }
+
+  listProjectsByCreator(creatorUserId: string) {
+    const rows = Array.from(this.projectsById.values()).filter((p) => p.creatorUserId === creatorUserId);
+    rows.sort((a, b) => {
+      const aRank = a.status === "active" || a.status === "draft" ? 0 : 1;
+      const bRank = b.status === "active" || b.status === "draft" ? 0 : 1;
+      if (aRank !== bRank) return aRank - bRank;
+      return a.createdAt > b.createdAt ? -1 : 1;
+    });
+    return rows;
+  }
+
+  createProjectForCreator(input: {
+    creatorUserId: string;
+    title: string;
+    goalAmountMinor: number;
+    currency: string;
+    deadlineAt: string;
+    minimumPlan: {
+      name: string;
+      priceMinor: number;
+      rewardSummary: string;
+      currency: string;
+    };
+  }) {
+    const existing = Array.from(this.projectsById.values()).find(
+      (p) => p.creatorUserId === input.creatorUserId && (p.status === "active" || p.status === "draft"),
+    );
+    if (existing) return null;
+    const project = {
+      id: randomUUID(),
+      creatorUserId: input.creatorUserId,
+      title: input.title,
+      status: "active",
+      goalAmountMinor: input.goalAmountMinor,
+      currency: input.currency,
+      deadlineAt: input.deadlineAt,
+      createdAt: nowIso(),
+      minimumPlan: {
+        id: randomUUID(),
+        name: input.minimumPlan.name,
+        priceMinor: input.minimumPlan.priceMinor,
+        rewardSummary: input.minimumPlan.rewardSummary,
+        currency: input.minimumPlan.currency,
+      },
+    };
+    this.projectsById.set(project.id, project);
+    return project;
+  }
+
+  deleteProjectForCreator(input: { creatorUserId: string; projectId: string }) {
+    const existing = this.projectsById.get(input.projectId);
+    if (!existing) return "not_found" as const;
+    if (existing.creatorUserId !== input.creatorUserId) return "forbidden" as const;
+    if (existing.status !== "draft") return "invalid_state" as const;
+    this.projectsById.delete(input.projectId);
+    return "deleted" as const;
+  }
+
+  endProjectForCreator(input: { creatorUserId: string; projectId: string; reason?: string }) {
+    const existing = this.projectsById.get(input.projectId);
+    if (!existing) return "not_found" as const;
+    if (existing.creatorUserId !== input.creatorUserId) return "forbidden" as const;
+    if (existing.status === "stopped") return "ended" as const;
+    this.projectsById.set(input.projectId, { ...existing, status: "stopped" });
+    return "ended" as const;
   }
 
   completeUploadSession(uploadSessionId: string, contentHashSha256: string, _storageObjectKey?: string) {

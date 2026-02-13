@@ -132,7 +132,7 @@ async function main() {
     await click(sessionId, meTab);
     await wait(700);
 
-    const postedTab = await findByLabels(sessionId, ["Posted"]);
+    const postedTab = await findByLabels(sessionId, ["Posts", "Posted"]);
     if (postedTab) {
       await click(sessionId, postedTab);
     } else {
@@ -140,7 +140,7 @@ async function main() {
       const rect = rectResp?.value || {};
       const w = Number(rect.width || 390);
       const h = Number(rect.height || 844);
-      await tapAt(sessionId, Math.floor(w * 0.18), Math.floor(h * 0.36));
+      await tapAt(sessionId, Math.floor(w * 0.50), Math.floor(h * 0.36));
     }
     await wait(700);
 

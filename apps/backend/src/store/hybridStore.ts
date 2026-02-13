@@ -1726,7 +1726,332 @@ export class HybridStore {
     }
   }
 
-  async createUploadSession(input?: { fileName?: string; contentType?: string; fileSizeBytes?: number }) {
+  async getProjectByCreator(creatorUserId: string) {
+    if (!hasDb() || !dbPool) {
+      return memory.getProjectByCreator(creatorUserId);
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const project = await client.query<{
+        id: string;
+        title: string;
+        status: string;
+        goal_amount_minor: string | number;
+        currency: string;
+        deadline_at: string | Date;
+        created_at: string | Date;
+      }>(
+        `
+        select id, title, status, goal_amount_minor, currency, deadline_at, created_at
+        from projects
+        where creator_user_id = $1
+          and status in ('active', 'draft')
+        order by created_at desc
+        limit 1
+      `,
+        [creatorUserId],
+      );
+      if (project.rowCount === 0) return null;
+      const row = project.rows[0];
+
+      const minimumPlan = await client.query<{
+        id: string;
+        name: string;
+        price_minor: string | number;
+        reward_summary: string;
+        currency: string;
+      }>(
+        `
+        select id, name, price_minor, reward_summary, currency
+        from project_plans
+        where project_id = $1
+        order by price_minor asc, created_at asc
+        limit 1
+      `,
+        [row.id],
+      );
+
+      return {
+        id: row.id,
+        creatorUserId,
+        title: row.title,
+        status: row.status,
+        goalAmountMinor: Number(row.goal_amount_minor),
+        currency: row.currency,
+        deadlineAt: toIso(row.deadline_at),
+        createdAt: toIso(row.created_at),
+        minimumPlan: minimumPlan.rowCount
+          ? {
+              id: minimumPlan.rows[0].id,
+              name: minimumPlan.rows[0].name,
+              priceMinor: Number(minimumPlan.rows[0].price_minor),
+              rewardSummary: minimumPlan.rows[0].reward_summary,
+              currency: minimumPlan.rows[0].currency,
+            }
+          : null,
+      };
+    } finally {
+      client.release();
+    }
+  }
+
+  async listProjectsByCreator(creatorUserId: string) {
+    if (!hasDb() || !dbPool) {
+      return memory.listProjectsByCreator(creatorUserId);
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const projects = await client.query<{
+        id: string;
+        title: string;
+        status: string;
+        goal_amount_minor: string | number;
+        currency: string;
+        deadline_at: string | Date;
+        created_at: string | Date;
+      }>(
+        `
+        select id, title, status, goal_amount_minor, currency, deadline_at, created_at
+        from projects
+        where creator_user_id = $1
+        order by
+          case when status in ('active', 'draft') then 0 else 1 end,
+          created_at desc
+      `,
+        [creatorUserId],
+      );
+
+      const rows = [];
+      for (const row of projects.rows) {
+        const minimumPlan = await client.query<{
+          id: string;
+          name: string;
+          price_minor: string | number;
+          reward_summary: string;
+          currency: string;
+        }>(
+          `
+          select id, name, price_minor, reward_summary, currency
+          from project_plans
+          where project_id = $1
+          order by price_minor asc, created_at asc
+          limit 1
+        `,
+          [row.id],
+        );
+
+        rows.push({
+          id: row.id,
+          creatorUserId,
+          title: row.title,
+          status: row.status,
+          goalAmountMinor: Number(row.goal_amount_minor),
+          currency: row.currency,
+          deadlineAt: toIso(row.deadline_at),
+          createdAt: toIso(row.created_at),
+          minimumPlan: minimumPlan.rowCount
+            ? {
+                id: minimumPlan.rows[0].id,
+                name: minimumPlan.rows[0].name,
+                priceMinor: Number(minimumPlan.rows[0].price_minor),
+                rewardSummary: minimumPlan.rows[0].reward_summary,
+                currency: minimumPlan.rows[0].currency,
+              }
+            : null,
+        });
+      }
+      return rows;
+    } finally {
+      client.release();
+    }
+  }
+
+  async createProjectForCreator(input: {
+    creatorUserId: string;
+    title: string;
+    goalAmountMinor: number;
+    currency: string;
+    deadlineAt: string;
+    minimumPlan: {
+      name: string;
+      priceMinor: number;
+      rewardSummary: string;
+      currency: string;
+    };
+  }) {
+    if (!hasDb() || !dbPool) {
+      return memory.createProjectForCreator(input);
+    }
+
+    const client = await dbPool.connect();
+    try {
+      await client.query("begin");
+      const exists = await client.query<{ id: string }>(
+        `select id from projects where creator_user_id = $1 and status in ('draft', 'active') limit 1`,
+        [input.creatorUserId],
+      );
+      if ((exists.rowCount ?? 0) > 0) {
+        await client.query("rollback");
+        return null;
+      }
+
+      const projectId = randomUUID();
+      const planId = randomUUID();
+
+      await client.query(
+        `
+        insert into projects (
+          id, creator_user_id, title, status, goal_amount_minor, currency, deadline_at, created_at, updated_at
+        )
+        values ($1, $2, $3, 'active', $4, $5, $6, now(), now())
+      `,
+        [projectId, input.creatorUserId, input.title, input.goalAmountMinor, input.currency, input.deadlineAt],
+      );
+
+      await client.query(
+        `
+        insert into project_plans (
+          id, project_id, name, reward_summary, is_physical_reward, price_minor, currency, created_at, updated_at
+        )
+        values ($1, $2, $3, $4, true, $5, $6, now(), now())
+      `,
+        [planId, projectId, input.minimumPlan.name, input.minimumPlan.rewardSummary, input.minimumPlan.priceMinor, input.minimumPlan.currency],
+      );
+
+      await client.query("commit");
+      return {
+        id: projectId,
+        creatorUserId: input.creatorUserId,
+        title: input.title,
+        status: "active",
+        goalAmountMinor: input.goalAmountMinor,
+        currency: input.currency,
+        deadlineAt: input.deadlineAt,
+        createdAt: new Date().toISOString(),
+        minimumPlan: {
+          id: planId,
+          name: input.minimumPlan.name,
+          priceMinor: input.minimumPlan.priceMinor,
+          rewardSummary: input.minimumPlan.rewardSummary,
+          currency: input.minimumPlan.currency,
+        },
+      };
+    } catch (error) {
+      await client.query("rollback");
+      const pgError = error as { code?: string };
+      if (pgError.code === "23505") {
+        return null;
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async deleteProjectForCreator(input: { creatorUserId: string; projectId: string }) {
+    if (!hasDb() || !dbPool) {
+      return memory.deleteProjectForCreator(input);
+    }
+
+    const client = await dbPool.connect();
+    try {
+      await client.query("begin");
+      const existing = await client.query<{ id: string; creator_user_id: string; status: string }>(
+        `select id, creator_user_id, status from projects where id = $1 limit 1`,
+        [input.projectId],
+      );
+      if ((existing.rowCount ?? 0) === 0) {
+        await client.query("rollback");
+        return "not_found" as const;
+      }
+      if (existing.rows[0].creator_user_id !== input.creatorUserId) {
+        await client.query("rollback");
+        return "forbidden" as const;
+      }
+      if (existing.rows[0].status !== "draft") {
+        await client.query("rollback");
+        return "invalid_state" as const;
+      }
+
+      const supportCount = await client.query<{ count: string }>(
+        `select count(*)::text as count from support_transactions where project_id = $1`,
+        [input.projectId],
+      );
+      if (Number(supportCount.rows[0]?.count ?? "0") > 0) {
+        await client.query("rollback");
+        return "has_supports" as const;
+      }
+
+      // Clear upload sessions under this project first; video_assets are cascade-deleted by FK.
+      await client.query(
+        `
+        delete from video_upload_sessions
+        where project_id = $1 and creator_user_id = $2
+      `,
+        [input.projectId, input.creatorUserId],
+      );
+
+      await client.query(
+        `
+        delete from projects
+        where id = $1 and creator_user_id = $2
+      `,
+        [input.projectId, input.creatorUserId],
+      );
+
+      await client.query("commit");
+      return "deleted" as const;
+    } catch (error) {
+      await client.query("rollback");
+      const pgError = error as { code?: string };
+      if (pgError.code === "23503") {
+        return "conflict" as const;
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async endProjectForCreator(input: { creatorUserId: string; projectId: string; reason?: string }) {
+    if (!hasDb() || !dbPool) {
+      return memory.endProjectForCreator(input);
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const existing = await client.query<{ id: string; creator_user_id: string; status: string }>(
+        `select id, creator_user_id, status from projects where id = $1 limit 1`,
+        [input.projectId],
+      );
+      if ((existing.rowCount ?? 0) === 0) {
+        return "not_found" as const;
+      }
+      if (existing.rows[0].creator_user_id !== input.creatorUserId) {
+        return "forbidden" as const;
+      }
+      if (existing.rows[0].status === "stopped") {
+        return "ended" as const;
+      }
+
+      await client.query(
+        `
+        update projects
+        set status = 'stopped', updated_at = now()
+        where id = $1 and creator_user_id = $2
+      `,
+        [input.projectId, input.creatorUserId],
+      );
+
+      return "ended" as const;
+    } finally {
+      client.release();
+    }
+  }
+
+  async createUploadSession(input?: { fileName?: string; contentType?: string; fileSizeBytes?: number; projectId?: string }) {
     if (!hasDb() || !dbPool) {
       return memory.createUploadSession({ fileName: input?.fileName });
     }
@@ -1746,6 +2071,23 @@ export class HybridStore {
       const safeFileName = input?.fileName?.trim().slice(0, 255) || `upload-${uploadSessionId}.mp4`;
       const contentType = input?.contentType || "video/mp4";
       const fileSizeBytes = Math.max(1, Number(input?.fileSizeBytes ?? 1));
+      const projectId = input?.projectId;
+      if (!projectId) {
+        return null;
+      }
+
+      const project = await client.query<{ id: string }>(
+        `
+        select id
+        from projects
+        where id = $1 and creator_user_id = $2 and status in ('active', 'draft')
+        limit 1
+      `,
+        [projectId, creatorUserId],
+      );
+      if (project.rowCount === 0) {
+        return null;
+      }
       const publicBaseUrl = (process.env.LIFECAST_PUBLIC_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
       const cloudflareUpload = hasCloudflareStreamConfig() ? await createCloudflareDirectUpload() : null;
       const uploadUrl = cloudflareUpload?.uploadURL ?? `${publicBaseUrl}/v1/videos/uploads/${uploadSessionId}/binary`;
@@ -1755,9 +2097,9 @@ export class HybridStore {
         `
         insert into video_upload_sessions (
           id, creator_user_id, status, file_name, content_type, file_size_bytes,
-          provider_upload_id, created_at, updated_at
+          project_id, provider_upload_id, created_at, updated_at
         )
-        values ($1, $2, 'created', $3, $4, $5, $6, now(), now())
+        values ($1, $2, 'created', $3, $4, $5, $6, $7, now(), now())
       `,
         [
           uploadSessionId,
@@ -1765,6 +2107,7 @@ export class HybridStore {
           safeFileName,
           contentType,
           fileSizeBytes,
+          projectId,
           cloudflareUpload?.uid ?? uploadSessionId,
         ],
       );
