@@ -891,16 +891,6 @@ struct CreatorPostedFeedView: View {
                 .accessibilityIdentifier("posted-feed-back")
 
                 Spacer()
-                if !videos.isEmpty && currentIndex > 0 {
-                    Text("\(currentIndex + 1)/\(videos.count)")
-                        .font(.caption.bold())
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.45))
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
-                        .accessibilityIdentifier("posted-feed-counter")
-                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -967,7 +957,7 @@ struct CreatorPostedFeedView: View {
                         .font(.headline)
                         .foregroundStyle(.white)
 
-                    Text(video.file_name)
+                    Text(project.caption)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.9))
                         .lineLimit(2)
