@@ -79,8 +79,9 @@ async function processTranscode(client: any, job: { id: string; video_id: string
 }
 
 async function processPackage(client: any, job: { id: string; video_id: string }) {
-  const manifestUrl = `https://cdn.lifecast.jp/v/${job.video_id}/hls/master.m3u8`;
-  const thumbnailUrl = `https://cdn.lifecast.jp/v/${job.video_id}/thumb.jpg`;
+  const publicBaseUrl = (process.env.LIFECAST_PUBLIC_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+  const manifestUrl = `${publicBaseUrl}/v1/videos/${job.video_id}/playback`;
+  const thumbnailUrl = `${publicBaseUrl}/v1/dev/sample-video.mp4`;
 
   await client.query(
     `

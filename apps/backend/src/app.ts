@@ -12,7 +12,16 @@ import { registerSupportRoutes } from "./routes/supports.js";
 import { registerUploadRoutes } from "./routes/uploads.js";
 
 export async function buildApp() {
-  const app = Fastify({ logger: true });
+  const app = Fastify({
+    logger: true,
+    bodyLimit: 50 * 1024 * 1024,
+  });
+  app.addContentTypeParser(/^video\/.*/, { parseAs: "buffer" }, (_req, body, done) => {
+    done(null, body);
+  });
+  app.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_req, body, done) => {
+    done(null, body);
+  });
   await app.register(cors, { origin: true });
 
   app.get("/health", async () => ({ ok: true, service: "lifecast-backend" }));

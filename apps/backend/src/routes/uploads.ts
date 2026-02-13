@@ -1,4 +1,7 @@
 import type { FastifyInstance } from "fastify";
+import { createReadStream, existsSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
+import { resolve } from "node:path";
 import { z } from "zod";
 import { getStoredIdempotentResponse, requestFingerprint, storeIdempotentResponse } from "../idempotency.js";
 import { fail, ok } from "../response.js";
@@ -17,6 +20,10 @@ const completeUploadBody = z.object({
 });
 
 export async function registerUploadRoutes(app: FastifyInstance) {
+  const publicBaseUrl = (process.env.LIFECAST_PUBLIC_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+  const devSampleVideoNames = ["video_1.mov", "video_2.mov", "video_3.mov"] as const;
+  const devAssetsDir = resolve(process.cwd(), "dev-assets");
+
   app.post("/v1/videos/uploads", async (req, reply) => {
     const body = createUploadBody.safeParse(req.body);
     if (!body.success) {
@@ -45,7 +52,7 @@ export async function registerUploadRoutes(app: FastifyInstance) {
     const response = ok({
       upload_session_id: session.uploadSessionId,
       status: session.status,
-      upload_url: session.uploadUrl,
+      upload_url: session.uploadUrl ?? `${publicBaseUrl}/v1/videos/uploads/${session.uploadSessionId}/binary`,
       expires_at: session.expiresAt,
     });
     if (idempotencyKey) {
@@ -122,6 +129,7 @@ export async function registerUploadRoutes(app: FastifyInstance) {
     const response = ok({
       upload_session_id: session.uploadSessionId,
       status: session.status,
+      video_id: session.videoId,
     });
     if (idempotencyKey) {
       await storeIdempotentResponse({
@@ -153,7 +161,139 @@ export async function registerUploadRoutes(app: FastifyInstance) {
         upload_url: session.uploadUrl,
         expires_at: session.expiresAt,
         video_id: session.videoId,
+        storage_object_key: session.storageObjectKey,
       }),
     );
+  });
+
+  app.put("/v1/videos/uploads/:uploadSessionId/binary", async (req, reply) => {
+    const uploadSessionId = (req.params as { uploadSessionId: string }).uploadSessionId;
+    if (!z.string().uuid().safeParse(uploadSessionId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid upload session id"));
+    }
+
+    const body = req.body;
+    let payload: Buffer;
+    if (Buffer.isBuffer(body)) {
+      payload = body;
+    } else {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req.raw) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      payload = Buffer.concat(chunks);
+    }
+    if (payload.byteLength === 0) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Upload payload is empty"));
+    }
+
+    const contentTypeHeader = req.headers["content-type"];
+    const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader.split(";")[0].trim() : "video/mp4";
+
+    const written = await store.writeUploadBinary(uploadSessionId, {
+      contentType,
+      payload,
+    });
+    if (!written) {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Upload session not found"));
+    }
+
+    return reply.send(
+      ok({
+        upload_session_id: uploadSessionId,
+        storage_object_key: written.storageObjectKey,
+        bytes_stored: written.bytesStored,
+        content_hash_sha256: written.contentHashSha256,
+      }),
+    );
+  });
+
+  app.get("/v1/videos/mine", async (_req, reply) => {
+    const creatorUserId = process.env.LIFECAST_DEV_CREATOR_USER_ID;
+    if (!creatorUserId) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "LIFECAST_DEV_CREATOR_USER_ID is not configured"));
+    }
+
+    const rows = await store.listCreatorVideos(creatorUserId, 30);
+    return reply.send(
+      ok({
+        rows: rows.map((row) => ({
+          video_id: row.videoId,
+          status: row.status,
+          file_name: row.fileName,
+          playback_url: row.playbackUrl,
+          created_at: row.createdAt,
+        })),
+      }),
+    );
+  });
+
+  app.get("/v1/videos/:videoId/playback", async (req, reply) => {
+    const videoId = (req.params as { videoId: string }).videoId;
+    if (!z.string().uuid().safeParse(videoId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid video id"));
+    }
+
+    const playback = await store.getVideoPlaybackById(videoId);
+    if (!playback || playback.status !== "ready") {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Video playback not ready"));
+    }
+
+    if (playback.externalPlaybackUrl) {
+      return reply.redirect(playback.externalPlaybackUrl);
+    }
+
+    if (!playback.absolutePath || !existsSync(playback.absolutePath)) {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Video file not found"));
+    }
+
+    const range = req.headers.range;
+    const absolutePath = playback.absolutePath;
+    const { size } = await stat(absolutePath);
+    const contentType = playback.contentType || "video/mp4";
+
+    if (typeof range === "string" && range.startsWith("bytes=")) {
+      const [rawStart, rawEnd] = range.replace("bytes=", "").split("-");
+      const start = Number(rawStart || 0);
+      const end = rawEnd ? Number(rawEnd) : size - 1;
+      const safeStart = Number.isFinite(start) ? Math.max(0, start) : 0;
+      const safeEnd = Number.isFinite(end) ? Math.min(size - 1, end) : size - 1;
+      if (safeStart > safeEnd || safeStart >= size) {
+        return reply.code(416).send(fail("VALIDATION_ERROR", "Invalid range"));
+      }
+
+      reply.code(206);
+      reply.header("Content-Range", `bytes ${safeStart}-${safeEnd}/${size}`);
+      reply.header("Accept-Ranges", "bytes");
+      reply.header("Content-Length", String(safeEnd - safeStart + 1));
+      reply.header("Content-Type", contentType);
+      return reply.send(createReadStream(absolutePath, { start: safeStart, end: safeEnd }));
+    }
+
+    reply.header("Content-Length", String(size));
+    reply.header("Accept-Ranges", "bytes");
+    reply.header("Content-Type", contentType);
+    return reply.send(createReadStream(absolutePath));
+  });
+
+  app.get("/v1/dev/sample-video", async (req, reply) => {
+    const params = req.query as { index?: string };
+    const requestedIndex = Number(params.index);
+    const fallbackIndex = Math.floor(Math.random() * devSampleVideoNames.length);
+    const safeIndex = Number.isFinite(requestedIndex) && requestedIndex >= 1 && requestedIndex <= devSampleVideoNames.length
+      ? requestedIndex - 1
+      : fallbackIndex;
+    const selectedName = devSampleVideoNames[safeIndex];
+    const samplePath = resolve(devAssetsDir, selectedName);
+
+    if (!existsSync(samplePath)) {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", `${selectedName} is missing in dev-assets`));
+    }
+
+    const payload = await readFile(samplePath);
+    reply.header("Content-Type", "video/quicktime");
+    reply.header("Content-Length", String(payload.byteLength));
+    reply.header("X-LifeCast-File-Name", selectedName);
+    return reply.send(payload);
   });
 }

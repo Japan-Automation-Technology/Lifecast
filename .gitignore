@@ -7,6 +7,8 @@ dist/
 !.env.example
 .DS_Store
 pnpm-debug.log*
+.tmp/
+apps/backend/.data/
 
 # Xcode user/local build artifacts
 DerivedData/

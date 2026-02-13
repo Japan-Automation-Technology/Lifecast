@@ -14,7 +14,11 @@
     "db:migrate:backend": "pnpm --filter @lifecast/backend db:migrate",
     "db:seed:backend": "pnpm --filter @lifecast/backend db:seed",
     "db:bootstrap:backend": "pnpm --filter @lifecast/backend db:bootstrap",
+    "db:reset-videos:backend": "pnpm --filter @lifecast/backend db:reset-dev-videos",
+    "verify:cloudflare-stream:backend": "pnpm --filter @lifecast/backend verify:cloudflare-stream",
     "dev:backend:worker:video-processing": "pnpm --filter @lifecast/backend dev:worker:video-processing",
-    "smoke:ios:appium": "node scripts/appium/ios-smoke.mjs"
+    "smoke:ios:appium": "node scripts/appium/ios-smoke.mjs",
+    "smoke:ios:upload-profile": "node scripts/appium/ios-upload-profile-screens.mjs",
+    "smoke:ios:posted-feed": "node scripts/appium/ios-posted-feed-navigation.mjs"
   }
 }

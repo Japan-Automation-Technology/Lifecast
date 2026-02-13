@@ -10,6 +10,8 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:bootstrap": "pnpm db:migrate && pnpm db:seed",
+    "db:reset-dev-videos": "tsx src/scripts/resetDevVideos.ts",
+    "verify:cloudflare-stream": "tsx src/scripts/verifyCloudflareStream.ts",
     "smoke:payments": "tsx src/scripts/paymentsSmoke.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",

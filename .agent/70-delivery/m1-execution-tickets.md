@@ -82,7 +82,7 @@ BE-010: Video ingest and delivery foundation
   - `video_assets` / `video_renditions` / `video_processing_jobs` persistence
   - worker scaffold for `probe -> transcode -> package -> ready`
 - Keep publish-first UX: accept upload quickly, show `processing`, promote to `ready` asynchronously.
-Status: in progress (migration `0006` + upload-complete outbox emit + video processing worker scaffold implemented)
+Status: in progress (migration `0006` + upload-complete outbox emit + video processing worker scaffold + binary upload ingest endpoint + local playback endpoint + creator video list API implemented)
 
 ## Data/analytics tickets
 
@@ -119,7 +119,7 @@ iOS-003: Upload reliability UX
 - Implement resumable upload with state machine parity:
   - created -> uploading -> processing -> ready | failed
 - Show retry path for failed and stuck processing.
-Status: in progress (Create-tab state machine wired to upload create/complete/get; retry and resumable transport pending)
+Status: in progress (Create-tab state machine wired to create/upload-binary/complete/get with real sample mp4 upload; `Me > Posted` now fetches and plays ready uploads; resumable chunk transport and strict hash verification pending)
 
 ## Cross-cutting tickets
 

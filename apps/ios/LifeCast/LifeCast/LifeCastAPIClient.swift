@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 struct PrepareSupportRequest: Encodable {
     let plan_id: UUID
@@ -42,7 +43,35 @@ struct UploadSessionResult: Decodable {
     let status: String
     let upload_url: String?
     let expires_at: String?
-    let video_id: UUID?
+    let video_id: String?
+    let storage_object_key: String?
+}
+
+struct UploadBinaryResult: Decodable {
+    let upload_session_id: UUID
+    let storage_object_key: String
+    let bytes_stored: Int
+    let content_hash_sha256: String
+}
+
+struct MyVideo: Decodable, Identifiable {
+    let video_id: UUID
+    let status: String
+    let file_name: String
+    let playback_url: String?
+    let created_at: String
+
+    var id: UUID { video_id }
+}
+
+struct MyVideosResult: Decodable {
+    let rows: [MyVideo]
+}
+
+struct DevSampleVideo {
+    let data: Data
+    let fileName: String
+    let contentType: String
 }
 
 struct APIEnvelope<T: Decodable>: Decodable {
@@ -84,8 +113,8 @@ final class LifeCastAPIClient {
         try await send(path: "/v1/supports/\(supportId.uuidString)", method: "GET", body: Optional<String>.none, idempotencyKey: nil)
     }
 
-    func createUploadSession(fileName: String, fileSizeBytes: Int, idempotencyKey: String) async throws -> UploadSessionResult {
-        let body = UploadCreateRequest(file_name: fileName, content_type: "video/mp4", file_size_bytes: fileSizeBytes)
+    func createUploadSession(fileName: String, contentType: String, fileSizeBytes: Int, idempotencyKey: String) async throws -> UploadSessionResult {
+        let body = UploadCreateRequest(file_name: fileName, content_type: contentType, file_size_bytes: fileSizeBytes)
         return try await send(path: "/v1/videos/uploads", method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
@@ -106,6 +135,75 @@ final class LifeCastAPIClient {
             body: Optional<String>.none,
             idempotencyKey: nil
         )
+    }
+
+    func uploadBinary(uploadURL: URL, data: Data, contentType: String) async throws -> UploadBinaryResult {
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "PUT"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.httpBody = data
+
+        let (payload, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw NSError(domain: "LifeCastAPIClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let body = String(data: payload, encoding: .utf8) ?? ""
+            throw NSError(domain: "LifeCastAPIClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
+        }
+
+        let envelope = try JSONDecoder().decode(APIEnvelope<UploadBinaryResult>.self, from: payload)
+        return envelope.result
+    }
+
+    func uploadBinaryDirect(uploadURL: URL, data: Data, contentType: String) async throws {
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "POST"
+        let boundary = "LifeCastBoundary-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"upload.mov\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(contentType)\r\n\r\n".data(using: .utf8)!)
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw NSError(domain: "LifeCastAPIClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw NSError(domain: "LifeCastAPIClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "direct upload failed"])
+        }
+    }
+
+    func listMyVideos() async throws -> [MyVideo] {
+        let result: MyVideosResult = try await send(
+            path: "/v1/videos/mine",
+            method: "GET",
+            body: Optional<String>.none,
+            idempotencyKey: nil
+        )
+        return result.rows
+    }
+
+    func downloadDevSampleVideo() async throws -> DevSampleVideo {
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/dev/sample-video"))
+        request.httpMethod = "GET"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw NSError(domain: "LifeCastAPIClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "failed to fetch sample video"])
+        }
+        let fileName = http.value(forHTTPHeaderField: "X-LifeCast-File-Name") ?? "video.mov"
+        let contentType = http.value(forHTTPHeaderField: "Content-Type") ?? "video/quicktime"
+        return DevSampleVideo(data: data, fileName: fileName, contentType: contentType)
+    }
+
+    func sha256Hex(of data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     private func send<T: Decodable, B: Encodable>(

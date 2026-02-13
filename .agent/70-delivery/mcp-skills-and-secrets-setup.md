@@ -77,6 +77,7 @@ Recommended installs for this project:
   - Uses:
     - `/Users/takeshi/Desktop/lifecast/scripts/appium/ios-smoke.mjs`
     - `/Users/takeshi/Desktop/lifecast/scripts/appium/ios-upload-reset-screens.mjs`
+    - `/Users/takeshi/Desktop/lifecast/scripts/appium/ios-upload-profile-screens.mjs`
 
 Notes:
 - Skill listing script from `skill-installer` failed in this environment due local SSL certificate validation issue.

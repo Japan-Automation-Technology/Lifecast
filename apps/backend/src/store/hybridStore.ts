@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
+import { mkdir, stat, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { dbPool, hasDb } from "./db.js";
 import { InMemoryStore } from "./inMemory.js";
 import { buildServerEvent, validateEventPayload } from "../events/contract.js";
 import type {
+  CreatorVideoRecord,
   DisputeRecord,
   DisputeRecoveryResult,
   ModerationReportResult,
@@ -52,6 +56,22 @@ interface KpiDailyRow {
   repeat_support_rate_pct: string | number;
 }
 
+interface CloudflareDirectUploadResult {
+  uid: string;
+  uploadURL: string;
+}
+
+interface CloudflareVideoDetails {
+  uid: string;
+  readyToStream: boolean;
+  playbackUrl?: string;
+  preview?: string;
+  thumbnail?: string;
+  duration?: number;
+  width?: number;
+  height?: number;
+}
+
 const memory = new InMemoryStore();
 const webhookMemoryDedup = new Set<string>();
 const eventMemoryDedup = new Set<string>();
@@ -62,6 +82,70 @@ const eventMemoryDlq: Array<{
   raw_payload: unknown;
   source: "client" | "server";
 }> = [];
+
+const LOCAL_VIDEO_ROOT = resolve(process.cwd(), ".data/video-objects");
+
+function hasCloudflareStreamConfig() {
+  return Boolean(process.env.CF_ACCOUNT_ID && process.env.CF_STREAM_TOKEN);
+}
+
+async function createCloudflareDirectUpload(): Promise<CloudflareDirectUploadResult | null> {
+  const accountId = process.env.CF_ACCOUNT_ID;
+  const token = process.env.CF_STREAM_TOKEN;
+  if (!accountId || !token) return null;
+
+  const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/stream/direct_upload`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      maxDurationSeconds: 180,
+      requireSignedURLs: false,
+    }),
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.success || !payload?.result?.uploadURL || !payload?.result?.uid) {
+    return null;
+  }
+
+  return {
+    uid: String(payload.result.uid),
+    uploadURL: String(payload.result.uploadURL),
+  };
+}
+
+async function getCloudflareVideoDetails(uid: string): Promise<CloudflareVideoDetails | null> {
+  const accountId = process.env.CF_ACCOUNT_ID;
+  const token = process.env.CF_STREAM_TOKEN;
+  if (!accountId || !token) return null;
+
+  const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/stream/${uid}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.success || !payload?.result) {
+    return null;
+  }
+
+  const result = payload.result;
+  return {
+    uid: String(result.uid ?? uid),
+    readyToStream: Boolean(result.readyToStream),
+    playbackUrl: typeof result.playback?.hls === "string" ? result.playback.hls : undefined,
+    preview: typeof result.preview === "string" ? result.preview : undefined,
+    thumbnail: typeof result.thumbnail === "string" ? result.thumbnail : undefined,
+    duration: typeof result.duration === "number" ? result.duration : undefined,
+    width: typeof result.input?.width === "number" ? result.input.width : undefined,
+    height: typeof result.input?.height === "number" ? result.input.height : undefined,
+  };
+}
 
 function normalizeCurrency(value: string | undefined, fallback = "JPY") {
   return (value ?? fallback).toUpperCase().slice(0, 3);
@@ -1626,7 +1710,9 @@ export class HybridStore {
       const safeFileName = input?.fileName?.trim().slice(0, 255) || `upload-${uploadSessionId}.mp4`;
       const contentType = input?.contentType || "video/mp4";
       const fileSizeBytes = Math.max(1, Number(input?.fileSizeBytes ?? 1));
-      const uploadUrl = `https://upload.lifecast.jp/${uploadSessionId}/${safeFileName}`;
+      const publicBaseUrl = (process.env.LIFECAST_PUBLIC_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+      const cloudflareUpload = hasCloudflareStreamConfig() ? await createCloudflareDirectUpload() : null;
+      const uploadUrl = cloudflareUpload?.uploadURL ?? `${publicBaseUrl}/v1/videos/uploads/${uploadSessionId}/binary`;
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
       await client.query(
@@ -1637,7 +1723,14 @@ export class HybridStore {
         )
         values ($1, $2, 'created', $3, $4, $5, $6, now(), now())
       `,
-        [uploadSessionId, creatorUserId, safeFileName, contentType, fileSizeBytes, uploadSessionId],
+        [
+          uploadSessionId,
+          creatorUserId,
+          safeFileName,
+          contentType,
+          fileSizeBytes,
+          cloudflareUpload?.uid ?? uploadSessionId,
+        ],
       );
 
       return {
@@ -1666,6 +1759,7 @@ export class HybridStore {
       const result = await client.query<{
         id: string;
         status: UploadSession["status"];
+        provider_upload_id: string | null;
         provider_asset_id: string | null;
         creator_user_id: string;
         storage_object_key: string | null;
@@ -1681,7 +1775,7 @@ export class HybridStore {
             completed_at = coalesce(completed_at, now()),
             updated_at = now()
         where id = $1
-        returning id, status, provider_asset_id, creator_user_id, storage_object_key
+        returning id, status, provider_upload_id, provider_asset_id, creator_user_id, storage_object_key
       `,
         [uploadSessionId, contentHashSha256, uploadObjectKey, generatedVideoId],
       );
@@ -1693,7 +1787,8 @@ export class HybridStore {
       }
 
       const row = result.rows[0];
-      const videoId = row.provider_asset_id ?? generatedVideoId;
+      const cloudflareMode = hasCloudflareStreamConfig();
+      const videoId = row.provider_asset_id ?? row.provider_upload_id ?? generatedVideoId;
 
       await client.query(
         `
@@ -1709,15 +1804,16 @@ export class HybridStore {
       `,
         [videoId, row.creator_user_id, row.id, row.storage_object_key ?? uploadObjectKey],
       );
-
-      await client.query(
-        `
-        insert into video_processing_jobs (id, video_id, stage, status, attempt, run_after, created_at, updated_at)
-        values ($1, $2, 'probe', 'pending', 0, now(), now(), now())
-        on conflict do nothing
-      `,
-        [randomUUID(), videoId],
-      );
+      if (!cloudflareMode) {
+        await client.query(
+          `
+          insert into video_processing_jobs (id, video_id, stage, status, attempt, run_after, created_at, updated_at)
+          values ($1, $2, 'probe', 'pending', 0, now(), now(), now())
+          on conflict do nothing
+        `,
+          [randomUUID(), videoId],
+        );
+      }
 
       await client.query(
         `
@@ -1744,6 +1840,7 @@ export class HybridStore {
         status: row.status,
         videoId,
         contentHashSha256,
+        storageObjectKey: row.storage_object_key ?? uploadObjectKey,
       } satisfies UploadSession;
     } catch (error) {
       await client.query("rollback");
@@ -1769,12 +1866,14 @@ export class HybridStore {
       const result = await client.query<{
         id: string;
         status: UploadSession["status"];
+        provider_upload_id: string | null;
         provider_asset_id: string | null;
         content_hash_sha256: string | null;
+        storage_object_key: string | null;
         created_at: string | Date;
       }>(
         `
-        select id, status, provider_asset_id, content_hash_sha256, created_at
+        select id, status, provider_upload_id, provider_asset_id, content_hash_sha256, storage_object_key, created_at
         from video_upload_sessions
         where id = $1
       `,
@@ -1789,17 +1888,221 @@ export class HybridStore {
       const row = result.rows[0];
       const uploadUrl = `https://upload.lifecast.jp/${row.id}`;
       const expiresAt = new Date(new Date(row.created_at).getTime() + 60 * 60 * 1000).toISOString();
+      let latestStatus = row.status;
+      let latestVideoId = row.provider_asset_id ?? row.provider_upload_id ?? undefined;
+
+      if (hasCloudflareStreamConfig() && row.provider_upload_id) {
+        const details = await getCloudflareVideoDetails(row.provider_upload_id);
+        if (details?.readyToStream) {
+          latestStatus = "ready";
+          latestVideoId = details.uid;
+          await client.query(
+            `
+            update video_upload_sessions
+            set status = 'ready',
+                provider_asset_id = $2,
+                updated_at = now()
+            where id = $1
+          `,
+            [uploadSessionId, details.uid],
+          );
+          await client.query(
+            `
+            update video_assets
+            set status = 'ready',
+                manifest_url = coalesce($2, manifest_url),
+                thumbnail_url = coalesce($3, thumbnail_url),
+                updated_at = now()
+            where video_id = $1
+          `,
+            [details.uid, details.playbackUrl ?? details.preview ?? null, details.thumbnail ?? null],
+          );
+        }
+      }
 
       return {
         uploadSessionId: row.id,
-        status: row.status,
-        videoId: row.provider_asset_id ?? undefined,
+        status: latestStatus,
+        videoId: latestVideoId,
         contentHashSha256: row.content_hash_sha256 ?? undefined,
+        storageObjectKey: row.storage_object_key ?? undefined,
         uploadUrl,
         expiresAt,
       } satisfies UploadSession;
     } catch {
       return memory.getUploadSession(uploadSessionId);
+    } finally {
+      client.release();
+    }
+  }
+
+  async writeUploadBinary(
+    uploadSessionId: string,
+    input: { contentType: string; payload: Buffer; fileName?: string },
+  ) {
+    if (!hasDb() || !dbPool) {
+      const fallbackKey = `local/${uploadSessionId}/source.mp4`;
+      const hash = createHash("sha256").update(input.payload).digest("hex");
+      return memory.writeUploadBinary(uploadSessionId, {
+        storageObjectKey: fallbackKey,
+        contentHashSha256: hash,
+      });
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const sessionResult = await client.query<{
+        id: string;
+        file_name: string;
+      }>(
+        `
+        select id, file_name
+        from video_upload_sessions
+        where id = $1
+      `,
+        [uploadSessionId],
+      );
+
+      if (sessionResult.rowCount === 0) {
+        return null;
+      }
+
+      const safeName = (input.fileName?.trim() || sessionResult.rows[0].file_name || "source.mp4").replace(/[^A-Za-z0-9._-]/g, "_");
+      const objectKey = `local/${uploadSessionId}/${safeName}`;
+      const absolutePath = resolve(LOCAL_VIDEO_ROOT, objectKey);
+      const hash = createHash("sha256").update(input.payload).digest("hex");
+
+      await mkdir(dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, input.payload);
+      await stat(absolutePath);
+
+      await client.query(
+        `
+        update video_upload_sessions
+        set status = 'uploading',
+            storage_object_key = $2,
+            content_type = $3,
+            file_size_bytes = $4,
+            updated_at = now()
+        where id = $1
+      `,
+        [uploadSessionId, objectKey, input.contentType, input.payload.byteLength],
+      );
+
+      return {
+        uploadSessionId,
+        storageObjectKey: objectKey,
+        contentHashSha256: hash,
+        bytesStored: input.payload.byteLength,
+      };
+    } finally {
+      client.release();
+    }
+  }
+
+  async listCreatorVideos(creatorUserId: string, limit = 30) {
+    if (!hasDb() || !dbPool) {
+      return memory.listCreatorVideos(creatorUserId);
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const publicBaseUrl = (process.env.LIFECAST_PUBLIC_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+      const result = await client.query<{
+        video_id: string;
+        status: UploadSession["status"];
+        file_name: string;
+        created_at: string | Date;
+      }>(
+        `
+        select
+          va.video_id,
+          va.status,
+          vus.file_name,
+          va.created_at
+        from video_assets va
+        join video_upload_sessions vus on vus.id = va.upload_session_id
+        where va.creator_user_id = $1
+          and va.status = 'ready'
+        order by va.created_at desc
+        limit $2
+      `,
+        [creatorUserId, Math.min(Math.max(limit, 1), 100)],
+      );
+
+      return result.rows.map((row) => ({
+        videoId: row.video_id,
+        status: row.status,
+        fileName: row.file_name,
+        playbackUrl: `${publicBaseUrl}/v1/videos/${row.video_id}/playback`,
+        createdAt: toIso(row.created_at),
+      })) satisfies CreatorVideoRecord[];
+    } finally {
+      client.release();
+    }
+  }
+
+  async getVideoPlaybackById(videoId: string) {
+    if (!hasDb() || !dbPool) {
+      return memory.getPlaybackByVideoId(videoId);
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const result = await client.query<{
+        video_id: string;
+        status: UploadSession["status"];
+        origin_object_key: string | null;
+        manifest_url: string | null;
+        thumbnail_url: string | null;
+        content_type: string;
+      }>(
+        `
+        select
+          va.video_id,
+          va.status,
+          va.origin_object_key,
+          va.manifest_url,
+          va.thumbnail_url,
+          vus.content_type
+        from video_assets va
+        join video_upload_sessions vus on vus.id = va.upload_session_id
+        where va.video_id = $1
+      `,
+        [videoId],
+      );
+
+      if (result.rowCount === 0) return null;
+      const row = result.rows[0];
+      if (row.manifest_url && /^https?:\/\//.test(row.manifest_url)) {
+        let shouldUseExternal = true;
+        try {
+          const parsed = new URL(row.manifest_url);
+          // Guard against bad data that points manifest_url back to this API playback endpoint.
+          if (parsed.pathname === `/v1/videos/${row.video_id}/playback`) {
+            shouldUseExternal = false;
+          }
+        } catch {
+          shouldUseExternal = false;
+        }
+
+        if (shouldUseExternal) {
+          return {
+            videoId: row.video_id,
+            status: row.status,
+            contentType: "application/vnd.apple.mpegurl",
+            externalPlaybackUrl: row.manifest_url,
+          };
+        }
+      }
+      if (!row.origin_object_key) return null;
+
+      return {
+        videoId: row.video_id,
+        status: row.status,
+        contentType: row.content_type || "video/mp4",
+        absolutePath: resolve(LOCAL_VIDEO_ROOT, row.origin_object_key),
+      };
     } finally {
       client.release();
     }

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { DisputeRecord, PayoutRecord, SupportRecord, UploadSession } from "../types.js";
+import type { CreatorVideoRecord, DisputeRecord, PayoutRecord, SupportRecord, UploadSession } from "../types.js";
 
 const nowIso = () => new Date().toISOString();
 const plusHoursIso = (hours: number) => new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
@@ -71,6 +71,29 @@ export class InMemoryStore {
 
   getUploadSession(uploadSessionId: string) {
     return this.uploads.get(uploadSessionId) ?? null;
+  }
+
+  writeUploadBinary(uploadSessionId: string, input: { storageObjectKey: string; contentHashSha256: string }) {
+    const session = this.uploads.get(uploadSessionId);
+    if (!session) return null;
+    session.status = "uploading";
+    session.storageObjectKey = input.storageObjectKey;
+    session.contentHashSha256 = input.contentHashSha256;
+    this.uploads.set(uploadSessionId, session);
+    return {
+      uploadSessionId,
+      storageObjectKey: input.storageObjectKey,
+      contentHashSha256: input.contentHashSha256,
+      bytesStored: 0,
+    };
+  }
+
+  listCreatorVideos(_creatorUserId: string) {
+    return [] as CreatorVideoRecord[];
+  }
+
+  getPlaybackByVideoId(_videoId: string) {
+    return null;
   }
 
   getOrCreatePayout(projectId: string) {

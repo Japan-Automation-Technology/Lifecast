@@ -69,6 +69,10 @@
   - migration `0006_video_pipeline_foundation.sql` added (`video_assets`, `video_renditions`, `video_processing_jobs`)
   - upload complete now enqueues `video_upload_completed` outbox event
   - video processing worker scaffold added (`probe -> transcode -> package -> ready`)
+- BE-010 progress update:
+  - binary ingest endpoint added (`PUT /v1/videos/uploads/{id}/binary`) with local object persistence for development
+  - playback endpoint added (`GET /v1/videos/{videoId}/playback`) and creator library read API (`GET /v1/videos/mine`)
+  - iOS Create flow now uploads actual mp4 bytes (dev sample), and Me/Posted tab renders server-backed playback cards
 - iOS-003 implementation started:
   - Create tab now drives upload status state machine using create/complete/get upload APIs.
 - UI automation policy frozen:

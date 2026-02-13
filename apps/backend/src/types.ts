@@ -29,8 +29,17 @@ export interface UploadSession {
   status: UploadStatus;
   videoId?: string;
   contentHashSha256?: string;
+  storageObjectKey?: string;
   uploadUrl?: string;
   expiresAt?: string;
+}
+
+export interface CreatorVideoRecord {
+  videoId: string;
+  status: UploadStatus;
+  fileName: string;
+  playbackUrl?: string;
+  createdAt: string;
 }
 
 export interface DisputeRecord {
