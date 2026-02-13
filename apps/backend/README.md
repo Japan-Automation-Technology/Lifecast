@@ -5,6 +5,7 @@ Fastify + TypeScript API skeleton aligned to M1 contract freeze.
 Implemented route groups:
 - Supports
 - Events ingestion
+- Analytics (daily funnel/KPI read)
 - Payments (webhook entry)
 - Uploads
 - Journal (read stub)
@@ -23,12 +24,15 @@ Current state:
 - Adds reconciliation API baseline at `GET /v1/journal/reconciliation`.
 - Adds event ingestion API (`POST /v1/events/ingest`) with contract validation + DLQ persistence.
 - Emits server-side `payment_succeeded` event after webhook-authoritative settlement.
+- Adds outbox transport baseline (`outbox_events` + worker) for server-emitted events.
+- Adds daily analytics views (`analytics_funnel_daily`, `analytics_kpi_daily`) and read APIs.
 - Shapes and enums follow `packages/contracts/openapi/openapi.yaml`.
 - Ready for BE-001..BE-009 iterative implementation.
 
 Commands:
 - `pnpm dev:backend`
 - `pnpm dev:backend:worker:notifications`
+- `pnpm dev:backend:worker:outbox`
 - `pnpm typecheck:backend`
 - `pnpm test:backend`
 - `pnpm db:migrate:backend`
@@ -36,5 +40,5 @@ Commands:
 - `pnpm smoke:payments:backend`
 
 Next step:
-- Add provider-authenticated event bus publish for `payment_succeeded`.
+- Replace outbox placeholder delivery with provider-authenticated bus publish.
 - Harden reconciliation rules against provider settlement exports and chargeback lifecycle edge cases.

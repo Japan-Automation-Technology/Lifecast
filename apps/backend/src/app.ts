@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import { registerAnalyticsRoutes } from "./routes/analytics.js";
 import { registerDisputeRoutes } from "./routes/disputes.js";
 import { registerEventRoutes } from "./routes/events.js";
 import { registerJournalRoutes } from "./routes/journal.js";
@@ -17,6 +18,7 @@ export async function buildApp() {
 
   await registerSupportRoutes(app);
   await registerEventRoutes(app);
+  await registerAnalyticsRoutes(app);
   await registerPaymentRoutes(app);
   await registerUploadRoutes(app);
   await registerJournalRoutes(app);

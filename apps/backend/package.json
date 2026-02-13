@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:worker:notifications": "tsx watch src/workers/notifications.ts",
+    "dev:worker:outbox": "tsx watch src/workers/outbox.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:bootstrap": "pnpm db:migrate && pnpm db:seed",

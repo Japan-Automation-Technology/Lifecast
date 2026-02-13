@@ -56,6 +56,8 @@
 - `payment_succeeded` server event emit added after webhook-authoritative settlement.
 - Payment smoke script added for real API flow validation (`smoke:payments:backend`).
 - iOS starter API client scaffold added for support/upload API integration.
+- Outbox baseline added (`outbox_events` + worker) for server event transport decoupling.
+- Daily funnel/KPI analytics views and read APIs added for DA-002 baseline.
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`

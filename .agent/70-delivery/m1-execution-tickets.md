@@ -8,14 +8,14 @@ Status snapshot:
 - Backend route skeleton: completed.
 - Persistent DB integration:
   - Supports: in progress (hybrid DB + fallback + idempotency + status history implemented).
-  - Stripe webhook success path: in progress (signature verify + event dedupe + support/refund/dispute handlers implemented).
+  - Stripe webhook success path: in progress (signature verify + event dedupe + support/refund/dispute handlers + outbox enqueue implemented).
   - Journal list read: completed (DB-backed query implemented).
   - Payout read model: in progress (DB-backed schedule retrieval + lazy create + release write path implemented).
   - Dispute read/recovery: in progress (DB-backed read + recovery event insert implemented).
   - Moderation report intake: completed for M1 baseline (DB-backed report + trust score trigger + idempotency).
   - Upload sessions: in progress (DB-backed create/complete/get implemented).
   - Notification queue: in progress (DB enqueue + worker dequeue skeleton implemented).
-  - Migration packaging: completed (`0001` + `0002` applied, `db:migrate` / `db:seed` confirmed on Supabase pooler URL).
+  - Migration packaging: completed (`0001` + `0002` + `0003` + `0004` applied).
 - Mobile/web client implementation: pending.
 
 ## Backend tickets
@@ -86,6 +86,7 @@ DA-002: Funnel materialization
   - support conversion rate
   - average support amount
   - repeat support rate
+Status: in progress (`analytics_funnel_daily` / `analytics_kpi_daily` views + read APIs implemented; dashboard layer pending)
 
 DA-003: Cost guardrail jobs
 - Build job to evaluate low-conversion bitrate rules.

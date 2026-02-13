@@ -36,6 +36,22 @@ interface JournalEntryRow {
   lines: JournalLine[];
 }
 
+interface FunnelDailyRow {
+  event_date_utc: string | Date;
+  event_name: string;
+  event_count: string | number;
+  actor_count: string | number;
+}
+
+interface KpiDailyRow {
+  event_date_utc: string | Date;
+  watch_completed_count: string | number;
+  payment_succeeded_count: string | number;
+  support_conversion_rate_pct: string | number;
+  average_support_amount_minor: string | number;
+  repeat_support_rate_pct: string | number;
+}
+
 const memory = new InMemoryStore();
 const webhookMemoryDedup = new Set<string>();
 const eventMemoryDedup = new Set<string>();
@@ -1108,7 +1124,36 @@ export class HybridStore {
       appVersion,
       attributes: input.attributes,
     });
-    return this.ingestEvents({ events: [event], source: "server" });
+    const ingestion = await this.ingestEvents({ events: [event], source: "server" });
+    if (ingestion.accepted > 0) {
+      await this.enqueueOutboxEvent({
+        topic: `analytics.${input.eventName}`,
+        eventId: String(event.event_id),
+        payload: event,
+      });
+    }
+    return ingestion;
+  }
+
+  async enqueueOutboxEvent(input: { eventId: string; topic: string; payload: Record<string, unknown> }) {
+    if (!hasDb() || !dbPool) {
+      return { queued: true };
+    }
+
+    const client = await dbPool.connect();
+    try {
+      await client.query(
+        `
+        insert into outbox_events (event_id, topic, payload, status, next_attempt_at)
+        values ($1, $2, $3::jsonb, 'pending', now())
+        on conflict (event_id) do nothing
+      `,
+        [input.eventId, input.topic, JSON.stringify(input.payload)],
+      );
+      return { queued: true };
+    } finally {
+      client.release();
+    }
   }
 
   async listJournalEntries(filters: { projectId?: string; supportId?: string; entryType?: string; limit?: number }) {
@@ -1174,6 +1219,95 @@ export class HybridStore {
       })) as JournalEntryView[];
     } catch {
       return [] as JournalEntryView[];
+    } finally {
+      client.release();
+    }
+  }
+
+  async listFunnelDaily(filters: { dateFrom?: string; dateTo?: string; limit?: number }) {
+    if (!hasDb() || !dbPool) {
+      return [];
+    }
+    const client = await dbPool.connect();
+    try {
+      const where: string[] = [];
+      const values: unknown[] = [];
+      if (filters.dateFrom) {
+        values.push(filters.dateFrom);
+        where.push(`event_date_utc >= $${values.length}::date`);
+      }
+      if (filters.dateTo) {
+        values.push(filters.dateTo);
+        where.push(`event_date_utc <= $${values.length}::date`);
+      }
+      const limit = Math.min(Math.max(filters.limit ?? 100, 1), 365);
+      values.push(limit);
+
+      const result = await client.query<FunnelDailyRow>(
+        `
+        select event_date_utc, event_name, event_count, actor_count
+        from analytics_funnel_daily
+        ${where.length ? `where ${where.join(" and ")}` : ""}
+        order by event_date_utc desc, event_name asc
+        limit $${values.length}
+      `,
+        values,
+      );
+      return result.rows.map((row) => ({
+        event_date_utc: row.event_date_utc instanceof Date ? row.event_date_utc.toISOString().slice(0, 10) : String(row.event_date_utc).slice(0, 10),
+        event_name: row.event_name,
+        event_count: Number(row.event_count),
+        actor_count: Number(row.actor_count),
+      }));
+    } finally {
+      client.release();
+    }
+  }
+
+  async listKpiDaily(filters: { dateFrom?: string; dateTo?: string; limit?: number }) {
+    if (!hasDb() || !dbPool) {
+      return [];
+    }
+    const client = await dbPool.connect();
+    try {
+      const where: string[] = [];
+      const values: unknown[] = [];
+      if (filters.dateFrom) {
+        values.push(filters.dateFrom);
+        where.push(`event_date_utc >= $${values.length}::date`);
+      }
+      if (filters.dateTo) {
+        values.push(filters.dateTo);
+        where.push(`event_date_utc <= $${values.length}::date`);
+      }
+      const limit = Math.min(Math.max(filters.limit ?? 100, 1), 365);
+      values.push(limit);
+
+      const result = await client.query<KpiDailyRow>(
+        `
+        select
+          event_date_utc,
+          watch_completed_count,
+          payment_succeeded_count,
+          support_conversion_rate_pct,
+          average_support_amount_minor,
+          repeat_support_rate_pct
+        from analytics_kpi_daily
+        ${where.length ? `where ${where.join(" and ")}` : ""}
+        order by event_date_utc desc
+        limit $${values.length}
+      `,
+        values,
+      );
+
+      return result.rows.map((row) => ({
+        event_date_utc: row.event_date_utc instanceof Date ? row.event_date_utc.toISOString().slice(0, 10) : String(row.event_date_utc).slice(0, 10),
+        watch_completed_count: Number(row.watch_completed_count),
+        payment_succeeded_count: Number(row.payment_succeeded_count),
+        support_conversion_rate_pct: Number(row.support_conversion_rate_pct),
+        average_support_amount_minor: Number(row.average_support_amount_minor),
+        repeat_support_rate_pct: Number(row.repeat_support_rate_pct),
+      }));
     } finally {
       client.release();
     }

@@ -6,6 +6,7 @@
   "scripts": {
     "dev:backend": "pnpm --filter @lifecast/backend dev",
     "dev:backend:worker:notifications": "pnpm --filter @lifecast/backend dev:worker:notifications",
+    "dev:backend:worker:outbox": "pnpm --filter @lifecast/backend dev:worker:outbox",
     "build:backend": "pnpm --filter @lifecast/backend build",
     "typecheck:backend": "pnpm --filter @lifecast/backend typecheck",
     "test:backend": "pnpm --filter @lifecast/backend test",
