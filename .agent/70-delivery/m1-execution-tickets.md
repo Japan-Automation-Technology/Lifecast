@@ -17,6 +17,7 @@ Status snapshot:
   - Notification queue: in progress (DB enqueue + worker dequeue skeleton implemented).
   - Migration packaging: completed (`0001` + `0002` + `0003` + `0004` applied).
 - Mobile/web client implementation: pending.
+- Mobile UI wireflow: completed and frozen (`40-mvp-spec/ui-m1-wireflow.md`).
 
 ## Backend tickets
 

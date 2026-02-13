@@ -12,5 +12,6 @@ Key files:
 - `feature-requirements.md`
 - `non-functional-requirements.md`
 - `notification-matrix.md`
+- `ui-m1-wireflow.md`
 
-Last updated: 2026-02-12
+Last updated: 2026-02-13
