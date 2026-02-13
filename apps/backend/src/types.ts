@@ -39,6 +39,7 @@ export interface CreatorVideoRecord {
   status: UploadStatus;
   fileName: string;
   playbackUrl?: string;
+  thumbnailUrl?: string;
   createdAt: string;
 }
 

@@ -147,6 +147,26 @@ async function getCloudflareVideoDetails(uid: string): Promise<CloudflareVideoDe
   };
 }
 
+async function deleteCloudflareVideo(uid: string): Promise<boolean> {
+  const accountId = process.env.CF_ACCOUNT_ID;
+  const token = process.env.CF_STREAM_TOKEN;
+  if (!accountId || !token) return false;
+
+  const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/stream/${uid}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    return false;
+  }
+  const payload = await response.json().catch(() => null);
+  return Boolean(payload?.success);
+}
+
 function normalizeCurrency(value: string | undefined, fallback = "JPY") {
   return (value ?? fallback).toUpperCase().slice(0, 3);
 }
@@ -1895,16 +1915,14 @@ export class HybridStore {
         const details = await getCloudflareVideoDetails(row.provider_upload_id);
         if (details?.readyToStream) {
           latestStatus = "ready";
-          latestVideoId = details.uid;
           await client.query(
             `
             update video_upload_sessions
             set status = 'ready',
-                provider_asset_id = $2,
                 updated_at = now()
             where id = $1
           `,
-            [uploadSessionId, details.uid],
+            [uploadSessionId],
           );
           await client.query(
             `
@@ -1913,9 +1931,9 @@ export class HybridStore {
                 manifest_url = coalesce($2, manifest_url),
                 thumbnail_url = coalesce($3, thumbnail_url),
                 updated_at = now()
-            where video_id = $1
+            where upload_session_id = $1
           `,
-            [details.uid, details.playbackUrl ?? details.preview ?? null, details.thumbnail ?? null],
+            [uploadSessionId, details.playbackUrl ?? details.preview ?? null, details.thumbnail ?? null],
           );
         }
       }
@@ -2012,6 +2030,9 @@ export class HybridStore {
         video_id: string;
         status: UploadSession["status"];
         file_name: string;
+        thumbnail_url: string | null;
+        upload_session_id: string;
+        provider_upload_id: string | null;
         created_at: string | Date;
       }>(
         `
@@ -2019,6 +2040,9 @@ export class HybridStore {
           va.video_id,
           va.status,
           vus.file_name,
+          va.thumbnail_url,
+          va.upload_session_id,
+          vus.provider_upload_id,
           va.created_at
         from video_assets va
         join video_upload_sessions vus on vus.id = va.upload_session_id
@@ -2030,11 +2054,31 @@ export class HybridStore {
         [creatorUserId, Math.min(Math.max(limit, 1), 100)],
       );
 
+      if (hasCloudflareStreamConfig()) {
+        for (const row of result.rows) {
+          if (row.thumbnail_url || !row.provider_upload_id) continue;
+          const details = await getCloudflareVideoDetails(row.provider_upload_id);
+          if (!details?.thumbnail) continue;
+          await client.query(
+            `
+            update video_assets
+            set thumbnail_url = coalesce(thumbnail_url, $2),
+                manifest_url = coalesce(manifest_url, $3),
+                updated_at = now()
+            where upload_session_id = $1
+          `,
+            [row.upload_session_id, details.thumbnail, details.playbackUrl ?? details.preview ?? null],
+          );
+          row.thumbnail_url = details.thumbnail;
+        }
+      }
+
       return result.rows.map((row) => ({
         videoId: row.video_id,
         status: row.status,
         fileName: row.file_name,
         playbackUrl: `${publicBaseUrl}/v1/videos/${row.video_id}/playback`,
+        thumbnailUrl: row.thumbnail_url ?? undefined,
         createdAt: toIso(row.created_at),
       })) satisfies CreatorVideoRecord[];
     } finally {
@@ -2103,6 +2147,62 @@ export class HybridStore {
         contentType: row.content_type || "video/mp4",
         absolutePath: resolve(LOCAL_VIDEO_ROOT, row.origin_object_key),
       };
+    } finally {
+      client.release();
+    }
+  }
+
+  async deleteCreatorVideo(creatorUserId: string, videoId: string) {
+    if (!hasDb() || !dbPool) {
+      return memory.deleteCreatorVideo(creatorUserId, videoId);
+    }
+
+    const client = await dbPool.connect();
+    try {
+      await client.query("begin");
+      const existing = await client.query<{
+        video_id: string;
+        creator_user_id: string;
+        upload_session_id: string;
+        provider_upload_id: string | null;
+      }>(
+        `
+        select
+          va.video_id,
+          va.creator_user_id,
+          va.upload_session_id,
+          vus.provider_upload_id
+        from video_assets va
+        join video_upload_sessions vus on vus.id = va.upload_session_id
+        where va.video_id = $1
+        limit 1
+      `,
+        [videoId],
+      );
+
+      if (existing.rowCount === 0) {
+        await client.query("rollback");
+        return "not_found" as const;
+      }
+
+      const row = existing.rows[0];
+      if (row.creator_user_id !== creatorUserId) {
+        await client.query("rollback");
+        return "forbidden" as const;
+      }
+
+      await client.query(`delete from video_assets where video_id = $1 and creator_user_id = $2`, [videoId, creatorUserId]);
+      await client.query(`delete from video_upload_sessions where id = $1 and creator_user_id = $2`, [row.upload_session_id, creatorUserId]);
+      await client.query("commit");
+
+      if (row.provider_upload_id && hasCloudflareStreamConfig()) {
+        void deleteCloudflareVideo(row.provider_upload_id);
+      }
+
+      return "deleted" as const;
+    } catch {
+      await client.query("rollback");
+      return "not_found" as const;
     } finally {
       client.release();
     }

@@ -96,6 +96,10 @@ export class InMemoryStore {
     return null;
   }
 
+  deleteCreatorVideo(_creatorUserId: string, _videoId: string) {
+    return "not_found" as const;
+  }
+
   getOrCreatePayout(projectId: string) {
     const existing = this.payouts.get(projectId);
     if (existing) return existing;

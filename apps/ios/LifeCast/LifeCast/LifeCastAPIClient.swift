@@ -59,6 +59,7 @@ struct MyVideo: Decodable, Identifiable {
     let status: String
     let file_name: String
     let playback_url: String?
+    let thumbnail_url: String?
     let created_at: String
 
     var id: UUID { video_id }
@@ -189,6 +190,20 @@ final class LifeCastAPIClient {
         return result.rows
     }
 
+    func deleteVideo(videoId: UUID) async throws {
+        struct DeleteResult: Decodable {
+            let video_id: String
+            let status: String
+        }
+
+        _ = try await send(
+            path: "/v1/videos/\(videoId.uuidString)",
+            method: "DELETE",
+            body: Optional<String>.none,
+            idempotencyKey: nil
+        ) as DeleteResult
+    }
+
     func downloadDevSampleVideo() async throws -> DevSampleVideo {
         var request = URLRequest(url: baseURL.appendingPathComponent("v1/dev/sample-video"))
         request.httpMethod = "GET"
@@ -214,11 +229,11 @@ final class LifeCastAPIClient {
     ) async throws -> T {
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.httpMethod = method
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let idempotencyKey {
             request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
         }
         if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(body)
         }
 

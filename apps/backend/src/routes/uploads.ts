@@ -222,6 +222,7 @@ export async function registerUploadRoutes(app: FastifyInstance) {
           status: row.status,
           file_name: row.fileName,
           playback_url: row.playbackUrl,
+          thumbnail_url: row.thumbnailUrl,
           created_at: row.createdAt,
         })),
       }),
@@ -274,6 +275,32 @@ export async function registerUploadRoutes(app: FastifyInstance) {
     reply.header("Accept-Ranges", "bytes");
     reply.header("Content-Type", contentType);
     return reply.send(createReadStream(absolutePath));
+  });
+
+  app.delete("/v1/videos/:videoId", async (req, reply) => {
+    const videoId = (req.params as { videoId: string }).videoId;
+    if (!z.string().uuid().safeParse(videoId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid video id"));
+    }
+    const creatorUserId = process.env.LIFECAST_DEV_CREATOR_USER_ID;
+    if (!creatorUserId) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "LIFECAST_DEV_CREATOR_USER_ID is not configured"));
+    }
+
+    const result = await store.deleteCreatorVideo(creatorUserId, videoId);
+    if (result === "not_found") {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Video not found"));
+    }
+    if (result === "forbidden") {
+      return reply.code(403).send(fail("FORBIDDEN", "You cannot delete this video"));
+    }
+
+    return reply.send(
+      ok({
+        video_id: videoId,
+        status: "deleted",
+      }),
+    );
   });
 
   app.get("/v1/dev/sample-video", async (req, reply) => {

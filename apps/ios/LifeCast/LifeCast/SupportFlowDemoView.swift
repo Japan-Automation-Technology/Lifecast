@@ -1,5 +1,7 @@
 import SwiftUI
 import AVKit
+import PhotosUI
+import UniformTypeIdentifiers
 
 enum FeedMode: String, CaseIterable {
     case forYou = "For You"
@@ -793,14 +795,28 @@ struct PostedVideosListView: View {
                                 selectedVideo = video
                             } label: {
                                 ZStack(alignment: .bottomLeading) {
-                                    Rectangle()
-                                        .fill(
+                                    if let thumbnail = video.thumbnail_url, let thumbnailURL = URL(string: thumbnail) {
+                                        AsyncImage(url: thumbnailURL) { image in
+                                            image
+                                                .resizable()
+                                                .scaledToFill()
+                                        } placeholder: {
                                             LinearGradient(
                                                 colors: [Color.blue.opacity(0.5), Color.pink.opacity(0.6)],
                                                 startPoint: .top,
                                                 endPoint: .bottom
                                             )
-                                        )
+                                        }
+                                    } else {
+                                        Rectangle()
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [Color.blue.opacity(0.5), Color.pink.opacity(0.6)],
+                                                    startPoint: .top,
+                                                    endPoint: .bottom
+                                                )
+                                            )
+                                    }
                                     Image(systemName: "play.circle.fill")
                                         .font(.system(size: 28))
                                         .foregroundStyle(.white.opacity(0.9))
@@ -831,7 +847,12 @@ struct PostedVideosListView: View {
         .fullScreenCover(item: $selectedVideo) { video in
             CreatorPostedFeedView(
                 videos: newestFirstVideos,
-                initialVideoId: video.video_id
+                initialVideoId: video.video_id,
+                client: LifeCastAPIClient(baseURL: URL(string: "http://localhost:8080")!),
+                isCurrentUserVideo: true,
+                onVideoDeleted: {
+                    onRefreshVideos()
+                }
             )
         }
     }
@@ -840,17 +861,33 @@ struct PostedVideosListView: View {
 struct CreatorPostedFeedView: View {
     let videos: [MyVideo]
     let initialVideoId: UUID
+    let client: LifeCastAPIClient
+    let isCurrentUserVideo: Bool
+    let onVideoDeleted: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var feedVideos: [MyVideo]
     @State private var currentIndex: Int
     @State private var player: AVPlayer?
     @State private var showComments = false
     @State private var showShare = false
+    @State private var showActions = false
+    @State private var deleteErrorText = ""
 
-    init(videos: [MyVideo], initialVideoId: UUID) {
+    init(
+        videos: [MyVideo],
+        initialVideoId: UUID,
+        client: LifeCastAPIClient,
+        isCurrentUserVideo: Bool,
+        onVideoDeleted: @escaping () -> Void
+    ) {
         self.videos = videos
         self.initialVideoId = initialVideoId
+        self.client = client
+        self.isCurrentUserVideo = isCurrentUserVideo
+        self.onVideoDeleted = onVideoDeleted
         let initial = videos.firstIndex(where: { $0.video_id == initialVideoId }) ?? 0
+        _feedVideos = State(initialValue: videos)
         _currentIndex = State(initialValue: initial)
     }
 
@@ -858,11 +895,11 @@ struct CreatorPostedFeedView: View {
         ZStack(alignment: .top) {
             Color.black.ignoresSafeArea()
 
-            if videos.isEmpty {
+            if feedVideos.isEmpty {
                 Text("No videos")
                     .foregroundStyle(.white)
             } else {
-                feedPage(video: videos[currentIndex], project: currentProject)
+                feedPage(video: feedVideos[currentIndex], project: currentProject)
                     .accessibilityIdentifier("posted-feed-view")
                     .gesture(
                         DragGesture(minimumDistance: 24)
@@ -904,6 +941,32 @@ struct CreatorPostedFeedView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Choose one action")
+        }
+        .confirmationDialog("Video actions", isPresented: $showActions, titleVisibility: .visible) {
+            Button("Insights (Coming Soon)") {}
+            if isCurrentUserVideo {
+                Button("Delete video", role: .destructive) {
+                    Task {
+                        await deleteCurrentVideo()
+                    }
+                }
+            } else {
+                Button("Not interested") {}
+                Button("Report", role: .destructive) {}
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .overlay(alignment: .top) {
+            if !deleteErrorText.isEmpty {
+                Text(deleteErrorText)
+                    .font(.caption)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color.red.opacity(0.75))
+                    .clipShape(Capsule())
+                    .padding(.top, 56)
+            }
         }
         .onAppear {
             syncPlayerForCurrentIndex()
@@ -996,6 +1059,13 @@ struct CreatorPostedFeedView: View {
             } label: {
                 metricView(icon: "square.and.arrow.up.fill", value: 0, labelOverride: "Share")
             }
+            Button {
+                showActions = true
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.title2)
+            }
+            .accessibilityIdentifier("video-actions")
         }
         .foregroundStyle(.white)
     }
@@ -1098,12 +1168,16 @@ struct CreatorPostedFeedView: View {
     }
 
     private func syncPlayerForCurrentIndex() {
-        guard !videos.isEmpty else {
+        guard !feedVideos.isEmpty else {
             player?.pause()
             player = nil
             return
         }
-        guard let playbackUrl = videos[currentIndex].playback_url, let url = URL(string: playbackUrl) else {
+        guard currentIndex >= 0 && currentIndex < feedVideos.count else {
+            currentIndex = max(0, min(currentIndex, feedVideos.count - 1))
+            return
+        }
+        guard let playbackUrl = feedVideos[currentIndex].playback_url, let url = URL(string: playbackUrl) else {
             player?.pause()
             player = nil
             return
@@ -1115,7 +1189,7 @@ struct CreatorPostedFeedView: View {
     }
 
     private func showOlder() {
-        guard currentIndex < videos.count - 1 else { return }
+        guard currentIndex < feedVideos.count - 1 else { return }
         withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
             currentIndex += 1
         }
@@ -1125,6 +1199,29 @@ struct CreatorPostedFeedView: View {
         guard currentIndex > 0 else { return }
         withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
             currentIndex -= 1
+        }
+    }
+
+    private func deleteCurrentVideo() async {
+        guard !feedVideos.isEmpty else { return }
+        let target = feedVideos[currentIndex]
+        do {
+            try await client.deleteVideo(videoId: target.video_id)
+            await MainActor.run {
+                deleteErrorText = ""
+                feedVideos.removeAll(where: { $0.video_id == target.video_id })
+                if feedVideos.isEmpty {
+                    onVideoDeleted()
+                    dismiss()
+                    return
+                }
+                currentIndex = min(currentIndex, feedVideos.count - 1)
+                onVideoDeleted()
+            }
+        } catch {
+            await MainActor.run {
+                deleteErrorText = "Delete failed: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -1178,6 +1275,8 @@ struct UploadCreateView: View {
     let client: LifeCastAPIClient
     let onUploadReady: () -> Void
 
+    @State private var selectedPickerItem: PhotosPickerItem?
+    @State private var selectedUploadVideo: SelectedUploadVideo?
     @State private var state: UploadFlowState = .idle
     @State private var uploadProgress: Double = 0
     @State private var uploadSessionId: UUID?
@@ -1190,6 +1289,25 @@ struct UploadCreateView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Upload state machine demo")
                     .font(.headline)
+
+                PhotosPicker(
+                    selection: $selectedPickerItem,
+                    matching: .videos,
+                    photoLibrary: .shared()
+                ) {
+                    Label(selectedUploadVideo == nil ? "Select Video" : "Change Video", systemImage: "video.badge.plus")
+                }
+                .buttonStyle(.bordered)
+
+                if let selectedUploadVideo {
+                    Text("Selected: \(selectedUploadVideo.fileName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No video selected")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 statusPill
 
@@ -1245,6 +1363,11 @@ struct UploadCreateView: View {
             }
             .padding(16)
             .navigationTitle("Create")
+            .onChange(of: selectedPickerItem) { _, newValue in
+                Task {
+                    await loadSelectedVideo(from: newValue)
+                }
+            }
         }
     }
 
@@ -1273,16 +1396,23 @@ struct UploadCreateView: View {
         errorText = ""
         uploadProgress = 0
         state = .created
-        statusText = "Fetching source video..."
+        statusText = "Preparing selected video..."
 
         do {
-            let sampleData = try await client.downloadDevSampleVideo()
+            guard let selectedUploadVideo else {
+                throw NSError(
+                    domain: "LifeCastUpload",
+                    code: -2,
+                    userInfo: [NSLocalizedDescriptionKey: "Select a video first"]
+                )
+            }
+
             uploadProgress = 0.2
             statusText = "Creating upload session..."
             let create = try await client.createUploadSession(
-                fileName: sampleData.fileName,
-                contentType: sampleData.contentType,
-                fileSizeBytes: sampleData.data.count,
+                fileName: selectedUploadVideo.fileName,
+                contentType: selectedUploadVideo.contentType,
+                fileSizeBytes: selectedUploadVideo.data.count,
                 idempotencyKey: "ios-upload-create-\(UUID().uuidString)"
             )
             uploadSessionId = create.upload_session_id
@@ -1303,16 +1433,16 @@ struct UploadCreateView: View {
             if uploadURL.host == "localhost" || uploadURL.host == "127.0.0.1" {
                 let uploaded = try await client.uploadBinary(
                     uploadURL: uploadURL,
-                    data: sampleData.data,
-                    contentType: sampleData.contentType
+                    data: selectedUploadVideo.data,
+                    contentType: selectedUploadVideo.contentType
                 )
                 uploadedStorageKey = uploaded.storage_object_key
                 uploadedHash = uploaded.content_hash_sha256
             } else {
                 try await client.uploadBinaryDirect(
                     uploadURL: uploadURL,
-                    data: sampleData.data,
-                    contentType: sampleData.contentType
+                    data: selectedUploadVideo.data,
+                    contentType: selectedUploadVideo.contentType
                 )
                 uploadedStorageKey = "cloudflare://direct-upload/\(create.upload_session_id.uuidString)"
                 uploadedHash = uniquePseudoSha256()
@@ -1421,10 +1551,50 @@ struct UploadCreateView: View {
         errorText = ""
     }
 
+    private func loadSelectedVideo(from pickerItem: PhotosPickerItem?) async {
+        guard let pickerItem else { return }
+        do {
+            guard let data = try await pickerItem.loadTransferable(type: Data.self) else {
+                throw NSError(
+                    domain: "LifeCastUpload",
+                    code: -3,
+                    userInfo: [NSLocalizedDescriptionKey: "Could not read selected video data"]
+                )
+            }
+
+            let fileName = pickerItem.itemIdentifier.map { "\($0).mov" } ?? "selected-video.mov"
+            let contentType = pickerItem.supportedContentTypes.first?.preferredMIMEType ?? UTType.movie.preferredMIMEType ?? "video/quicktime"
+
+            await MainActor.run {
+                selectedUploadVideo = SelectedUploadVideo(
+                    data: data,
+                    fileName: fileName,
+                    contentType: contentType
+                )
+                state = .idle
+                statusText = "Ready to upload selected video"
+                errorText = ""
+            }
+        } catch {
+            await MainActor.run {
+                selectedUploadVideo = nil
+                state = .failed
+                statusText = "Video selection failed"
+                errorText = error.localizedDescription
+            }
+        }
+    }
+
     private func uniquePseudoSha256() -> String {
         let base = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         return base + base
     }
+}
+
+private struct SelectedUploadVideo {
+    let data: Data
+    let fileName: String
+    let contentType: String
 }
 
 private let sampleProjects: [FeedProjectSummary] = [
