@@ -769,6 +769,7 @@ struct PostedVideosListView: View {
     let errorText: String
     let onRefreshVideos: () -> Void
     @State private var selectedVideo: MyVideo?
+    @State private var thumbnailCacheBust = UUID().uuidString
 
     private var newestFirstVideos: [MyVideo] {
         videos.sorted { lhs, rhs in
@@ -783,6 +784,7 @@ struct PostedVideosListView: View {
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Button("Refresh") {
+                    thumbnailCacheBust = UUID().uuidString
                     onRefreshVideos()
                 }
                 .font(.caption)
@@ -810,7 +812,7 @@ struct PostedVideosListView: View {
                                 selectedVideo = video
                             } label: {
                                 ZStack(alignment: .bottomLeading) {
-                                    if let thumbnail = video.thumbnail_url, let thumbnailURL = URL(string: thumbnail) {
+                                    if let thumbnail = video.thumbnail_url, let thumbnailURL = thumbnailURL(base: thumbnail) {
                                         AsyncImage(url: thumbnailURL) { image in
                                             image
                                                 .resizable()
@@ -870,6 +872,14 @@ struct PostedVideosListView: View {
                 }
             )
         }
+    }
+
+    private func thumbnailURL(base: String) -> URL? {
+        guard var components = URLComponents(string: base) else { return nil }
+        var items = components.queryItems ?? []
+        items.append(URLQueryItem(name: "cb", value: thumbnailCacheBust))
+        components.queryItems = items
+        return components.url
     }
 }
 

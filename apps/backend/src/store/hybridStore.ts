@@ -2094,7 +2094,7 @@ export class HybridStore {
         status: row.status,
         fileName: row.file_name,
         playbackUrl: `${publicBaseUrl}/v1/videos/${row.video_id}/playback`,
-        thumbnailUrl: row.thumbnail_url ?? undefined,
+        thumbnailUrl: `${publicBaseUrl}/v1/videos/${row.video_id}/thumbnail`,
         createdAt: toIso(row.created_at),
       })) satisfies CreatorVideoRecord[];
     } finally {
@@ -2163,6 +2163,69 @@ export class HybridStore {
         contentType: row.content_type || "video/mp4",
         absolutePath: resolve(LOCAL_VIDEO_ROOT, row.origin_object_key),
       };
+    } finally {
+      client.release();
+    }
+  }
+
+  async getVideoThumbnailById(videoId: string) {
+    if (!hasDb() || !dbPool) {
+      return memory.getThumbnailByVideoId(videoId);
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const result = await client.query<{
+        video_id: string;
+        status: UploadSession["status"];
+        thumbnail_url: string | null;
+        provider_upload_id: string | null;
+      }>(
+        `
+        select
+          va.video_id,
+          va.status,
+          va.thumbnail_url,
+          vus.provider_upload_id
+        from video_assets va
+        join video_upload_sessions vus on vus.id = va.upload_session_id
+        where va.video_id = $1
+      `,
+        [videoId],
+      );
+      if (result.rowCount === 0) return null;
+      const row = result.rows[0];
+      if (row.status !== "ready") return null;
+
+      if (row.thumbnail_url && /^https?:\/\//.test(row.thumbnail_url)) {
+        return {
+          videoId: row.video_id,
+          status: row.status,
+          externalThumbnailUrl: row.thumbnail_url,
+        };
+      }
+
+      if (hasCloudflareStreamConfig() && row.provider_upload_id) {
+        const details = await getCloudflareVideoDetails(row.provider_upload_id);
+        if (details?.thumbnail) {
+          await client.query(
+            `
+            update video_assets
+            set thumbnail_url = $2,
+                manifest_url = coalesce(manifest_url, $3),
+                updated_at = now()
+            where video_id = $1
+          `,
+            [row.video_id, details.thumbnail, details.playbackUrl ?? details.preview ?? null],
+          );
+          return {
+            videoId: row.video_id,
+            status: row.status,
+            externalThumbnailUrl: details.thumbnail,
+          };
+        }
+      }
+      return null;
     } finally {
       client.release();
     }

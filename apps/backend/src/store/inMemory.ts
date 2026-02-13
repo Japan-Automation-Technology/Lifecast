@@ -96,6 +96,10 @@ export class InMemoryStore {
     return null;
   }
 
+  getThumbnailByVideoId(_videoId: string) {
+    return null;
+  }
+
   deleteCreatorVideo(_creatorUserId: string, _videoId: string) {
     return "not_found" as const;
   }

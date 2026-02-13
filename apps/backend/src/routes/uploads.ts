@@ -277,6 +277,19 @@ export async function registerUploadRoutes(app: FastifyInstance) {
     return reply.send(createReadStream(absolutePath));
   });
 
+  app.get("/v1/videos/:videoId/thumbnail", async (req, reply) => {
+    const videoId = (req.params as { videoId: string }).videoId;
+    if (!z.string().uuid().safeParse(videoId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid video id"));
+    }
+
+    const thumbnail = await store.getVideoThumbnailById(videoId);
+    if (!thumbnail || thumbnail.status !== "ready" || !thumbnail.externalThumbnailUrl) {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Video thumbnail not ready"));
+    }
+    return reply.redirect(thumbnail.externalThumbnailUrl);
+  });
+
   app.delete("/v1/videos/:videoId", async (req, reply) => {
     const videoId = (req.params as { videoId: string }).videoId;
     if (!z.string().uuid().safeParse(videoId).success) {
