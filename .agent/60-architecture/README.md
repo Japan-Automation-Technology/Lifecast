@@ -14,5 +14,6 @@ Key files:
 - `openapi-draft.yaml`
 - `db-schema-draft.sql`
 - `security-and-compliance.md`
+- `video-ingest-delivery-foundation.md`
 
-Last updated: 2026-02-12
+Last updated: 2026-02-13

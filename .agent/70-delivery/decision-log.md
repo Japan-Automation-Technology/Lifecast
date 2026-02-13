@@ -61,6 +61,10 @@
 - Outbox delivery attempt logging added with retry metadata (`outbox_delivery_attempts`).
 - Ops queue status endpoint added for backlog observability (`GET /v1/ops/queues`).
 - Delivery runbooks baseline added for webhook/dispute/upload/notification incidents.
+- Video ingest/delivery foundation frozen for early parallel development (`video-ingest-delivery-foundation.md`):
+  - publish-first async processing (`processing` -> `ready`)
+  - HLS/CMAF packaging baseline
+  - cost guardrails (prefetch cap, bitrate cap, priority processing)
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`
@@ -79,4 +83,4 @@ Cross-reference:
 - `../50-data-analytics/logging-retention.md`
 - `./m1-execution-tickets.md`
 
-Last updated: 2026-02-12
+Last updated: 2026-02-13

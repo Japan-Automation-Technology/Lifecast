@@ -75,6 +75,14 @@ BE-009: Notification event queue
 - Start with push/in-app/email/ops channels and retries.
 Status: in progress (worker + ops queue status API + outbox delivery attempts logging implemented; provider-specific delivery adapters pending)
 
+BE-010: Video ingest and delivery foundation
+- Extend upload flow to async processing architecture:
+  - multipart/chunk-aware ingest completion event
+  - `video_assets` / `video_renditions` / `video_processing_jobs` persistence
+  - worker scaffold for `probe -> transcode -> package -> ready`
+- Keep publish-first UX: accept upload quickly, show `processing`, promote to `ready` asynchronously.
+Status: in progress (architecture/spec frozen in `60-architecture/video-ingest-delivery-foundation.md`; implementation pending)
+
 ## Data/analytics tickets
 
 DA-001: Event contract validator
@@ -110,6 +118,7 @@ iOS-003: Upload reliability UX
 - Implement resumable upload with state machine parity:
   - created -> uploading -> processing -> ready | failed
 - Show retry path for failed and stuck processing.
+Status: in progress (backend-aligned architecture frozen; UI implementation pending)
 
 ## Cross-cutting tickets
 
