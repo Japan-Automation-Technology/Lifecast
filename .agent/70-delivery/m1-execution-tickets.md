@@ -16,7 +16,7 @@ Status snapshot:
   - Upload sessions: in progress (DB-backed create/complete/get implemented).
   - Notification queue: in progress (DB enqueue + worker dequeue skeleton implemented).
   - Migration packaging: completed (`0001` + `0002` + `0003` + `0004` applied).
-- Mobile/web client implementation: pending.
+- Mobile/web client implementation: in progress (iOS M1 UI shell implemented).
 - Mobile UI wireflow: completed and frozen (`40-mvp-spec/ui-m1-wireflow.md`).
 
 ## Backend tickets
@@ -99,10 +99,12 @@ DA-003: Cost guardrail jobs
 iOS-001: Feed and support flow
 - Implement feed interactions and support CTA pipeline to checkout handoff.
 - Render policy snapshot in confirmation card.
+Status: completed for M1 demo shell (4 tabs, vertical feed swipe, creator profile transition, support modal sequence, policy confirm card)
 
 iOS-002: Support status and notifications
 - Poll canonical support status endpoint after return flow.
 - Surface payment success/refund/campaign updates according to matrix.
+Status: in progress (post-checkout canonical support polling implemented in iOS demo flow; notification surfaces pending)
 
 iOS-003: Upload reliability UX
 - Implement resumable upload with state machine parity:
@@ -135,4 +137,4 @@ Definition of done (M1):
 - Payout and dispute SLA fields are queryable.
 - Funnel events are complete and dashboard-ready.
 
-Last updated: 2026-02-12
+Last updated: 2026-02-13
