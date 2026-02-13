@@ -14,10 +14,17 @@ export class InMemoryStore {
     id: string;
     creatorUserId: string;
     title: string;
+    subtitle: string | null;
+    imageUrl: string | null;
+    category: string | null;
+    location: string | null;
     status: string;
     goalAmountMinor: number;
     currency: string;
+    durationDays: number | null;
     deadlineAt: string;
+    description: string | null;
+    urls: string[];
     createdAt: string;
     minimumPlan: {
       id: string;
@@ -25,7 +32,14 @@ export class InMemoryStore {
       priceMinor: number;
       rewardSummary: string;
       currency: string;
-    };
+    } | null;
+    plans: {
+      id: string;
+      name: string;
+      priceMinor: number;
+      rewardSummary: string;
+      currency: string;
+    }[];
   }>();
 
   prepareSupport(input: { projectId: string; planId: string; quantity: number }) {
@@ -105,36 +119,52 @@ export class InMemoryStore {
   createProjectForCreator(input: {
     creatorUserId: string;
     title: string;
+    subtitle: string | null;
+    imageUrl: string | null;
+    category: string | null;
+    location: string | null;
     goalAmountMinor: number;
     currency: string;
+    durationDays: number | null;
     deadlineAt: string;
-    minimumPlan: {
+    description: string | null;
+    urls: string[];
+    plans: {
       name: string;
       priceMinor: number;
       rewardSummary: string;
       currency: string;
-    };
+    }[];
   }) {
     const existing = Array.from(this.projectsById.values()).find(
       (p) => p.creatorUserId === input.creatorUserId && (p.status === "active" || p.status === "draft"),
     );
     if (existing) return null;
+    const plans = input.plans.map((plan) => ({
+      id: randomUUID(),
+      name: plan.name,
+      priceMinor: plan.priceMinor,
+      rewardSummary: plan.rewardSummary,
+      currency: plan.currency,
+    }));
     const project = {
       id: randomUUID(),
       creatorUserId: input.creatorUserId,
       title: input.title,
+      subtitle: input.subtitle,
+      imageUrl: input.imageUrl,
+      category: input.category,
+      location: input.location,
       status: "active",
       goalAmountMinor: input.goalAmountMinor,
       currency: input.currency,
+      durationDays: input.durationDays,
       deadlineAt: input.deadlineAt,
+      description: input.description,
+      urls: input.urls,
       createdAt: nowIso(),
-      minimumPlan: {
-        id: randomUUID(),
-        name: input.minimumPlan.name,
-        priceMinor: input.minimumPlan.priceMinor,
-        rewardSummary: input.minimumPlan.rewardSummary,
-        currency: input.minimumPlan.currency,
-      },
+      minimumPlan: plans[0] ?? null,
+      plans,
     };
     this.projectsById.set(project.id, project);
     return project;

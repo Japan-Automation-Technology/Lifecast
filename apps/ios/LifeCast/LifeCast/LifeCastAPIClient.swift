@@ -82,12 +82,20 @@ struct MyProjectResult: Decodable {
     let id: UUID
     let creator_user_id: UUID
     let title: String
+    let subtitle: String?
+    let image_url: String?
+    let category: String?
+    let location: String?
     let status: String
     let goal_amount_minor: Int
     let currency: String
+    let duration_days: Int?
     let deadline_at: String
+    let description: String?
+    let urls: [String]?
     let created_at: String
     let minimum_plan: ProjectPlanResult?
+    let plans: [ProjectPlanResult]?
 }
 
 struct MyProjectsResult: Decodable {
@@ -95,7 +103,7 @@ struct MyProjectsResult: Decodable {
 }
 
 struct CreateProjectRequest: Encodable {
-    struct MinimumPlan: Encodable {
+    struct Plan: Encodable {
         let name: String
         let price_minor: Int
         let reward_summary: String
@@ -103,10 +111,17 @@ struct CreateProjectRequest: Encodable {
     }
 
     let title: String
+    let subtitle: String?
+    let image_url: String?
+    let category: String?
+    let location: String?
     let goal_amount_minor: Int
     let currency: String
-    let deadline_at: String
-    let minimum_plan: MinimumPlan
+    let project_duration_days: Int?
+    let deadline_at: String?
+    let description: String?
+    let urls: [String]?
+    let plans: [Plan]
 }
 
 struct DevSampleVideo {
@@ -246,24 +261,31 @@ final class LifeCastAPIClient {
 
     func createProject(
         title: String,
+        subtitle: String?,
+        imageURL: String?,
+        category: String?,
+        location: String?,
         goalAmountMinor: Int,
         currency: String,
-        deadlineAtISO8601: String,
-        minimumPlanName: String,
-        minimumPlanPriceMinor: Int,
-        minimumPlanRewardSummary: String
+        projectDurationDays: Int?,
+        deadlineAtISO8601: String?,
+        description: String?,
+        urls: [String],
+        plans: [CreateProjectRequest.Plan]
     ) async throws -> MyProjectResult {
         let body = CreateProjectRequest(
             title: title,
+            subtitle: subtitle,
+            image_url: imageURL,
+            category: category,
+            location: location,
             goal_amount_minor: goalAmountMinor,
             currency: currency,
+            project_duration_days: projectDurationDays,
             deadline_at: deadlineAtISO8601,
-            minimum_plan: .init(
-                name: minimumPlanName,
-                price_minor: minimumPlanPriceMinor,
-                reward_summary: minimumPlanRewardSummary,
-                currency: currency
-            )
+            description: description,
+            urls: urls,
+            plans: plans
         )
         return try await send(path: "/v1/projects", method: "POST", body: body, idempotencyKey: "ios-project-create-\(UUID().uuidString)")
     }

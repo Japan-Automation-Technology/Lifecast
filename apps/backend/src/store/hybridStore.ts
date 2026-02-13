@@ -1736,14 +1736,21 @@ export class HybridStore {
       const project = await client.query<{
         id: string;
         title: string;
+        subtitle: string | null;
+        cover_image_url: string | null;
+        category: string | null;
+        location: string | null;
         status: string;
         goal_amount_minor: string | number;
         currency: string;
+        duration_days: number | null;
         deadline_at: string | Date;
+        description: string | null;
+        external_urls: unknown;
         created_at: string | Date;
       }>(
         `
-        select id, title, status, goal_amount_minor, currency, deadline_at, created_at
+        select id, title, subtitle, cover_image_url, category, location, status, goal_amount_minor, currency, duration_days, deadline_at, description, external_urls, created_at
         from projects
         where creator_user_id = $1
           and status in ('active', 'draft')
@@ -1755,7 +1762,7 @@ export class HybridStore {
       if (project.rowCount === 0) return null;
       const row = project.rows[0];
 
-      const minimumPlan = await client.query<{
+      const plans = await client.query<{
         id: string;
         name: string;
         price_minor: string | number;
@@ -1767,29 +1774,35 @@ export class HybridStore {
         from project_plans
         where project_id = $1
         order by price_minor asc, created_at asc
-        limit 1
       `,
         [row.id],
       );
+      const mappedPlans = plans.rows.map((plan) => ({
+        id: plan.id,
+        name: plan.name,
+        priceMinor: Number(plan.price_minor),
+        rewardSummary: plan.reward_summary,
+        currency: plan.currency,
+      }));
 
       return {
         id: row.id,
         creatorUserId,
         title: row.title,
+        subtitle: row.subtitle,
+        imageUrl: row.cover_image_url,
+        category: row.category,
+        location: row.location,
         status: row.status,
         goalAmountMinor: Number(row.goal_amount_minor),
         currency: row.currency,
+        durationDays: row.duration_days,
         deadlineAt: toIso(row.deadline_at),
+        description: row.description,
+        urls: Array.isArray(row.external_urls) ? (row.external_urls as string[]) : [],
         createdAt: toIso(row.created_at),
-        minimumPlan: minimumPlan.rowCount
-          ? {
-              id: minimumPlan.rows[0].id,
-              name: minimumPlan.rows[0].name,
-              priceMinor: Number(minimumPlan.rows[0].price_minor),
-              rewardSummary: minimumPlan.rows[0].reward_summary,
-              currency: minimumPlan.rows[0].currency,
-            }
-          : null,
+        minimumPlan: mappedPlans[0] ?? null,
+        plans: mappedPlans,
       };
     } finally {
       client.release();
@@ -1806,14 +1819,21 @@ export class HybridStore {
       const projects = await client.query<{
         id: string;
         title: string;
+        subtitle: string | null;
+        cover_image_url: string | null;
+        category: string | null;
+        location: string | null;
         status: string;
         goal_amount_minor: string | number;
         currency: string;
+        duration_days: number | null;
         deadline_at: string | Date;
+        description: string | null;
+        external_urls: unknown;
         created_at: string | Date;
       }>(
         `
-        select id, title, status, goal_amount_minor, currency, deadline_at, created_at
+        select id, title, subtitle, cover_image_url, category, location, status, goal_amount_minor, currency, duration_days, deadline_at, description, external_urls, created_at
         from projects
         where creator_user_id = $1
         order by
@@ -1825,7 +1845,7 @@ export class HybridStore {
 
       const rows = [];
       for (const row of projects.rows) {
-        const minimumPlan = await client.query<{
+        const plans = await client.query<{
           id: string;
           name: string;
           price_minor: string | number;
@@ -1837,29 +1857,35 @@ export class HybridStore {
           from project_plans
           where project_id = $1
           order by price_minor asc, created_at asc
-          limit 1
         `,
           [row.id],
         );
+        const mappedPlans = plans.rows.map((plan) => ({
+          id: plan.id,
+          name: plan.name,
+          priceMinor: Number(plan.price_minor),
+          rewardSummary: plan.reward_summary,
+          currency: plan.currency,
+        }));
 
         rows.push({
           id: row.id,
           creatorUserId,
           title: row.title,
+          subtitle: row.subtitle,
+          imageUrl: row.cover_image_url,
+          category: row.category,
+          location: row.location,
           status: row.status,
           goalAmountMinor: Number(row.goal_amount_minor),
           currency: row.currency,
+          durationDays: row.duration_days,
           deadlineAt: toIso(row.deadline_at),
+          description: row.description,
+          urls: Array.isArray(row.external_urls) ? (row.external_urls as string[]) : [],
           createdAt: toIso(row.created_at),
-          minimumPlan: minimumPlan.rowCount
-            ? {
-                id: minimumPlan.rows[0].id,
-                name: minimumPlan.rows[0].name,
-                priceMinor: Number(minimumPlan.rows[0].price_minor),
-                rewardSummary: minimumPlan.rows[0].reward_summary,
-                currency: minimumPlan.rows[0].currency,
-              }
-            : null,
+          minimumPlan: mappedPlans[0] ?? null,
+          plans: mappedPlans,
         });
       }
       return rows;
@@ -1871,15 +1897,22 @@ export class HybridStore {
   async createProjectForCreator(input: {
     creatorUserId: string;
     title: string;
+    subtitle: string | null;
+    imageUrl: string | null;
+    category: string | null;
+    location: string | null;
     goalAmountMinor: number;
     currency: string;
+    durationDays: number | null;
     deadlineAt: string;
-    minimumPlan: {
+    description: string | null;
+    urls: string[];
+    plans: {
       name: string;
       priceMinor: number;
       rewardSummary: string;
       currency: string;
-    };
+    }[];
   }) {
     if (!hasDb() || !dbPool) {
       return memory.createProjectForCreator(input);
@@ -1898,45 +1931,76 @@ export class HybridStore {
       }
 
       const projectId = randomUUID();
-      const planId = randomUUID();
-
       await client.query(
         `
         insert into projects (
-          id, creator_user_id, title, status, goal_amount_minor, currency, deadline_at, created_at, updated_at
+          id, creator_user_id, title, subtitle, cover_image_url, category, location, status, goal_amount_minor, currency, duration_days, deadline_at, description, external_urls, created_at, updated_at
         )
-        values ($1, $2, $3, 'active', $4, $5, $6, now(), now())
+        values ($1, $2, $3, $4, $5, $6, $7, 'active', $8, $9, $10, $11, $12, $13::jsonb, now(), now())
       `,
-        [projectId, input.creatorUserId, input.title, input.goalAmountMinor, input.currency, input.deadlineAt],
+        [
+          projectId,
+          input.creatorUserId,
+          input.title,
+          input.subtitle,
+          input.imageUrl,
+          input.category,
+          input.location,
+          input.goalAmountMinor,
+          input.currency,
+          input.durationDays,
+          input.deadlineAt,
+          input.description,
+          JSON.stringify(input.urls),
+        ],
       );
 
-      await client.query(
-        `
-        insert into project_plans (
-          id, project_id, name, reward_summary, is_physical_reward, price_minor, currency, created_at, updated_at
-        )
-        values ($1, $2, $3, $4, true, $5, $6, now(), now())
-      `,
-        [planId, projectId, input.minimumPlan.name, input.minimumPlan.rewardSummary, input.minimumPlan.priceMinor, input.minimumPlan.currency],
-      );
+      const createdPlans: {
+        id: string;
+        name: string;
+        priceMinor: number;
+        rewardSummary: string;
+        currency: string;
+      }[] = [];
+      for (const plan of input.plans) {
+        const planId = randomUUID();
+        await client.query(
+          `
+          insert into project_plans (
+            id, project_id, name, reward_summary, is_physical_reward, price_minor, currency, created_at, updated_at
+          )
+          values ($1, $2, $3, $4, true, $5, $6, now(), now())
+        `,
+          [planId, projectId, plan.name, plan.rewardSummary, plan.priceMinor, plan.currency],
+        );
+        createdPlans.push({
+          id: planId,
+          name: plan.name,
+          priceMinor: plan.priceMinor,
+          rewardSummary: plan.rewardSummary,
+          currency: plan.currency,
+        });
+      }
 
       await client.query("commit");
       return {
         id: projectId,
         creatorUserId: input.creatorUserId,
         title: input.title,
+        subtitle: input.subtitle,
+        imageUrl: input.imageUrl,
+        category: input.category,
+        location: input.location,
         status: "active",
         goalAmountMinor: input.goalAmountMinor,
         currency: input.currency,
+        durationDays: input.durationDays,
         deadlineAt: input.deadlineAt,
+        description: input.description,
+        urls: input.urls,
         createdAt: new Date().toISOString(),
-        minimumPlan: {
-          id: planId,
-          name: input.minimumPlan.name,
-          priceMinor: input.minimumPlan.priceMinor,
-          rewardSummary: input.minimumPlan.rewardSummary,
-          currency: input.minimumPlan.currency,
-        },
+        minimumPlan: createdPlans[0] ?? null,
+        plans: createdPlans,
       };
     } catch (error) {
       await client.query("rollback");

@@ -730,11 +730,17 @@ struct ProjectPageView: View {
     @State private var projectLoading = false
     @State private var projectErrorText = ""
     @State private var projectTitle = ""
+    @State private var projectSubtitle = ""
+    @State private var projectImageURL = ""
+    @State private var projectCategory = ""
+    @State private var projectLocation = ""
     @State private var projectGoalMinor = "500000"
     @State private var projectDurationDays = "14"
-    @State private var minimumPlanName = "Early Support"
-    @State private var minimumPlanPriceMinor = "1000"
-    @State private var minimumPlanRewardSummary = "Prototype update + thank-you card"
+    @State private var projectDescription = ""
+    @State private var projectUrlsText = ""
+    @State private var projectPlanDrafts: [ProjectPlanDraft] = [
+        ProjectPlanDraft(name: "Early Support", priceMinorText: "1000", rewardSummary: "Prototype update + thank-you card")
+    ]
     @State private var showEndConfirm = false
 
     var body: some View {
@@ -744,11 +750,26 @@ struct ProjectPageView: View {
                     Text("Project page")
                         .font(.headline)
                     Text(myProject.title)
+                    if let subtitle = myProject.subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                     ProgressView(value: 1.0)
                         .tint(.green)
                     Text("Goal: \(myProject.goal_amount_minor) \(myProject.currency)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if let category = myProject.category, !category.isEmpty {
+                        Text("Category: \(category)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let location = myProject.location, !location.isEmpty {
+                        Text("Location: \(location)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     if let minimumPlan = myProject.minimum_plan {
                         Text("Min plan: \(minimumPlan.name) / \(minimumPlan.price_minor) \(minimumPlan.currency)")
                             .font(.caption)
@@ -806,6 +827,11 @@ struct ProjectPageView: View {
                             Text("Goal: \(project.goal_amount_minor) \(project.currency)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            if let category = project.category, !category.isEmpty {
+                                Text("Category: \(category)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                             Text("Created: \(project.created_at)")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
@@ -846,19 +872,52 @@ struct ProjectPageView: View {
                 .font(.headline)
             TextField("Project title", text: $projectTitle)
                 .textFieldStyle(.roundedBorder)
+            TextField("Subtitle (optional)", text: $projectSubtitle)
+                .textFieldStyle(.roundedBorder)
+            TextField("Image URL (optional)", text: $projectImageURL)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.URL)
+            TextField("Category", text: $projectCategory)
+                .textFieldStyle(.roundedBorder)
+            TextField("Location", text: $projectLocation)
+                .textFieldStyle(.roundedBorder)
             TextField("Goal amount (JPY)", text: $projectGoalMinor)
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.numberPad)
             TextField("Duration days", text: $projectDurationDays)
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.numberPad)
-            TextField("Minimum plan name", text: $minimumPlanName)
+            TextField("Description (optional)", text: $projectDescription, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
-            TextField("Minimum plan price (JPY)", text: $minimumPlanPriceMinor)
+            TextField("URLs (optional, comma separated)", text: $projectUrlsText)
                 .textFieldStyle(.roundedBorder)
-                .keyboardType(.numberPad)
-            TextField("Minimum plan reward summary", text: $minimumPlanRewardSummary)
-                .textFieldStyle(.roundedBorder)
+
+            Text("Plans & returns")
+                .font(.subheadline.weight(.semibold))
+            ForEach($projectPlanDrafts) { $plan in
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Plan name", text: $plan.name)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Price (JPY)", text: $plan.priceMinorText)
+                        .textFieldStyle(.roundedBorder)
+                        .keyboardType(.numberPad)
+                    TextField("Reward summary", text: $plan.rewardSummary)
+                        .textFieldStyle(.roundedBorder)
+                    if projectPlanDrafts.count > 1 {
+                        Button("Remove plan", role: .destructive) {
+                            projectPlanDrafts.removeAll { $0.id == plan.id }
+                        }
+                        .font(.caption)
+                    }
+                }
+                .padding(8)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            Button("Add plan") {
+                projectPlanDrafts.append(ProjectPlanDraft(name: "", priceMinorText: "", rewardSummary: ""))
+            }
+            .buttonStyle(.bordered)
 
             Button(projectLoading ? "Creating..." : buttonTitle) {
                 Task {
@@ -900,21 +959,39 @@ struct ProjectPageView: View {
             guard let days = Int(projectDurationDays), days >= 1 else {
                 throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Duration must be at least 1 day"])
             }
-            guard let minPrice = Int(minimumPlanPriceMinor), minPrice > 0 else {
-                throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Minimum plan price must be positive"])
-            }
+            let urls = projectUrlsText
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
 
-            let deadline = Calendar.current.date(byAdding: .day, value: days, to: Date()) ?? Date().addingTimeInterval(14 * 86400)
-            let iso = ISO8601DateFormatter().string(from: deadline)
+            let parsedPlans = try projectPlanDrafts.map { draft -> CreateProjectRequest.Plan in
+                let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let reward = draft.rewardSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else {
+                    throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Plan name is required"])
+                }
+                guard !reward.isEmpty else {
+                    throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Plan reward summary is required"])
+                }
+                guard let price = Int(draft.priceMinorText), price > 0 else {
+                    throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Plan price must be positive"])
+                }
+                return .init(name: name, price_minor: price, reward_summary: reward, currency: "JPY")
+            }
 
             let project = try await client.createProject(
                 title: projectTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+                subtitle: projectSubtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : projectSubtitle.trimmingCharacters(in: .whitespacesAndNewlines),
+                imageURL: projectImageURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : projectImageURL.trimmingCharacters(in: .whitespacesAndNewlines),
+                category: projectCategory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : projectCategory.trimmingCharacters(in: .whitespacesAndNewlines),
+                location: projectLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : projectLocation.trimmingCharacters(in: .whitespacesAndNewlines),
                 goalAmountMinor: goal,
                 currency: "JPY",
-                deadlineAtISO8601: iso,
-                minimumPlanName: minimumPlanName.trimmingCharacters(in: .whitespacesAndNewlines),
-                minimumPlanPriceMinor: minPrice,
-                minimumPlanRewardSummary: minimumPlanRewardSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+                projectDurationDays: days,
+                deadlineAtISO8601: nil,
+                description: projectDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : projectDescription.trimmingCharacters(in: .whitespacesAndNewlines),
+                urls: urls,
+                plans: parsedPlans
             )
             await MainActor.run {
                 myProject = project
@@ -1933,6 +2010,13 @@ private struct SelectedUploadVideo {
     let data: Data
     let fileName: String
     let contentType: String
+}
+
+private struct ProjectPlanDraft: Identifiable {
+    let id = UUID()
+    var name: String
+    var priceMinorText: String
+    var rewardSummary: String
 }
 
 private let sampleProjects: [FeedProjectSummary] = [

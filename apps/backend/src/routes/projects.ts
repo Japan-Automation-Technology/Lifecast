@@ -5,15 +5,36 @@ import { store } from "../store/hybridStore.js";
 
 const createProjectBody = z.object({
   title: z.string().min(1).max(120),
-  goal_amount_minor: z.number().int().positive(),
+  subtitle: z.string().max(160).optional(),
+  image_url: z.string().url().max(2048).optional(),
+  category: z.string().max(80).optional(),
+  location: z.string().max(120).optional(),
+  goal_amount_minor: z.number().int().positive().optional(),
+  funding_goal_minor: z.number().int().positive().optional(),
   currency: z.string().length(3).default("JPY"),
-  deadline_at: z.string().datetime(),
-  minimum_plan: z.object({
-    name: z.string().min(1).max(60),
-    price_minor: z.number().int().positive(),
-    reward_summary: z.string().min(1).max(500),
-    currency: z.string().length(3).default("JPY"),
-  }),
+  project_duration_days: z.number().int().min(1).max(365).optional(),
+  deadline_at: z.string().datetime().optional(),
+  description: z.string().max(5000).optional(),
+  urls: z.array(z.string().url().max(2048)).max(10).optional(),
+  minimum_plan: z
+    .object({
+      name: z.string().min(1).max(60),
+      price_minor: z.number().int().positive(),
+      reward_summary: z.string().min(1).max(500),
+      currency: z.string().length(3).default("JPY"),
+    })
+    .optional(),
+  plans: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(60),
+        price_minor: z.number().int().positive(),
+        reward_summary: z.string().min(1).max(500),
+        currency: z.string().length(3).default("JPY"),
+      }),
+    )
+    .max(10)
+    .optional(),
 });
 
 const endProjectBody = z
@@ -38,17 +59,38 @@ export async function registerProjectRoutes(app: FastifyInstance) {
           name: string;
           priceMinor: number;
           rewardSummary: string;
-          currency: string;
+        currency: string;
         }
       | null;
+    plans: {
+      id: string;
+      name: string;
+      priceMinor: number;
+      rewardSummary: string;
+      currency: string;
+    }[];
+    subtitle: string | null;
+    imageUrl: string | null;
+    category: string | null;
+    location: string | null;
+    description: string | null;
+    urls: string[];
+    durationDays: number | null;
   }) => ({
     id: project.id,
     creator_user_id: project.creatorUserId,
     title: project.title,
+    subtitle: project.subtitle,
+    image_url: project.imageUrl,
+    category: project.category,
+    location: project.location,
     status: project.status,
     goal_amount_minor: project.goalAmountMinor,
     currency: project.currency,
+    duration_days: project.durationDays,
     deadline_at: project.deadlineAt,
+    description: project.description,
+    urls: project.urls,
     created_at: project.createdAt,
     minimum_plan: project.minimumPlan
       ? {
@@ -59,6 +101,13 @@ export async function registerProjectRoutes(app: FastifyInstance) {
           currency: project.minimumPlan.currency,
         }
       : null,
+    plans: project.plans.map((plan) => ({
+      id: plan.id,
+      name: plan.name,
+      price_minor: plan.priceMinor,
+      reward_summary: plan.rewardSummary,
+      currency: plan.currency,
+    })),
   });
 
   app.get("/v1/me/project", async (_req, reply) => {
@@ -94,19 +143,44 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     if (!creatorUserId) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "LIFECAST_DEV_CREATOR_USER_ID is not configured"));
     }
+    const goalAmountMinor = body.data.goal_amount_minor ?? body.data.funding_goal_minor;
+    if (!goalAmountMinor || goalAmountMinor <= 0) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "goal_amount_minor or funding_goal_minor is required"));
+    }
 
     const project = await store.createProjectForCreator({
       creatorUserId,
       title: body.data.title,
-      goalAmountMinor: body.data.goal_amount_minor,
+      subtitle: body.data.subtitle?.trim() || null,
+      imageUrl: body.data.image_url?.trim() || null,
+      category: body.data.category?.trim() || null,
+      location: body.data.location?.trim() || null,
+      goalAmountMinor,
       currency: body.data.currency.toUpperCase(),
-      deadlineAt: body.data.deadline_at,
-      minimumPlan: {
-        name: body.data.minimum_plan.name,
-        priceMinor: body.data.minimum_plan.price_minor,
-        rewardSummary: body.data.minimum_plan.reward_summary,
-        currency: body.data.minimum_plan.currency.toUpperCase(),
-      },
+      deadlineAt:
+        body.data.deadline_at ??
+        new Date(Date.now() + (body.data.project_duration_days ?? 14) * 24 * 60 * 60 * 1000).toISOString(),
+      durationDays: body.data.project_duration_days ?? null,
+      description: body.data.description?.trim() || null,
+      urls: body.data.urls ?? [],
+      plans: (body.data.plans && body.data.plans.length > 0
+        ? body.data.plans
+        : body.data.minimum_plan
+          ? [body.data.minimum_plan]
+          : [
+              {
+                name: "Early Support",
+                price_minor: 1000,
+                reward_summary: "Support this project",
+                currency: body.data.currency,
+              },
+            ]
+      ).map((plan) => ({
+        name: plan.name,
+        priceMinor: plan.price_minor,
+        rewardSummary: plan.reward_summary,
+        currency: plan.currency.toUpperCase(),
+      })),
     });
 
     if (!project) {
