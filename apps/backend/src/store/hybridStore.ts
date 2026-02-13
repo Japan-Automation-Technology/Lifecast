@@ -1747,10 +1747,42 @@ export class HybridStore {
         deadline_at: string | Date;
         description: string | null;
         external_urls: unknown;
+        funded_amount_minor: string | number;
+        supporter_count: string | number;
+        support_count_total: string | number;
         created_at: string | Date;
       }>(
         `
-        select id, title, subtitle, cover_image_url, category, location, status, goal_amount_minor, currency, duration_days, deadline_at, description, external_urls, created_at
+        select
+          id,
+          title,
+          subtitle,
+          cover_image_url,
+          category,
+          location,
+          status,
+          goal_amount_minor,
+          currency,
+          duration_days,
+          deadline_at,
+          description,
+          external_urls,
+          coalesce((
+            select sum(st.amount_minor)
+            from support_transactions st
+            where st.project_id = projects.id and st.status = 'succeeded'
+          ), 0) as funded_amount_minor,
+          coalesce((
+            select count(*)
+            from support_transactions st
+            where st.project_id = projects.id and st.status = 'succeeded'
+          ), 0) as supporter_count,
+          coalesce((
+            select count(*)
+            from support_transactions st
+            where st.project_id = projects.id
+          ), 0) as support_count_total,
+          created_at
         from projects
         where creator_user_id = $1
           and status in ('active', 'draft')
@@ -1767,10 +1799,12 @@ export class HybridStore {
         name: string;
         price_minor: string | number;
         reward_summary: string;
+        description: string | null;
+        image_url: string | null;
         currency: string;
       }>(
         `
-        select id, name, price_minor, reward_summary, currency
+        select id, name, price_minor, reward_summary, description, image_url, currency
         from project_plans
         where project_id = $1
         order by price_minor asc, created_at asc
@@ -1782,6 +1816,8 @@ export class HybridStore {
         name: plan.name,
         priceMinor: Number(plan.price_minor),
         rewardSummary: plan.reward_summary,
+        description: plan.description,
+        imageUrl: plan.image_url,
         currency: plan.currency,
       }));
 
@@ -1800,6 +1836,9 @@ export class HybridStore {
         deadlineAt: toIso(row.deadline_at),
         description: row.description,
         urls: Array.isArray(row.external_urls) ? (row.external_urls as string[]) : [],
+        fundedAmountMinor: Number(row.funded_amount_minor),
+        supporterCount: Number(row.supporter_count),
+        supportCountTotal: Number(row.support_count_total),
         createdAt: toIso(row.created_at),
         minimumPlan: mappedPlans[0] ?? null,
         plans: mappedPlans,
@@ -1830,10 +1869,42 @@ export class HybridStore {
         deadline_at: string | Date;
         description: string | null;
         external_urls: unknown;
+        funded_amount_minor: string | number;
+        supporter_count: string | number;
+        support_count_total: string | number;
         created_at: string | Date;
       }>(
         `
-        select id, title, subtitle, cover_image_url, category, location, status, goal_amount_minor, currency, duration_days, deadline_at, description, external_urls, created_at
+        select
+          id,
+          title,
+          subtitle,
+          cover_image_url,
+          category,
+          location,
+          status,
+          goal_amount_minor,
+          currency,
+          duration_days,
+          deadline_at,
+          description,
+          external_urls,
+          coalesce((
+            select sum(st.amount_minor)
+            from support_transactions st
+            where st.project_id = projects.id and st.status = 'succeeded'
+          ), 0) as funded_amount_minor,
+          coalesce((
+            select count(*)
+            from support_transactions st
+            where st.project_id = projects.id and st.status = 'succeeded'
+          ), 0) as supporter_count,
+          coalesce((
+            select count(*)
+            from support_transactions st
+            where st.project_id = projects.id
+          ), 0) as support_count_total,
+          created_at
         from projects
         where creator_user_id = $1
         order by
@@ -1850,10 +1921,12 @@ export class HybridStore {
           name: string;
           price_minor: string | number;
           reward_summary: string;
+          description: string | null;
+          image_url: string | null;
           currency: string;
         }>(
           `
-          select id, name, price_minor, reward_summary, currency
+          select id, name, price_minor, reward_summary, description, image_url, currency
           from project_plans
           where project_id = $1
           order by price_minor asc, created_at asc
@@ -1865,6 +1938,8 @@ export class HybridStore {
           name: plan.name,
           priceMinor: Number(plan.price_minor),
           rewardSummary: plan.reward_summary,
+          description: plan.description,
+          imageUrl: plan.image_url,
           currency: plan.currency,
         }));
 
@@ -1883,6 +1958,9 @@ export class HybridStore {
           deadlineAt: toIso(row.deadline_at),
           description: row.description,
           urls: Array.isArray(row.external_urls) ? (row.external_urls as string[]) : [],
+          fundedAmountMinor: Number(row.funded_amount_minor),
+          supporterCount: Number(row.supporter_count),
+          supportCountTotal: Number(row.support_count_total),
           createdAt: toIso(row.created_at),
           minimumPlan: mappedPlans[0] ?? null,
           plans: mappedPlans,
@@ -1911,6 +1989,8 @@ export class HybridStore {
       name: string;
       priceMinor: number;
       rewardSummary: string;
+      description: string | null;
+      imageUrl: string | null;
       currency: string;
     }[];
   }) {
@@ -1960,6 +2040,8 @@ export class HybridStore {
         name: string;
         priceMinor: number;
         rewardSummary: string;
+        description: string | null;
+        imageUrl: string | null;
         currency: string;
       }[] = [];
       for (const plan of input.plans) {
@@ -1967,17 +2049,19 @@ export class HybridStore {
         await client.query(
           `
           insert into project_plans (
-            id, project_id, name, reward_summary, is_physical_reward, price_minor, currency, created_at, updated_at
+            id, project_id, name, reward_summary, description, image_url, is_physical_reward, price_minor, currency, created_at, updated_at
           )
-          values ($1, $2, $3, $4, true, $5, $6, now(), now())
+          values ($1, $2, $3, $4, $5, $6, true, $7, $8, now(), now())
         `,
-          [planId, projectId, plan.name, plan.rewardSummary, plan.priceMinor, plan.currency],
+          [planId, projectId, plan.name, plan.rewardSummary, plan.description, plan.imageUrl, plan.priceMinor, plan.currency],
         );
         createdPlans.push({
           id: planId,
           name: plan.name,
           priceMinor: plan.priceMinor,
           rewardSummary: plan.rewardSummary,
+          description: plan.description,
+          imageUrl: plan.imageUrl,
           currency: plan.currency,
         });
       }
@@ -1998,6 +2082,9 @@ export class HybridStore {
         deadlineAt: input.deadlineAt,
         description: input.description,
         urls: input.urls,
+        fundedAmountMinor: 0,
+        supporterCount: 0,
+        supportCountTotal: 0,
         createdAt: new Date().toISOString(),
         minimumPlan: createdPlans[0] ?? null,
         plans: createdPlans,
@@ -2034,7 +2121,7 @@ export class HybridStore {
         await client.query("rollback");
         return "forbidden" as const;
       }
-      if (existing.rows[0].status !== "draft") {
+      if (existing.rows[0].status !== "draft" && existing.rows[0].status !== "active") {
         await client.query("rollback");
         return "invalid_state" as const;
       }

@@ -1,7 +1,12 @@
 import type { FastifyInstance } from "fastify";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { extname, resolve } from "node:path";
 import { z } from "zod";
 import { fail, ok } from "../response.js";
 import { store } from "../store/hybridStore.js";
+
+const PROJECT_IMAGE_ROOT = resolve(process.cwd(), ".data/project-images");
 
 const createProjectBody = z.object({
   title: z.string().min(1).max(120),
@@ -21,6 +26,8 @@ const createProjectBody = z.object({
       name: z.string().min(1).max(60),
       price_minor: z.number().int().positive(),
       reward_summary: z.string().min(1).max(500),
+      description: z.string().max(1000).optional(),
+      image_url: z.string().url().max(2048).optional(),
       currency: z.string().length(3).default("JPY"),
     })
     .optional(),
@@ -30,6 +37,8 @@ const createProjectBody = z.object({
         name: z.string().min(1).max(60),
         price_minor: z.number().int().positive(),
         reward_summary: z.string().min(1).max(500),
+        description: z.string().max(1000).optional(),
+        image_url: z.string().url().max(2048).optional(),
         currency: z.string().length(3).default("JPY"),
       }),
     )
@@ -42,6 +51,12 @@ const endProjectBody = z
     reason: z.string().min(1).max(500).optional(),
   })
   .optional();
+
+const projectImageUploadBody = z.object({
+  file_name: z.string().max(255).optional(),
+  content_type: z.string().max(100),
+  data_base64: z.string().min(1),
+});
 
 export async function registerProjectRoutes(app: FastifyInstance) {
   const mapProject = (project: {
@@ -59,7 +74,9 @@ export async function registerProjectRoutes(app: FastifyInstance) {
           name: string;
           priceMinor: number;
           rewardSummary: string;
-        currency: string;
+          description: string | null;
+          imageUrl: string | null;
+          currency: string;
         }
       | null;
     plans: {
@@ -67,6 +84,8 @@ export async function registerProjectRoutes(app: FastifyInstance) {
       name: string;
       priceMinor: number;
       rewardSummary: string;
+      description: string | null;
+      imageUrl: string | null;
       currency: string;
     }[];
     subtitle: string | null;
@@ -76,6 +95,9 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     description: string | null;
     urls: string[];
     durationDays: number | null;
+    fundedAmountMinor: number;
+    supporterCount: number;
+    supportCountTotal: number;
   }) => ({
     id: project.id,
     creator_user_id: project.creatorUserId,
@@ -91,6 +113,9 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     deadline_at: project.deadlineAt,
     description: project.description,
     urls: project.urls,
+    funded_amount_minor: project.fundedAmountMinor,
+    supporter_count: project.supporterCount,
+    support_count_total: project.supportCountTotal,
     created_at: project.createdAt,
     minimum_plan: project.minimumPlan
       ? {
@@ -98,6 +123,8 @@ export async function registerProjectRoutes(app: FastifyInstance) {
           name: project.minimumPlan.name,
           price_minor: project.minimumPlan.priceMinor,
           reward_summary: project.minimumPlan.rewardSummary,
+          description: project.minimumPlan.description,
+          image_url: project.minimumPlan.imageUrl,
           currency: project.minimumPlan.currency,
         }
       : null,
@@ -106,8 +133,80 @@ export async function registerProjectRoutes(app: FastifyInstance) {
       name: plan.name,
       price_minor: plan.priceMinor,
       reward_summary: plan.rewardSummary,
+      description: plan.description,
+      image_url: plan.imageUrl,
       currency: plan.currency,
     })),
+  });
+
+  app.post("/v1/projects/images", async (req, reply) => {
+    const body = projectImageUploadBody.safeParse(req.body);
+    if (!body.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid image payload"));
+    }
+
+    const contentType = body.data.content_type.toLowerCase().trim();
+    if (!contentType.startsWith("image/")) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "content_type must be image/*"));
+    }
+
+    let data: Buffer;
+    try {
+      data = Buffer.from(body.data.data_base64, "base64");
+    } catch {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid base64 image data"));
+    }
+
+    if (data.length === 0 || data.length > 8 * 1024 * 1024) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Image size must be between 1 byte and 8MB"));
+    }
+
+    const ext = (() => {
+      if (contentType === "image/jpeg" || contentType === "image/jpg") return "jpg";
+      if (contentType === "image/png") return "png";
+      if (contentType === "image/webp") return "webp";
+      if (contentType === "image/heic") return "heic";
+      return "bin";
+    })();
+
+    const imageId = randomUUID();
+    const fileName = `${imageId}.${ext}`;
+    const filePath = resolve(PROJECT_IMAGE_ROOT, fileName);
+    await mkdir(PROJECT_IMAGE_ROOT, { recursive: true });
+    await writeFile(filePath, data);
+
+    const imageUrl = `${req.protocol}://${req.headers.host}/v1/projects/images/${fileName}`;
+    return reply.send(ok({ image_url: imageUrl }));
+  });
+
+  app.get("/v1/projects/images/:fileName", async (req, reply) => {
+    const fileName = (req.params as { fileName: string }).fileName;
+    const isValid = /^[0-9a-fA-F-]+\.(jpg|jpeg|png|webp|heic|bin)$/.test(fileName);
+    if (!isValid) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid file name"));
+    }
+
+    const filePath = resolve(PROJECT_IMAGE_ROOT, fileName);
+    let binary: Buffer;
+    try {
+      binary = await readFile(filePath);
+    } catch {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Image not found"));
+    }
+
+    const ext = extname(fileName).toLowerCase();
+    const responseType =
+      ext === ".jpg" || ext === ".jpeg"
+        ? "image/jpeg"
+        : ext === ".png"
+          ? "image/png"
+          : ext === ".webp"
+            ? "image/webp"
+            : ext === ".heic"
+              ? "image/heic"
+              : "application/octet-stream";
+    reply.type(responseType);
+    return reply.send(binary);
   });
 
   app.get("/v1/me/project", async (_req, reply) => {
@@ -179,6 +278,8 @@ export async function registerProjectRoutes(app: FastifyInstance) {
         name: plan.name,
         priceMinor: plan.price_minor,
         rewardSummary: plan.reward_summary,
+        description: plan.description?.trim() || null,
+        imageUrl: plan.image_url?.trim() || null,
         currency: plan.currency.toUpperCase(),
       })),
     });
@@ -208,7 +309,9 @@ export async function registerProjectRoutes(app: FastifyInstance) {
       return reply.code(403).send(fail("FORBIDDEN", "You cannot delete this project"));
     }
     if (deleted === "invalid_state") {
-      return reply.code(409).send(fail("STATE_CONFLICT", "Only draft projects can be deleted. End active projects first."));
+      return reply
+        .code(409)
+        .send(fail("STATE_CONFLICT", "Only active/draft projects with zero supports can be deleted."));
     }
     if (deleted === "has_supports") {
       return reply.code(409).send(fail("STATE_CONFLICT", "Projects with supports cannot be deleted"));

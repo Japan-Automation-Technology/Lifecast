@@ -2,6 +2,7 @@ import SwiftUI
 import AVKit
 import PhotosUI
 import UniformTypeIdentifiers
+import UIKit
 
 enum FeedMode: String, CaseIterable {
     case forYou = "For You"
@@ -677,7 +678,7 @@ struct MeTabView: View {
                         .frame(width: 90, height: 90)
                     Text("@lifecast_maker")
                         .font(.headline)
-                    Text("Supported by 218 users")
+                    Text("Creator profile")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -731,17 +732,23 @@ struct ProjectPageView: View {
     @State private var projectErrorText = ""
     @State private var projectTitle = ""
     @State private var projectSubtitle = ""
-    @State private var projectImageURL = ""
+    @State private var projectImageSelection: SelectedProjectImage?
+    @State private var projectCoverPickerItem: PhotosPickerItem?
     @State private var projectCategory = ""
     @State private var projectLocation = ""
     @State private var projectGoalMinor = "500000"
     @State private var projectDurationDays = "14"
     @State private var projectDescription = ""
-    @State private var projectUrlsText = ""
+    @State private var projectUrlDraft = ""
+    @State private var projectUrls: [String] = []
     @State private var projectPlanDrafts: [ProjectPlanDraft] = [
         ProjectPlanDraft(name: "Early Support", priceMinorText: "1000", rewardSummary: "Prototype update + thank-you card")
     ]
+    @State private var planImagePickerItems: [UUID: PhotosPickerItem] = [:]
+    @State private var selectedPlanImages: [UUID: SelectedProjectImage] = [:]
     @State private var showEndConfirm = false
+    @State private var projectCreateInFlight = false
+    @State private var projectCreateStatusText = ""
 
     var body: some View {
         ScrollView {
@@ -749,35 +756,7 @@ struct ProjectPageView: View {
                 if let myProject {
                     Text("Project page")
                         .font(.headline)
-                    Text(myProject.title)
-                    if let subtitle = myProject.subtitle, !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    ProgressView(value: 1.0)
-                        .tint(.green)
-                    Text("Goal: \(myProject.goal_amount_minor) \(myProject.currency)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if let category = myProject.category, !category.isEmpty {
-                        Text("Category: \(category)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let location = myProject.location, !location.isEmpty {
-                        Text("Location: \(location)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let minimumPlan = myProject.minimum_plan {
-                        Text("Min plan: \(minimumPlan.name) / \(minimumPlan.price_minor) \(minimumPlan.currency)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text("Status: \(myProject.status.uppercased())")
-                        .font(.caption2)
-                        .foregroundStyle(myProject.status == "stopped" ? .orange : .secondary)
+                    projectDetailsView(project: myProject)
                     if myProject.status == "stopped" {
                         Text("Ended project. Refund policy: full refund.")
                             .font(.caption)
@@ -785,19 +764,19 @@ struct ProjectPageView: View {
                     }
 
                     if myProject.status == "active" || myProject.status == "draft" {
-                        Button("End Project", role: .destructive) {
-                            showEndConfirm = true
-                        }
-                        .buttonStyle(.bordered)
-                    }
-
-                    if myProject.status == "draft" {
-                        Button("Delete Project", role: .destructive) {
-                            Task {
-                                await deleteProject(projectId: myProject.id)
+                        if myProject.support_count_total == 0 {
+                            Button("Delete Project", role: .destructive) {
+                                Task {
+                                    await deleteProject(projectId: myProject.id)
+                                }
                             }
+                            .buttonStyle(.bordered)
+                        } else {
+                            Button("End Project", role: .destructive) {
+                                showEndConfirm = true
+                            }
+                            .buttonStyle(.bordered)
                         }
-                        .buttonStyle(.bordered)
                     }
                     if myProject.status == "stopped" || myProject.status == "failed" || myProject.status == "succeeded" {
                         Divider().padding(.vertical, 4)
@@ -847,6 +826,15 @@ struct ProjectPageView: View {
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
+
+                if projectCreateInFlight {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ProgressView()
+                        Text(projectCreateStatusText.isEmpty ? "Creating project..." : projectCreateStatusText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding(16)
         }
@@ -864,48 +852,159 @@ struct ProjectPageView: View {
         } message: {
             Text("Project will be marked as ended. Refund policy is fixed to full refund.")
         }
+        .onChange(of: projectCoverPickerItem) { _, newValue in
+            Task {
+                await loadProjectCover(from: newValue)
+            }
+        }
     }
 
     private func createProjectSection(buttonTitle: String) -> some View {
         Group {
             Text("Create your project")
                 .font(.headline)
-            TextField("Project title", text: $projectTitle)
-                .textFieldStyle(.roundedBorder)
-            TextField("Subtitle (optional)", text: $projectSubtitle)
-                .textFieldStyle(.roundedBorder)
-            TextField("Image URL (optional)", text: $projectImageURL)
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.URL)
-            TextField("Category", text: $projectCategory)
-                .textFieldStyle(.roundedBorder)
-            TextField("Location", text: $projectLocation)
-                .textFieldStyle(.roundedBorder)
-            TextField("Goal amount (JPY)", text: $projectGoalMinor)
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.numberPad)
-            TextField("Duration days", text: $projectDurationDays)
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.numberPad)
-            TextField("Description (optional)", text: $projectDescription, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-            TextField("URLs (optional, comma separated)", text: $projectUrlsText)
-                .textFieldStyle(.roundedBorder)
+
+            labeledField("Project Title", isOptional: false) {
+                TextField("", text: $projectTitle)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            labeledField("Subtitle", isOptional: true) {
+                TextField("", text: $projectSubtitle)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            labeledField("Project Image", isOptional: true) {
+                VStack(alignment: .leading, spacing: 8) {
+                    PhotosPicker(selection: $projectCoverPickerItem, matching: .images, photoLibrary: .shared()) {
+                        Label(projectImageSelection == nil ? "Select Cover Image" : "Change Cover Image", systemImage: "photo")
+                    }
+                    .buttonStyle(.bordered)
+                    if let projectImageSelection, let uiImage = UIImage(data: projectImageSelection.data) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(height: 140)
+                            .frame(maxWidth: .infinity)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        Text("No image selected. A default placeholder will be used.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            labeledField("Category", isOptional: true) {
+                TextField("", text: $projectCategory)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            labeledField("Location", isOptional: true) {
+                TextField("", text: $projectLocation)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            labeledField("Funding Goal (JPY)", isOptional: false) {
+                TextField("", text: $projectGoalMinor)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.numberPad)
+            }
+
+            labeledField("Project Duration (days)", isOptional: false) {
+                TextField("", text: $projectDurationDays)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.numberPad)
+            }
+
+            labeledField("Description", isOptional: true) {
+                TextField("", text: $projectDescription, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            labeledField("URLs", isOptional: true) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        TextField("", text: $projectUrlDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                        Button("Add") {
+                            addProjectURL()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(projectUrls.count >= 3)
+                    }
+                    Text("Up to 3 URLs")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if !projectUrls.isEmpty {
+                        ForEach(Array(projectUrls.enumerated()), id: \.offset) { index, url in
+                            HStack {
+                                Text(url)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                Spacer()
+                                Button("Remove", role: .destructive) {
+                                    projectUrls.remove(at: index)
+                                }
+                                .font(.caption)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+            }
 
             Text("Plans & returns")
                 .font(.subheadline.weight(.semibold))
-            ForEach($projectPlanDrafts) { $plan in
+            ForEach(Array(projectPlanDrafts.indices), id: \.self) { index in
                 VStack(alignment: .leading, spacing: 6) {
-                    TextField("Plan name", text: $plan.name)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("Price (JPY)", text: $plan.priceMinorText)
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.numberPad)
-                    TextField("Reward summary", text: $plan.rewardSummary)
-                        .textFieldStyle(.roundedBorder)
-                    if projectPlanDrafts.count > 1 {
+                    labeledField("Plan Name", isOptional: false) {
+                        TextField("", text: $projectPlanDrafts[index].name)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    labeledField("Price (JPY)", isOptional: false) {
+                        TextField("", text: $projectPlanDrafts[index].priceMinorText)
+                            .textFieldStyle(.roundedBorder)
+                            .keyboardType(.numberPad)
+                    }
+                    labeledField("Reward Summary", isOptional: false) {
+                        TextField("", text: $projectPlanDrafts[index].rewardSummary)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    labeledField("Plan Description", isOptional: true) {
+                        TextField("", text: $projectPlanDrafts[index].description, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    labeledField("Plan Image", isOptional: true) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            PhotosPicker(selection: planPickerBinding(for: projectPlanDrafts[index].id), matching: .images, photoLibrary: .shared()) {
+                                Label(selectedPlanImages[projectPlanDrafts[index].id] == nil ? "Select Plan Image" : "Change Plan Image", systemImage: "photo.on.rectangle")
+                            }
+                            .buttonStyle(.bordered)
+                            if let selected = selectedPlanImages[projectPlanDrafts[index].id], let uiImage = UIImage(data: selected.data) {
+                                Image(uiImage: uiImage)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(height: 120)
+                                    .frame(maxWidth: .infinity)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            } else {
+                                Text("No image selected")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    if index > 0 {
                         Button("Remove plan", role: .destructive) {
-                            projectPlanDrafts.removeAll { $0.id == plan.id }
+                            let planId = projectPlanDrafts[index].id
+                            projectPlanDrafts.remove(at: index)
+                            selectedPlanImages[planId] = nil
+                            planImagePickerItems[planId] = nil
                         }
                         .font(.caption)
                     }
@@ -915,17 +1014,250 @@ struct ProjectPageView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             Button("Add plan") {
-                projectPlanDrafts.append(ProjectPlanDraft(name: "", priceMinorText: "", rewardSummary: ""))
+                let draft = ProjectPlanDraft(name: "", priceMinorText: "", rewardSummary: "")
+                projectPlanDrafts.append(draft)
             }
             .buttonStyle(.bordered)
 
-            Button(projectLoading ? "Creating..." : buttonTitle) {
+            Button(projectCreateInFlight ? "Creating..." : buttonTitle) {
                 Task {
                     await createProject()
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(projectLoading)
+            .disabled(projectCreateInFlight)
+        }
+    }
+
+    private func projectDetailsView(project: MyProjectResult) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            let funded = max(project.funded_amount_minor, 0)
+            let goal = max(project.goal_amount_minor, 1)
+            let progress = min(Double(funded) / Double(goal), 1.0)
+            let percent = Int((Double(funded) / Double(goal)) * 100.0)
+
+            if let imageURL = project.image_url, let url = URL(string: imageURL) {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    Rectangle().fill(Color.secondary.opacity(0.15))
+                }
+                .frame(height: 180)
+                .frame(maxWidth: .infinity)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+
+            Text(project.title)
+                .font(.title3.weight(.semibold))
+            if let subtitle = project.subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            ProgressView(value: progress)
+                .tint(progress >= 1 ? .green : .blue)
+            Text("\(percent)% funded (\(funded.formatted()) / \(goal.formatted()) \(project.currency))")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text("Supporters: \(project.supporter_count)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Text("Goal: \(project.goal_amount_minor.formatted()) \(project.currency)")
+                .font(.footnote)
+            if let days = project.duration_days {
+                Text("Duration: \(days) days")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Text("Deadline: \(project.deadline_at)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            if let category = project.category, !category.isEmpty {
+                Text("Category: \(category)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if let location = project.location, !location.isEmpty {
+                Text("Location: \(location)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if let description = project.description, !description.isEmpty {
+                Text(description)
+                    .font(.footnote)
+            }
+
+            if let urls = project.urls, !urls.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("URLs")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(urls, id: \.self) { raw in
+                        if let url = URL(string: raw) {
+                            Link(raw, destination: url)
+                                .font(.caption)
+                                .lineLimit(1)
+                        } else {
+                            Text(raw)
+                                .font(.caption)
+                        }
+                    }
+                }
+            }
+
+            Text("Plans")
+                .font(.subheadline.weight(.semibold))
+            ForEach(project.plans ?? [], id: \.id) { plan in
+                VStack(alignment: .leading, spacing: 6) {
+                    if let image = plan.image_url, let url = URL(string: image) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .empty:
+                                Rectangle().fill(Color.secondary.opacity(0.15))
+                            case .success(let image):
+                                image.resizable().scaledToFill()
+                            case .failure:
+                                Rectangle().fill(Color.secondary.opacity(0.15))
+                            @unknown default:
+                                Rectangle().fill(Color.secondary.opacity(0.15))
+                            }
+                        }
+                        .frame(height: 120)
+                        .frame(maxWidth: .infinity)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.gray.opacity(0.25))
+                            Image(systemName: "photo")
+                                .font(.system(size: 28, weight: .semibold))
+                                .foregroundStyle(.gray.opacity(0.9))
+                        }
+                        .frame(height: 120)
+                        .frame(maxWidth: .infinity)
+                    }
+                    Text(plan.name)
+                        .font(.subheadline.weight(.semibold))
+                    Text("\(plan.price_minor.formatted()) \(plan.currency)")
+                        .font(.caption)
+                    Text(plan.reward_summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let description = plan.description, !description.isEmpty {
+                        Text(description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(10)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+
+            Text("Status: \(project.status.uppercased())")
+                .font(.caption2)
+                .foregroundStyle(project.status == "stopped" ? .orange : .secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func labeledField<Content: View>(_ title: String, isOptional: Bool, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(isOptional ? "\(title) (optional)" : title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            content()
+        }
+    }
+
+    private func addProjectURL() {
+        let trimmed = projectUrlDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard projectUrls.count < 3 else {
+            projectErrorText = "You can add up to 3 URLs"
+            return
+        }
+        guard let normalized = normalizeURLString(trimmed) else {
+            projectErrorText = "URL format is invalid"
+            return
+        }
+        if !projectUrls.contains(normalized) {
+            projectUrls.append(normalized)
+        }
+        projectUrlDraft = ""
+        projectErrorText = ""
+    }
+
+    private func normalizeURLString(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let withScheme = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        guard let components = URLComponents(string: withScheme) else { return nil }
+        guard let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        guard let host = components.host, !host.isEmpty else { return nil }
+        return components.url?.absoluteString
+    }
+
+    private func planPickerBinding(for planId: UUID) -> Binding<PhotosPickerItem?> {
+        Binding(
+            get: { planImagePickerItems[planId] },
+            set: { newValue in
+                planImagePickerItems[planId] = newValue
+                guard let newValue else {
+                    selectedPlanImages[planId] = nil
+                    return
+                }
+                Task {
+                    await loadPlanImage(from: newValue, planId: planId)
+                }
+            }
+        )
+    }
+
+    private func loadProjectCover(from pickerItem: PhotosPickerItem?) async {
+        guard let pickerItem else {
+            projectImageSelection = nil
+            return
+        }
+        do {
+            guard let data = try await pickerItem.loadTransferable(type: Data.self) else {
+                throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Could not read selected image"])
+            }
+            let fileName = pickerItem.itemIdentifier.map { "\($0).jpg" } ?? "project-cover.jpg"
+            let contentType = pickerItem.supportedContentTypes.first?.preferredMIMEType ?? UTType.jpeg.preferredMIMEType ?? "image/jpeg"
+            await MainActor.run {
+                projectImageSelection = SelectedProjectImage(data: data, fileName: fileName, contentType: contentType)
+                projectErrorText = ""
+            }
+        } catch {
+            await MainActor.run {
+                projectImageSelection = nil
+                projectErrorText = error.localizedDescription
+            }
+        }
+    }
+
+    private func loadPlanImage(from pickerItem: PhotosPickerItem, planId: UUID) async {
+        do {
+            guard let data = try await pickerItem.loadTransferable(type: Data.self) else {
+                throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Could not read selected plan image"])
+            }
+            let fileName = pickerItem.itemIdentifier.map { "\($0).jpg" } ?? "plan-image.jpg"
+            let contentType = pickerItem.supportedContentTypes.first?.preferredMIMEType ?? UTType.jpeg.preferredMIMEType ?? "image/jpeg"
+            await MainActor.run {
+                selectedPlanImages[planId] = SelectedProjectImage(data: data, fileName: fileName, contentType: contentType)
+                projectErrorText = ""
+            }
+        } catch {
+            await MainActor.run {
+                selectedPlanImages[planId] = nil
+                projectErrorText = error.localizedDescription
+            }
         }
     }
 
@@ -949,6 +1281,12 @@ struct ProjectPageView: View {
 
     private func createProject() async {
         projectErrorText = ""
+        projectCreateInFlight = true
+        projectCreateStatusText = "Validating input..."
+        defer {
+            projectCreateInFlight = false
+            projectCreateStatusText = ""
+        }
         do {
             guard !projectTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Project title is required"])
@@ -959,10 +1297,39 @@ struct ProjectPageView: View {
             guard let days = Int(projectDurationDays), days >= 1 else {
                 throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Duration must be at least 1 day"])
             }
-            let urls = projectUrlsText
-                .split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
+            let normalizedUrls = try projectUrls.map { raw -> String in
+                guard let normalized = normalizeURLString(raw) else {
+                    throw NSError(
+                        domain: "LifeCastProject",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "URL format is invalid: \(raw)"]
+                    )
+                }
+                return normalized
+            }
+            var imageURL: String?
+            if let cover = projectImageSelection {
+                projectCreateStatusText = "Uploading project image..."
+                imageURL = try await client.uploadProjectImage(
+                    data: cover.data,
+                    fileName: cover.fileName,
+                    contentType: cover.contentType
+                )
+            }
+
+            var uploadedImageMap: [UUID: String] = [:]
+            var imageIndex = 0
+            for draft in projectPlanDrafts {
+                guard let selected = selectedPlanImages[draft.id] else { continue }
+                imageIndex += 1
+                projectCreateStatusText = "Uploading plan image \(imageIndex)..."
+                let uploaded = try await client.uploadProjectImage(
+                    data: selected.data,
+                    fileName: selected.fileName,
+                    contentType: selected.contentType
+                )
+                uploadedImageMap[draft.id] = uploaded
+            }
 
             let parsedPlans = try projectPlanDrafts.map { draft -> CreateProjectRequest.Plan in
                 let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -976,13 +1343,22 @@ struct ProjectPageView: View {
                 guard let price = Int(draft.priceMinorText), price > 0 else {
                     throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Plan price must be positive"])
                 }
-                return .init(name: name, price_minor: price, reward_summary: reward, currency: "JPY")
+                    let desc = draft.description.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return .init(
+                        name: name,
+                        price_minor: price,
+                        reward_summary: reward,
+                        description: desc.isEmpty ? nil : desc,
+                        image_url: uploadedImageMap[draft.id],
+                        currency: "JPY"
+                    )
             }
 
+            projectCreateStatusText = "Creating project..."
             let project = try await client.createProject(
                 title: projectTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                 subtitle: projectSubtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : projectSubtitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                imageURL: projectImageURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : projectImageURL.trimmingCharacters(in: .whitespacesAndNewlines),
+                imageURL: imageURL,
                 category: projectCategory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : projectCategory.trimmingCharacters(in: .whitespacesAndNewlines),
                 location: projectLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : projectLocation.trimmingCharacters(in: .whitespacesAndNewlines),
                 goalAmountMinor: goal,
@@ -990,13 +1366,14 @@ struct ProjectPageView: View {
                 projectDurationDays: days,
                 deadlineAtISO8601: nil,
                 description: projectDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : projectDescription.trimmingCharacters(in: .whitespacesAndNewlines),
-                urls: urls,
+                urls: normalizedUrls,
                 plans: parsedPlans
             )
             await MainActor.run {
                 myProject = project
                 projectHistory = projectHistory.filter { $0.id != project.id }
                 projectErrorText = ""
+                projectCreateStatusText = "Created"
                 onProjectChanged()
             }
         } catch {
@@ -2017,6 +2394,13 @@ private struct ProjectPlanDraft: Identifiable {
     var name: String
     var priceMinorText: String
     var rewardSummary: String
+    var description: String = ""
+}
+
+private struct SelectedProjectImage {
+    let data: Data
+    let fileName: String
+    let contentType: String
 }
 
 private let sampleProjects: [FeedProjectSummary] = [

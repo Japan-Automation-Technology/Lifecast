@@ -75,6 +75,8 @@ struct ProjectPlanResult: Decodable {
     let name: String
     let price_minor: Int
     let reward_summary: String
+    let description: String?
+    let image_url: String?
     let currency: String
 }
 
@@ -93,6 +95,9 @@ struct MyProjectResult: Decodable {
     let deadline_at: String
     let description: String?
     let urls: [String]?
+    let funded_amount_minor: Int
+    let supporter_count: Int
+    let support_count_total: Int
     let created_at: String
     let minimum_plan: ProjectPlanResult?
     let plans: [ProjectPlanResult]?
@@ -107,6 +112,8 @@ struct CreateProjectRequest: Encodable {
         let name: String
         let price_minor: Int
         let reward_summary: String
+        let description: String?
+        let image_url: String?
         let currency: String
     }
 
@@ -122,6 +129,16 @@ struct CreateProjectRequest: Encodable {
     let description: String?
     let urls: [String]?
     let plans: [Plan]
+}
+
+struct UploadProjectImageRequest: Encodable {
+    let file_name: String?
+    let content_type: String
+    let data_base64: String
+}
+
+struct UploadProjectImageResult: Decodable {
+    let image_url: String
 }
 
 struct DevSampleVideo {
@@ -288,6 +305,21 @@ final class LifeCastAPIClient {
             plans: plans
         )
         return try await send(path: "/v1/projects", method: "POST", body: body, idempotencyKey: "ios-project-create-\(UUID().uuidString)")
+    }
+
+    func uploadProjectImage(data: Data, fileName: String?, contentType: String) async throws -> String {
+        let body = UploadProjectImageRequest(
+            file_name: fileName,
+            content_type: contentType,
+            data_base64: data.base64EncodedString()
+        )
+        let result: UploadProjectImageResult = try await send(
+            path: "/v1/projects/images",
+            method: "POST",
+            body: body,
+            idempotencyKey: "ios-project-image-\(UUID().uuidString)"
+        )
+        return result.image_url
     }
 
     func deleteProject(projectId: UUID) async throws {

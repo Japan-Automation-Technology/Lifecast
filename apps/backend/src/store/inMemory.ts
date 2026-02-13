@@ -25,12 +25,17 @@ export class InMemoryStore {
     deadlineAt: string;
     description: string | null;
     urls: string[];
+    fundedAmountMinor: number;
+    supporterCount: number;
+    supportCountTotal: number;
     createdAt: string;
     minimumPlan: {
       id: string;
       name: string;
       priceMinor: number;
       rewardSummary: string;
+      description: string | null;
+      imageUrl: string | null;
       currency: string;
     } | null;
     plans: {
@@ -38,6 +43,8 @@ export class InMemoryStore {
       name: string;
       priceMinor: number;
       rewardSummary: string;
+      description: string | null;
+      imageUrl: string | null;
       currency: string;
     }[];
   }>();
@@ -133,6 +140,8 @@ export class InMemoryStore {
       name: string;
       priceMinor: number;
       rewardSummary: string;
+      description: string | null;
+      imageUrl: string | null;
       currency: string;
     }[];
   }) {
@@ -145,6 +154,8 @@ export class InMemoryStore {
       name: plan.name,
       priceMinor: plan.priceMinor,
       rewardSummary: plan.rewardSummary,
+      description: plan.description,
+      imageUrl: plan.imageUrl,
       currency: plan.currency,
     }));
     const project = {
@@ -162,6 +173,9 @@ export class InMemoryStore {
       deadlineAt: input.deadlineAt,
       description: input.description,
       urls: input.urls,
+      fundedAmountMinor: 0,
+      supporterCount: 0,
+      supportCountTotal: 0,
       createdAt: nowIso(),
       minimumPlan: plans[0] ?? null,
       plans,
@@ -174,7 +188,7 @@ export class InMemoryStore {
     const existing = this.projectsById.get(input.projectId);
     if (!existing) return "not_found" as const;
     if (existing.creatorUserId !== input.creatorUserId) return "forbidden" as const;
-    if (existing.status !== "draft") return "invalid_state" as const;
+    if (existing.status !== "draft" && existing.status !== "active") return "invalid_state" as const;
     this.projectsById.delete(input.projectId);
     return "deleted" as const;
   }
