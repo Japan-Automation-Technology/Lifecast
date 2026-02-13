@@ -795,6 +795,14 @@ struct UploadCreateView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(state == .uploading || state == .processing)
 
+                    Button("Retry") {
+                        Task {
+                            await retryOrResumeFlow()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(uploadSessionId == nil || (state != .failed && state != .processing))
+
                     Button("Reset") {
                         reset()
                     }
@@ -903,6 +911,59 @@ struct UploadCreateView: View {
 
         state = .processing
         statusText = "Still processing (timeout in demo poll window)"
+    }
+
+    private func retryOrResumeFlow() async {
+        guard let uploadSessionId else {
+            errorText = "No upload session to resume"
+            return
+        }
+
+        do {
+            let current = try await client.getUploadSession(uploadSessionId: uploadSessionId)
+            videoId = current.video_id
+            errorText = ""
+
+            if current.status == "ready" {
+                state = .ready
+                statusText = "Upload already ready"
+                uploadProgress = 1
+                return
+            }
+
+            if current.status == "processing" {
+                state = .processing
+                statusText = "Resuming processing poll..."
+                uploadProgress = 1
+                await pollUploadStatus(uploadSessionId: uploadSessionId)
+                return
+            }
+
+            if current.status == "created" || current.status == "uploading" {
+                state = .uploading
+                statusText = "Retrying upload completion..."
+                uploadProgress = 1
+
+                let complete = try await client.completeUploadSession(
+                    uploadSessionId: uploadSessionId,
+                    storageObjectKey: "raw/\(uploadSessionId.uuidString)/source.mp4",
+                    contentHashSha256: uniquePseudoSha256(),
+                    idempotencyKey: "ios-upload-complete-retry-\(UUID().uuidString)"
+                )
+                videoId = complete.video_id
+                state = .processing
+                statusText = "Processing upload..."
+                await pollUploadStatus(uploadSessionId: uploadSessionId)
+                return
+            }
+
+            state = .failed
+            statusText = "Upload cannot be resumed"
+        } catch {
+            state = .failed
+            statusText = "Retry failed"
+            errorText = error.localizedDescription
+        }
     }
 
     private func reset() {

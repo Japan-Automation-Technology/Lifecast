@@ -72,6 +72,11 @@ Recommended installs for this project:
 - `openai-docs` for up-to-date OpenAI/Codex docs lookups.
 - `figma` and `figma-implement-design` only if your design source is Figma.
 - `security-threat-model` before beta launch hardening.
+- `ios-appium-ui-smoke` (local custom skill) for mandatory iOS UI verification:
+  - `/Users/takeshi/.codex/skills/ios-appium-ui-smoke/SKILL.md`
+  - Uses:
+    - `/Users/takeshi/Desktop/lifecast/scripts/appium/ios-smoke.mjs`
+    - `/Users/takeshi/Desktop/lifecast/scripts/appium/ios-upload-reset-screens.mjs`
 
 Notes:
 - Skill listing script from `skill-installer` failed in this environment due local SSL certificate validation issue.

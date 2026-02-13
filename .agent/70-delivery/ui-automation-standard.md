@@ -25,11 +25,16 @@ For any task that changes mobile UI behavior, navigation, or user-visible state:
 
 ## Minimum iOS checklist (per UI-affecting task)
 
-1. Launch simulator and app.
-2. Execute target user flow end-to-end (the changed path).
-3. Verify at least 3 key assertions from spec.
-4. Capture screenshot(s) of final/critical states.
-5. Record outcome in task summary.
+1. Confirm capability/runtime match before session start.
+   - `LIFECAST_CAPABILITIES_CONFIG` points to current target (example: iPhone 17 Pro / iOS 26.2).
+   - `xcrun simctl list devices` includes the capability `appium:udid`.
+2. Launch simulator and app.
+3. Execute target user flow end-to-end (the changed path) via script when available.
+   - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:appium`
+   - `node /Users/takeshi/Desktop/lifecast/scripts/appium/ios-upload-reset-screens.mjs`
+4. Verify at least 3 key assertions from spec.
+5. Capture screenshot(s) of final/critical states.
+6. Record outcome in task summary.
 
 Evidence format (example):
 - `Appium flow`: pass
@@ -45,6 +50,11 @@ Evidence format (example):
 - Appium MCP server relies on:
   - `LIFECAST_CAPABILITIES_CONFIG`
   - `~/.codex/config.toml` `[mcp_servers.appium-mcp]`
+- Fallback/portable Appium client command (no MCP tool wiring required):
+  - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:appium`
+  - script: `/Users/takeshi/Desktop/lifecast/scripts/appium/ios-smoke.mjs`
+  - requires Appium server up at `http://127.0.0.1:4723`:
+    - `appium server -p 4723` (or equivalent)
 
 ## Definition of done addendum (UI tasks)
 
@@ -55,5 +65,6 @@ A UI task is **not done** unless Appium verification evidence is present.
 - Do not rely only on unit tests/typechecks for UI changes.
 - Do not claim simulator behavior unless you actually validated it.
 - If environment is unstable (e.g., appium cache/runtime issue), report the blocker and the exact command/log.
+- If Appium session used old capability/runtime, treat results as invalid and rerun after capability fix.
 
 Last updated: 2026-02-13

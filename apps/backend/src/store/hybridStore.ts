@@ -1745,41 +1745,15 @@ export class HybridStore {
         videoId,
         contentHashSha256,
       } satisfies UploadSession;
-    } catch {
+    } catch (error) {
       await client.query("rollback");
-      // Do not silently translate DB errors into 404. If the session exists, return current canonical state.
-      try {
-        const existing = await client.query<{
-          id: string;
-          status: UploadSession["status"];
-          provider_asset_id: string | null;
-          content_hash_sha256: string | null;
-          created_at: string | Date;
-        }>(
-          `
-          select id, status, provider_asset_id, content_hash_sha256, created_at
-          from video_upload_sessions
-          where id = $1
-        `,
-          [uploadSessionId],
-        );
-
-        if (existing.rowCount && existing.rows[0]) {
-          const row = existing.rows[0];
-          return {
-            uploadSessionId: row.id,
-            status: row.status,
-            videoId: row.provider_asset_id ?? undefined,
-            contentHashSha256: row.content_hash_sha256 ?? undefined,
-            uploadUrl: `https://upload.lifecast.jp/${row.id}`,
-            expiresAt: new Date(new Date(row.created_at).getTime() + 60 * 60 * 1000).toISOString(),
-          } satisfies UploadSession;
-        }
-      } catch {
-        // ignore and fallback below
+      const pgError = error as { code?: string; constraint?: string; message?: string };
+      if (pgError.code === "23505" && pgError.constraint === "uq_upload_hash_per_creator") {
+        const conflict = new Error("Upload content hash already exists for this creator");
+        (conflict as Error & { code: string }).code = "UPLOAD_HASH_CONFLICT";
+        throw conflict;
       }
-
-      return memory.completeUploadSession(uploadSessionId, contentHashSha256, storageObjectKey);
+      throw error;
     } finally {
       client.release();
     }

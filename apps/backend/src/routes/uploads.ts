@@ -81,11 +81,30 @@ export async function registerUploadRoutes(app: FastifyInstance) {
       }
     }
 
-    const session = await store.completeUploadSession(
-      uploadSessionId,
-      body.data.content_hash_sha256,
-      body.data.storage_object_key,
-    );
+    let session;
+    try {
+      session = await store.completeUploadSession(
+        uploadSessionId,
+        body.data.content_hash_sha256,
+        body.data.storage_object_key,
+      );
+    } catch (error) {
+      const maybeCode = (error as { code?: string }).code;
+      if (maybeCode === "UPLOAD_HASH_CONFLICT") {
+        const conflict = fail("STATE_CONFLICT", "Upload hash already exists for this creator");
+        if (idempotencyKey) {
+          await storeIdempotentResponse({
+            routeKey,
+            idempotencyKey,
+            fingerprint,
+            statusCode: 409,
+            payload: conflict,
+          });
+        }
+        return reply.code(409).send(conflict);
+      }
+      throw error;
+    }
     if (!session) {
       const notFound = fail("RESOURCE_NOT_FOUND", "Upload session not found");
       if (idempotencyKey) {
