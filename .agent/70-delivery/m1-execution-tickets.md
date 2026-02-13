@@ -13,7 +13,7 @@ Status snapshot:
   - Payout read model: in progress (DB-backed schedule retrieval + lazy create + release write path implemented).
   - Dispute read/recovery: in progress (DB-backed read + recovery event insert implemented).
   - Moderation report intake: completed for M1 baseline (DB-backed report + trust score trigger + idempotency).
-  - Upload sessions: in progress (DB-backed create/complete/get implemented).
+  - Upload sessions: in progress (DB-backed create/complete/get + async processing foundation implemented).
   - Notification queue: in progress (DB enqueue + worker dequeue skeleton implemented).
   - Migration packaging: completed (`0001` + `0002` + `0003` + `0004` applied).
 - Mobile/web client implementation: in progress (iOS M1 UI shell implemented).
@@ -69,6 +69,7 @@ BE-007: Moderation report intake
 BE-008: Upload session APIs
 - Implement create/complete/get endpoints for upload sessions.
 - Keep dedupe by content hash and timeout fallback handling.
+Status: in progress (create/complete/get implemented with storage key + content hash wiring; dedupe hardening pending)
 
 BE-009: Notification event queue
 - Implement notification event producer for creator/supporter/ops matrix.
@@ -81,7 +82,7 @@ BE-010: Video ingest and delivery foundation
   - `video_assets` / `video_renditions` / `video_processing_jobs` persistence
   - worker scaffold for `probe -> transcode -> package -> ready`
 - Keep publish-first UX: accept upload quickly, show `processing`, promote to `ready` asynchronously.
-Status: in progress (architecture/spec frozen in `60-architecture/video-ingest-delivery-foundation.md`; implementation pending)
+Status: in progress (migration `0006` + upload-complete outbox emit + video processing worker scaffold implemented)
 
 ## Data/analytics tickets
 
@@ -118,7 +119,7 @@ iOS-003: Upload reliability UX
 - Implement resumable upload with state machine parity:
   - created -> uploading -> processing -> ready | failed
 - Show retry path for failed and stuck processing.
-Status: in progress (backend-aligned architecture frozen; UI implementation pending)
+Status: in progress (Create-tab state machine wired to upload create/complete/get; retry and resumable transport pending)
 
 ## Cross-cutting tickets
 
@@ -139,6 +140,11 @@ X-003: Runbook baseline
   - upload processing backlog
   - notification queue backlog
 Status: in progress (`runbooks/` added with four baseline procedures; threshold-based alert automation pending)
+
+X-004: UI automation execution gate
+- For UI-affecting tasks, require Appium-first simulator verification before completion report.
+- Require evidence bundle: commands, assertion checklist, screenshot path.
+Status: completed (policy frozen in `70-delivery/ui-automation-standard.md`)
 
 Definition of done (M1):
 - Core support E2E passes with webhook-authoritative success.

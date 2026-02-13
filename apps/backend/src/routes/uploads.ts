@@ -37,7 +37,11 @@ export async function registerUploadRoutes(app: FastifyInstance) {
       }
     }
 
-    const session = await store.createUploadSession();
+    const session = await store.createUploadSession({
+      fileName: body.data.file_name,
+      contentType: body.data.content_type,
+      fileSizeBytes: body.data.file_size_bytes,
+    });
     const response = ok({
       upload_session_id: session.uploadSessionId,
       status: session.status,
@@ -77,7 +81,11 @@ export async function registerUploadRoutes(app: FastifyInstance) {
       }
     }
 
-    const session = await store.completeUploadSession(uploadSessionId, body.data.content_hash_sha256);
+    const session = await store.completeUploadSession(
+      uploadSessionId,
+      body.data.content_hash_sha256,
+      body.data.storage_object_key,
+    );
     if (!session) {
       const notFound = fail("RESOURCE_NOT_FOUND", "Upload session not found");
       if (idempotencyKey) {

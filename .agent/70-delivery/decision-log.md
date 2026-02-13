@@ -65,6 +65,15 @@
   - publish-first async processing (`processing` -> `ready`)
   - HLS/CMAF packaging baseline
   - cost guardrails (prefetch cap, bitrate cap, priority processing)
+- BE-010 implementation started:
+  - migration `0006_video_pipeline_foundation.sql` added (`video_assets`, `video_renditions`, `video_processing_jobs`)
+  - upload complete now enqueues `video_upload_completed` outbox event
+  - video processing worker scaffold added (`probe -> transcode -> package -> ready`)
+- iOS-003 implementation started:
+  - Create tab now drives upload status state machine using create/complete/get upload APIs.
+- UI automation policy frozen:
+  - Appium-first verification is mandatory for UI-affecting changes.
+  - UI tasks are not considered done without Appium evidence (assertions + screenshot path).
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`

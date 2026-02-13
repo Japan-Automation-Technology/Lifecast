@@ -27,13 +27,18 @@ Current state:
 - Adds outbox transport baseline (`outbox_events` + worker) for server-emitted events.
 - Adds daily analytics views (`analytics_funnel_daily`, `analytics_kpi_daily`) and read APIs.
 - Adds ops queue status API (`GET /v1/ops/queues`) for backlog monitoring.
+- Adds video ingest/delivery foundation (BE-010 baseline):
+  - `video_assets`, `video_renditions`, `video_processing_jobs` migration
+  - upload complete emits `video.upload.completed` outbox event
+  - video processing worker scaffold (`probe -> transcode -> package -> ready`)
 - Shapes and enums follow `packages/contracts/openapi/openapi.yaml`.
-- Ready for BE-001..BE-009 iterative implementation.
+- Ready for BE-001..BE-010 iterative implementation.
 
 Commands:
 - `pnpm dev:backend`
 - `pnpm dev:backend:worker:notifications`
 - `pnpm dev:backend:worker:outbox`
+- `pnpm dev:backend:worker:video-processing`
 - `pnpm typecheck:backend`
 - `pnpm test:backend`
 - `pnpm db:migrate:backend`

@@ -1606,20 +1606,27 @@ export class HybridStore {
     }
   }
 
-  async createUploadSession() {
+  async createUploadSession(input?: { fileName?: string; contentType?: string; fileSizeBytes?: number }) {
     if (!hasDb() || !dbPool) {
-      return memory.createUploadSession();
-    }
-
-    const creatorUserId = process.env.LIFECAST_DEV_CREATOR_USER_ID;
-    if (!creatorUserId) {
-      return memory.createUploadSession();
+      return memory.createUploadSession({ fileName: input?.fileName });
     }
 
     const client = await dbPool.connect();
     try {
       const uploadSessionId = randomUUID();
-      const uploadUrl = `https://upload.lifecast.jp/${uploadSessionId}`;
+      let creatorUserId = process.env.LIFECAST_DEV_CREATOR_USER_ID;
+      if (!creatorUserId) {
+        const fallbackCreator = await client.query<{ id: string }>(`select id from users order by created_at asc limit 1`);
+        creatorUserId = fallbackCreator.rows[0]?.id;
+      }
+      if (!creatorUserId) {
+        return memory.createUploadSession({ fileName: input?.fileName });
+      }
+
+      const safeFileName = input?.fileName?.trim().slice(0, 255) || `upload-${uploadSessionId}.mp4`;
+      const contentType = input?.contentType || "video/mp4";
+      const fileSizeBytes = Math.max(1, Number(input?.fileSizeBytes ?? 1));
+      const uploadUrl = `https://upload.lifecast.jp/${uploadSessionId}/${safeFileName}`;
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
       await client.query(
@@ -1628,9 +1635,9 @@ export class HybridStore {
           id, creator_user_id, status, file_name, content_type, file_size_bytes,
           provider_upload_id, created_at, updated_at
         )
-        values ($1, $2, 'created', $3, 'video/mp4', 1, $4, now(), now())
+        values ($1, $2, 'created', $3, $4, $5, $6, now(), now())
       `,
-        [uploadSessionId, creatorUserId, `upload-${uploadSessionId}.mp4`, uploadSessionId],
+        [uploadSessionId, creatorUserId, safeFileName, contentType, fileSizeBytes, uploadSessionId],
       );
 
       return {
@@ -1640,50 +1647,139 @@ export class HybridStore {
         expiresAt,
       } satisfies UploadSession;
     } catch {
-      return memory.createUploadSession();
+      return memory.createUploadSession({ fileName: input?.fileName });
     } finally {
       client.release();
     }
   }
 
-  async completeUploadSession(uploadSessionId: string, contentHashSha256: string) {
+  async completeUploadSession(uploadSessionId: string, contentHashSha256: string, storageObjectKey?: string) {
     if (!hasDb() || !dbPool) {
-      return memory.completeUploadSession(uploadSessionId, contentHashSha256);
+      return memory.completeUploadSession(uploadSessionId, contentHashSha256, storageObjectKey);
     }
 
     const client = await dbPool.connect();
     try {
+      await client.query("begin");
+      const generatedVideoId = randomUUID();
+      const uploadObjectKey = storageObjectKey || `raw/${uploadSessionId}/source.mp4`;
       const result = await client.query<{
         id: string;
         status: UploadSession["status"];
         provider_asset_id: string | null;
+        creator_user_id: string;
+        storage_object_key: string | null;
       }>(
         `
         update video_upload_sessions
         set status = 'processing',
             content_hash_sha256 = $2,
+            storage_object_key = coalesce($3, storage_object_key),
+            provider_asset_id = coalesce(provider_asset_id, $4),
             processing_started_at = now(),
             processing_deadline_at = now() + interval '30 minutes',
+            completed_at = coalesce(completed_at, now()),
             updated_at = now()
         where id = $1
-        returning id, status, provider_asset_id
+        returning id, status, provider_asset_id, creator_user_id, storage_object_key
       `,
-        [uploadSessionId, contentHashSha256],
+        [uploadSessionId, contentHashSha256, uploadObjectKey, generatedVideoId],
       );
 
       if (result.rowCount === 0) {
-        return null;
+        await client.query("rollback");
+        // If createUploadSession fell back to in-memory, allow complete via same fallback path.
+        return memory.completeUploadSession(uploadSessionId, contentHashSha256, storageObjectKey);
       }
 
       const row = result.rows[0];
+      const videoId = row.provider_asset_id ?? generatedVideoId;
+
+      await client.query(
+        `
+        insert into video_assets (
+          video_id, creator_user_id, upload_session_id, status, origin_object_key, created_at, updated_at
+        )
+        values ($1, $2, $3, 'processing', $4, now(), now())
+        on conflict (video_id)
+        do update set
+          status = 'processing',
+          origin_object_key = coalesce(excluded.origin_object_key, video_assets.origin_object_key),
+          updated_at = now()
+      `,
+        [videoId, row.creator_user_id, row.id, row.storage_object_key ?? uploadObjectKey],
+      );
+
+      await client.query(
+        `
+        insert into video_processing_jobs (id, video_id, stage, status, attempt, run_after, created_at, updated_at)
+        values ($1, $2, 'probe', 'pending', 0, now(), now(), now())
+        on conflict do nothing
+      `,
+        [randomUUID(), videoId],
+      );
+
+      await client.query(
+        `
+        insert into outbox_events (event_id, topic, payload, status, next_attempt_at)
+        values ($1, 'video.upload.completed', $2::jsonb, 'pending', now())
+        on conflict (event_id) do nothing
+      `,
+        [
+          randomUUID(),
+          JSON.stringify({
+            event_name: "video_upload_completed",
+            upload_session_id: row.id,
+            video_id: videoId,
+            creator_user_id: row.creator_user_id,
+            content_hash_sha256: contentHashSha256,
+            occurred_at: new Date().toISOString(),
+          }),
+        ],
+      );
+
+      await client.query("commit");
       return {
         uploadSessionId: row.id,
         status: row.status,
-        videoId: row.provider_asset_id ?? undefined,
+        videoId,
         contentHashSha256,
       } satisfies UploadSession;
     } catch {
-      return memory.completeUploadSession(uploadSessionId, contentHashSha256);
+      await client.query("rollback");
+      // Do not silently translate DB errors into 404. If the session exists, return current canonical state.
+      try {
+        const existing = await client.query<{
+          id: string;
+          status: UploadSession["status"];
+          provider_asset_id: string | null;
+          content_hash_sha256: string | null;
+          created_at: string | Date;
+        }>(
+          `
+          select id, status, provider_asset_id, content_hash_sha256, created_at
+          from video_upload_sessions
+          where id = $1
+        `,
+          [uploadSessionId],
+        );
+
+        if (existing.rowCount && existing.rows[0]) {
+          const row = existing.rows[0];
+          return {
+            uploadSessionId: row.id,
+            status: row.status,
+            videoId: row.provider_asset_id ?? undefined,
+            contentHashSha256: row.content_hash_sha256 ?? undefined,
+            uploadUrl: `https://upload.lifecast.jp/${row.id}`,
+            expiresAt: new Date(new Date(row.created_at).getTime() + 60 * 60 * 1000).toISOString(),
+          } satisfies UploadSession;
+        }
+      } catch {
+        // ignore and fallback below
+      }
+
+      return memory.completeUploadSession(uploadSessionId, contentHashSha256, storageObjectKey);
     } finally {
       client.release();
     }
@@ -1712,7 +1808,8 @@ export class HybridStore {
       );
 
       if (result.rowCount === 0) {
-        return null;
+        // If session only exists in memory fallback, keep behavior consistent.
+        return memory.getUploadSession(uploadSessionId);
       }
 
       const row = result.rows[0];

@@ -18,6 +18,8 @@ Implemented:
   - `confirmSupport`
   - `getSupport`
   - `createUploadSession`
+  - `completeUploadSession`
+  - `getUploadSession`
 - `LifeCast/LifeCast/SupportFlowDemoView.swift`
   - M1 wireflow demo shell:
     - 4 tabs (`Home`, `Discover`, `Create`, `Me`)
@@ -31,6 +33,7 @@ Implemented:
     - Me tab with `Posted` / `Liked` / `Project` tabs
     - Project page section with milestones + support CTA
     - Canonical support polling after checkout simulation
+    - Create tab upload state machine (`created -> uploading -> processing -> ready|failed`)
 
 Local typecheck command used:
 - `xcrun swiftc -typecheck LifeCast/LifeCast/LifeCastAPIClient.swift LifeCast/LifeCast/SupportFlowDemoView.swift`

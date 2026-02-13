@@ -17,6 +17,7 @@ Current local status (observed):
    - Linear MCP (if backlog/tickets are in Linear)
 3. Keep project-specific MCP servers minimal to avoid unnecessary auth and token surface area.
 4. For mobile automation, use official `appium-mcp` package and keep Appium server/drivers preinstalled locally.
+5. Treat Appium verification as mandatory for UI-affecting tasks (see `ui-automation-standard.md`).
 
 ## Codex MCP setup reference
 

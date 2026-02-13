@@ -13,7 +13,8 @@ Key files:
 - `question-backlog.md`
 - `implementation-workbreakdown.md`
 - `mcp-skills-and-secrets-setup.md`
+- `ui-automation-standard.md`
 - `m1-execution-tickets.md`
 - `runbooks/README.md`
 
-Last updated: 2026-02-12
+Last updated: 2026-02-13

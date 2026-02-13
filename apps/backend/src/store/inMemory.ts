@@ -48,19 +48,19 @@ export class InMemoryStore {
     return record;
   }
 
-  createUploadSession() {
+  createUploadSession(input?: { fileName?: string }) {
     const uploadSessionId = randomUUID();
     const session: UploadSession = {
       uploadSessionId,
       status: "created",
-      uploadUrl: `https://upload.lifecast.jp/${uploadSessionId}`,
+      uploadUrl: `https://upload.lifecast.jp/${uploadSessionId}/${input?.fileName ?? "source.mp4"}`,
       expiresAt: plusHoursIso(1),
     };
     this.uploads.set(uploadSessionId, session);
     return session;
   }
 
-  completeUploadSession(uploadSessionId: string, contentHashSha256: string) {
+  completeUploadSession(uploadSessionId: string, contentHashSha256: string, _storageObjectKey?: string) {
     const session = this.uploads.get(uploadSessionId);
     if (!session) return null;
     session.status = "processing";

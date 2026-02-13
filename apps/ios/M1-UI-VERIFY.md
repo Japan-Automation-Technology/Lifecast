@@ -2,6 +2,8 @@
 
 ## Preconditions
 - Backend running on `http://localhost:8080`
+- Video worker running for upload completion:
+  - `pnpm -C /Users/takeshi/Desktop/lifecast dev:backend:worker:video-processing`
 - At least one sample project/plan exists in backend seed
 
 ## 1) Code-level sanity check
@@ -40,6 +42,16 @@ Use `SupportFlowDemoView` as the root view and verify these points.
 - Profile shows support relationship marker (`Supported`)
 - `Me` tab has `Posted`, `Liked`, `Project`
 - `Project` tab has info/progress/milestones and `Support` button
+
+### Create / upload (iOS-003 baseline)
+- Open `Create` tab
+- Tap `Start Upload`
+- Confirm state transitions:
+  - `CREATED`
+  - `UPLOADING`
+  - `PROCESSING`
+  - `READY` or `FAILED`
+- Confirm upload session id is shown during flow
 
 ## 3) Payment flow API check from UI
 - In support flow, press `Complete payment`

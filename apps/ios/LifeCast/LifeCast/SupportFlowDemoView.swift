@@ -17,6 +17,15 @@ enum SupportStep: Int {
     case result
 }
 
+enum UploadFlowState: String {
+    case idle
+    case created
+    case uploading
+    case processing
+    case ready
+    case failed
+}
+
 struct SupportPlan: Identifiable, Hashable {
     let id: UUID
     let name: String
@@ -112,7 +121,7 @@ struct SupportFlowDemoView: View {
                 .tabItem { Label("Discover", systemImage: "magnifyingglass") }
                 .tag(1)
 
-            CreatePlaceholderView()
+            UploadCreateView(client: client)
                 .tabItem { Label("Create", systemImage: "plus.square") }
                 .tag(2)
 
@@ -734,13 +743,180 @@ struct DiscoverPlaceholderView: View {
     }
 }
 
-struct CreatePlaceholderView: View {
+struct UploadCreateView: View {
+    let client: LifeCastAPIClient
+
+    @State private var state: UploadFlowState = .idle
+    @State private var uploadProgress: Double = 0
+    @State private var uploadSessionId: UUID?
+    @State private var videoId: UUID?
+    @State private var statusText = "Not started"
+    @State private var errorText = ""
+
     var body: some View {
         NavigationStack {
-            Text("Create (M1 placeholder)")
-                .foregroundStyle(.secondary)
-                .navigationTitle("Create")
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Upload state machine demo")
+                    .font(.headline)
+
+                statusPill
+
+                ProgressView(value: uploadProgress, total: 1)
+                    .tint(state == .failed ? .red : .blue)
+
+                Text(statusText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                if let uploadSessionId {
+                    Text("Session: \(uploadSessionId.uuidString)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let videoId {
+                    Text("Video: \(videoId.uuidString)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                if !errorText.isEmpty {
+                    Text(errorText)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                HStack {
+                    Button("Start Upload") {
+                        Task {
+                            await startUploadFlow()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(state == .uploading || state == .processing)
+
+                    Button("Reset") {
+                        reset()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Spacer()
+            }
+            .padding(16)
+            .navigationTitle("Create")
         }
+    }
+
+    private var statusPill: some View {
+        Text(state.rawValue.uppercased())
+            .font(.caption.bold())
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(stateColor.opacity(0.15))
+            .foregroundStyle(stateColor)
+            .clipShape(Capsule())
+    }
+
+    private var stateColor: Color {
+        switch state {
+        case .idle: return .secondary
+        case .created: return .blue
+        case .uploading: return .blue
+        case .processing: return .orange
+        case .ready: return .green
+        case .failed: return .red
+        }
+    }
+
+    private func startUploadFlow() async {
+        errorText = ""
+        uploadProgress = 0
+        state = .created
+        statusText = "Creating upload session..."
+
+        do {
+            let create = try await client.createUploadSession(
+                fileName: "lifecast-demo-\(Int(Date().timeIntervalSince1970)).mp4",
+                fileSizeBytes: 8_000_000,
+                idempotencyKey: "ios-upload-create-\(UUID().uuidString)"
+            )
+            uploadSessionId = create.upload_session_id
+            videoId = create.video_id
+            state = .uploading
+            statusText = "Uploading chunks..."
+
+            // Simulate chunk upload progress for MVP UI wiring.
+            for step in 1...10 {
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                uploadProgress = Double(step) / 10.0
+            }
+
+            let hash = uniquePseudoSha256()
+            let complete = try await client.completeUploadSession(
+                uploadSessionId: create.upload_session_id,
+                storageObjectKey: "raw/\(create.upload_session_id.uuidString)/source.mp4",
+                contentHashSha256: hash,
+                idempotencyKey: "ios-upload-complete-\(UUID().uuidString)"
+            )
+            videoId = complete.video_id
+            state = .processing
+            statusText = "Processing upload..."
+            uploadProgress = 1
+
+            await pollUploadStatus(uploadSessionId: create.upload_session_id)
+        } catch {
+            state = .failed
+            statusText = "Upload failed"
+            errorText = error.localizedDescription
+        }
+    }
+
+    private func pollUploadStatus(uploadSessionId: UUID) async {
+        for _ in 0..<25 {
+            do {
+                let session = try await client.getUploadSession(uploadSessionId: uploadSessionId)
+                videoId = session.video_id
+
+                if session.status == "ready" {
+                    state = .ready
+                    statusText = "Upload ready for playback"
+                    return
+                }
+                if session.status == "failed" {
+                    state = .failed
+                    statusText = "Upload processing failed"
+                    return
+                }
+
+                state = .processing
+                statusText = "Processing upload..."
+            } catch {
+                state = .failed
+                statusText = "Upload status check failed"
+                errorText = error.localizedDescription
+                return
+            }
+
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+
+        state = .processing
+        statusText = "Still processing (timeout in demo poll window)"
+    }
+
+    private func reset() {
+        state = .idle
+        uploadProgress = 0
+        uploadSessionId = nil
+        videoId = nil
+        statusText = "Not started"
+        errorText = ""
+    }
+
+    private func uniquePseudoSha256() -> String {
+        let base = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        return base + base
     }
 }
 

@@ -32,6 +32,11 @@ struct UploadCreateRequest: Encodable {
     let file_size_bytes: Int
 }
 
+struct UploadCompleteRequest: Encodable {
+    let storage_object_key: String
+    let content_hash_sha256: String
+}
+
 struct UploadSessionResult: Decodable {
     let upload_session_id: UUID
     let status: String
@@ -82,6 +87,25 @@ final class LifeCastAPIClient {
     func createUploadSession(fileName: String, fileSizeBytes: Int, idempotencyKey: String) async throws -> UploadSessionResult {
         let body = UploadCreateRequest(file_name: fileName, content_type: "video/mp4", file_size_bytes: fileSizeBytes)
         return try await send(path: "/v1/videos/uploads", method: "POST", body: body, idempotencyKey: idempotencyKey)
+    }
+
+    func completeUploadSession(uploadSessionId: UUID, storageObjectKey: String, contentHashSha256: String, idempotencyKey: String) async throws -> UploadSessionResult {
+        let body = UploadCompleteRequest(storage_object_key: storageObjectKey, content_hash_sha256: contentHashSha256)
+        return try await send(
+            path: "/v1/videos/uploads/\(uploadSessionId.uuidString)/complete",
+            method: "POST",
+            body: body,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func getUploadSession(uploadSessionId: UUID) async throws -> UploadSessionResult {
+        try await send(
+            path: "/v1/videos/uploads/\(uploadSessionId.uuidString)",
+            method: "GET",
+            body: Optional<String>.none,
+            idempotencyKey: nil
+        )
     }
 
     private func send<T: Decodable, B: Encodable>(

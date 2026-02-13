@@ -14,7 +14,8 @@ Read order:
 9. `60-architecture/openapi-draft.yaml`
 10. `60-architecture/db-schema-draft.sql`
 11. `70-delivery/mcp-skills-and-secrets-setup.md`
-12. Relevant deeper folders based on task
+12. `70-delivery/ui-automation-standard.md`
+13. Relevant deeper folders based on task
 
 How to use this hierarchy:
 - Read this file first.
