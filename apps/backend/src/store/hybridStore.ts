@@ -167,6 +167,22 @@ async function deleteCloudflareVideo(uid: string): Promise<boolean> {
   return Boolean(payload?.success);
 }
 
+async function scheduleCloudflareDeleteJob(client: import("pg").PoolClient, input: {
+  creatorUserId: string;
+  videoId: string;
+  providerUploadId: string;
+}) {
+  await client.query(
+    `
+    insert into video_delete_jobs (
+      creator_user_id, video_id, provider_upload_id, status, attempt, next_run_at, created_at, updated_at
+    )
+    values ($1, $2, $3, 'pending', 0, now(), now(), now())
+  `,
+    [input.creatorUserId, input.videoId, input.providerUploadId],
+  );
+}
+
 function normalizeCurrency(value: string | undefined, fallback = "JPY") {
   return (value ?? fallback).toUpperCase().slice(0, 3);
 }
@@ -2191,12 +2207,37 @@ export class HybridStore {
         return "forbidden" as const;
       }
 
+      if (row.provider_upload_id && hasCloudflareStreamConfig()) {
+        await scheduleCloudflareDeleteJob(client, {
+          creatorUserId,
+          videoId,
+          providerUploadId: row.provider_upload_id,
+        });
+      }
+
       await client.query(`delete from video_assets where video_id = $1 and creator_user_id = $2`, [videoId, creatorUserId]);
       await client.query(`delete from video_upload_sessions where id = $1 and creator_user_id = $2`, [row.upload_session_id, creatorUserId]);
       await client.query("commit");
 
       if (row.provider_upload_id && hasCloudflareStreamConfig()) {
-        void deleteCloudflareVideo(row.provider_upload_id);
+        const deleted = await deleteCloudflareVideo(row.provider_upload_id);
+        if (deleted) {
+          const finalizeClient = await dbPool.connect();
+          try {
+            await finalizeClient.query(
+              `
+              update video_delete_jobs
+              set status = 'succeeded',
+                  completed_at = now(),
+                  updated_at = now()
+              where creator_user_id = $1 and video_id = $2 and provider_upload_id = $3 and status = 'pending'
+            `,
+              [creatorUserId, videoId, row.provider_upload_id],
+            );
+          } finally {
+            finalizeClient.release();
+          }
+        }
       }
 
       return "deleted" as const;

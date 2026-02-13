@@ -172,6 +172,13 @@ struct SupportFlowDemoView: View {
         .task {
             await refreshMyVideos()
         }
+        .onChange(of: selectedTab) { _, newValue in
+            if newValue == 3 {
+                Task {
+                    await refreshMyVideos()
+                }
+            }
+        }
     }
 
     private var homeTab: some View {
@@ -681,6 +688,11 @@ struct MeTabView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
+                .onChange(of: selectedIndex) { _, newValue in
+                    if newValue == 0 {
+                        onRefreshVideos()
+                    }
+                }
 
                 Group {
                     if selectedIndex == 0 {
@@ -698,6 +710,9 @@ struct MeTabView: View {
                 .frame(maxHeight: .infinity)
             }
             .navigationTitle("Me")
+            .task {
+                onRefreshVideos()
+            }
         }
     }
 }
@@ -1464,7 +1479,7 @@ struct UploadCreateView: View {
         } catch {
             state = .failed
             statusText = "Upload failed"
-            errorText = error.localizedDescription
+            errorText = userFacingUploadErrorMessage(error, context: .upload)
         }
     }
 
@@ -1491,7 +1506,7 @@ struct UploadCreateView: View {
             } catch {
                 state = .failed
                 statusText = "Upload status check failed"
-                errorText = error.localizedDescription
+                errorText = userFacingUploadErrorMessage(error, context: .statusPoll)
                 return
             }
 
@@ -1538,7 +1553,7 @@ struct UploadCreateView: View {
         } catch {
             state = .failed
             statusText = "Retry failed"
-            errorText = error.localizedDescription
+            errorText = userFacingUploadErrorMessage(error, context: .retry)
         }
     }
 
@@ -1588,6 +1603,50 @@ struct UploadCreateView: View {
     private func uniquePseudoSha256() -> String {
         let base = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         return base + base
+    }
+
+    private enum UploadErrorContext {
+        case upload
+        case statusPoll
+        case retry
+    }
+
+    private func userFacingUploadErrorMessage(_ error: Error, context: UploadErrorContext) -> String {
+        let nsError = error as NSError
+        let apiCode = (nsError.userInfo["code"] as? String)?.uppercased()
+        let message = nsError.localizedDescription.lowercased()
+        if apiCode == "STATE_CONFLICT" {
+            return "Duplicate upload detected. Choose a different video."
+        }
+        if apiCode == "RESOURCE_NOT_FOUND" {
+            return context == .statusPoll
+                ? "Upload session not found. Start upload again."
+                : "Resource not found. Please retry from the beginning."
+        }
+        if apiCode == "VALIDATION_ERROR" {
+            return "Upload request is invalid. Check the selected video and retry."
+        }
+        if message.contains("timed out") || message.contains("network") || message.contains("offline") {
+            return "Network issue. Check connection and retry."
+        }
+        if message.contains("resource_not_found") || message.contains("not found") {
+            return context == .statusPoll
+                ? "Upload session not found. Start upload again."
+                : "Resource not found. Please retry from the beginning."
+        }
+        if message.contains("state_conflict") || message.contains("hash already exists") {
+            return "Duplicate upload detected. Choose a different video."
+        }
+        if message.contains("direct upload failed") || message.contains("cloudflare") {
+            return "Video upload service error. Retry in a moment."
+        }
+        if message.contains("could not read selected video data") || message.contains("select a video first") {
+            return "Please select a video before uploading."
+        }
+        if message.contains("couldn’t be read because it isn’t in the correct format") || message.contains("correct format") {
+            return "Server response format changed. Please retry."
+        }
+        return "Upload failed. Please retry."
     }
 }
 

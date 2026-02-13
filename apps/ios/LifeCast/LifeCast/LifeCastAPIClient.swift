@@ -242,8 +242,29 @@ final class LifeCastAPIClient {
             throw NSError(domain: "LifeCastAPIClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
         }
         guard (200..<300).contains(http.statusCode) else {
-            let payload = String(data: data, encoding: .utf8) ?? ""
-            throw NSError(domain: "LifeCastAPIClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: payload])
+            let payloadText = String(data: data, encoding: .utf8) ?? ""
+            if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let error = object["error"] as? [String: Any] {
+                    let code = (error["code"] as? String) ?? "UNKNOWN"
+                    let message = (error["message"] as? String) ?? payloadText
+                    throw NSError(
+                        domain: "LifeCastAPI",
+                        code: http.statusCode,
+                        userInfo: [
+                            NSLocalizedDescriptionKey: message,
+                            "code": code
+                        ]
+                    )
+                }
+                if let message = object["message"] as? String {
+                    throw NSError(
+                        domain: "LifeCastAPI",
+                        code: http.statusCode,
+                        userInfo: [NSLocalizedDescriptionKey: message]
+                    )
+                }
+            }
+            throw NSError(domain: "LifeCastAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: payloadText])
         }
 
         let envelope = try JSONDecoder().decode(APIEnvelope<T>.self, from: data)

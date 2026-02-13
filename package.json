@@ -19,6 +19,7 @@
     "dev:backend:worker:video-processing": "pnpm --filter @lifecast/backend dev:worker:video-processing",
     "smoke:ios:appium": "node scripts/appium/ios-smoke.mjs",
     "smoke:ios:upload-profile": "node scripts/appium/ios-upload-profile-screens.mjs",
-    "smoke:ios:posted-feed": "node scripts/appium/ios-posted-feed-navigation.mjs"
+    "smoke:ios:posted-feed": "node scripts/appium/ios-posted-feed-navigation.mjs",
+    "dev:backend:worker:video-maintenance": "pnpm --filter @lifecast/backend dev:worker:video-maintenance"
   }
 }

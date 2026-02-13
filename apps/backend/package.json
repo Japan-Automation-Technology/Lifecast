@@ -17,7 +17,8 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test src/**/*.test.ts",
-    "dev:worker:video-processing": "tsx watch src/workers/videoProcessing.ts"
+    "dev:worker:video-processing": "tsx watch src/workers/videoProcessing.ts",
+    "dev:worker:video-maintenance": "tsx watch src/workers/videoMaintenance.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
