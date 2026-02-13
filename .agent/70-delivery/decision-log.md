@@ -52,6 +52,10 @@
 - Webhook event handlers expanded to include refund and dispute open/close transitions.
 - Journal coverage expanded for `refund`, `dispute_open`, `dispute_close`, `loss_booking`, and `payout_release`.
 - Reconciliation endpoint baseline added (`GET /v1/journal/reconciliation`) for provider-total delta checks.
+- Event ingestion baseline added: event-contract validator + `analytics_events`/`analytics_event_dlq` persistence.
+- `payment_succeeded` server event emit added after webhook-authoritative settlement.
+- Payment smoke script added for real API flow validation (`smoke:payments:backend`).
+- iOS starter API client scaffold added for support/upload API integration.
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`

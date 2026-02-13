@@ -11,3 +11,10 @@ Immediate build order:
 Contract dependencies:
 - `packages/contracts/openapi/openapi.yaml`
 - `packages/contracts/events/event-contract-v1.md`
+
+Implemented starter:
+- `LifeCastAPIClient.swift`
+  - `prepareSupport`
+  - `confirmSupport`
+  - `getSupport`
+  - `createUploadSession`

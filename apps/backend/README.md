@@ -4,6 +4,7 @@ Fastify + TypeScript API skeleton aligned to M1 contract freeze.
 
 Implemented route groups:
 - Supports
+- Events ingestion
 - Payments (webhook entry)
 - Uploads
 - Journal (read stub)
@@ -20,6 +21,8 @@ Current state:
 - Adds Stripe webhook dedupe by provider event ID and signature verification via `LIFECAST_STRIPE_WEBHOOK_SECRET`.
 - Adds journal write handlers for `support_hold`, `refund`, `dispute_open`, `dispute_close`, `loss_booking`, and `payout_release`.
 - Adds reconciliation API baseline at `GET /v1/journal/reconciliation`.
+- Adds event ingestion API (`POST /v1/events/ingest`) with contract validation + DLQ persistence.
+- Emits server-side `payment_succeeded` event after webhook-authoritative settlement.
 - Shapes and enums follow `packages/contracts/openapi/openapi.yaml`.
 - Ready for BE-001..BE-009 iterative implementation.
 
@@ -30,6 +33,7 @@ Commands:
 - `pnpm test:backend`
 - `pnpm db:migrate:backend`
 - `pnpm db:seed:backend`
+- `pnpm smoke:payments:backend`
 
 Next step:
 - Add provider-authenticated event bus publish for `payment_succeeded`.

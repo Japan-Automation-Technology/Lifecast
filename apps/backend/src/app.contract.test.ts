@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import test from "node:test";
 
+process.env.LIFECAST_DISABLE_DOTENV = "1";
 process.env.LIFECAST_DATABASE_URL = "";
 process.env.LIFECAST_STRIPE_WEBHOOK_SECRET = "";
 
@@ -197,6 +198,49 @@ test("stripe webhook accepts valid signature and processes refund transition", a
     assert.equal(support.json().result.support_status, "refunded");
   } finally {
     process.env.LIFECAST_STRIPE_WEBHOOK_SECRET = prev;
+    await app.close();
+  }
+});
+
+test("events ingest stores valid events and rejects invalid payload to DLQ path", async () => {
+  const app = await buildApp();
+  try {
+    const validEvent = {
+      event_name: "support_button_tapped",
+      event_id: "3c2f6585-2b92-4c8b-b2e1-76263a6a7a22",
+      event_time: new Date().toISOString(),
+      anonymous_id: "anon-1",
+      session_id: "sess-1",
+      client_platform: "ios",
+      app_version: "0.1.0",
+      attributes: {
+        video_id: "vid-1",
+        project_id: "11111111-1111-1111-1111-111111111111",
+      },
+    };
+
+    const invalidEvent = {
+      event_name: "payment_succeeded",
+      event_id: "4bb8d08f-1111-4444-9999-df3f842cb8f2",
+      event_time: new Date().toISOString(),
+      anonymous_id: "anon-2",
+      session_id: "sess-2",
+      client_platform: "android",
+      app_version: "0.1.0",
+      attributes: {
+        project_id: "11111111-1111-1111-1111-111111111111",
+      },
+    };
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/events/ingest",
+      payload: { events: [validEvent, invalidEvent] },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().result.accepted, 1);
+    assert.equal(res.json().result.rejected, 1);
+  } finally {
     await app.close();
   }
 });

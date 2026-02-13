@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { registerDisputeRoutes } from "./routes/disputes.js";
+import { registerEventRoutes } from "./routes/events.js";
 import { registerJournalRoutes } from "./routes/journal.js";
 import { registerModerationRoutes } from "./routes/moderation.js";
 import { registerPaymentRoutes } from "./routes/payments.js";
@@ -15,6 +16,7 @@ export async function buildApp() {
   app.get("/health", async () => ({ ok: true, service: "lifecast-backend" }));
 
   await registerSupportRoutes(app);
+  await registerEventRoutes(app);
   await registerPaymentRoutes(app);
   await registerUploadRoutes(app);
   await registerJournalRoutes(app);

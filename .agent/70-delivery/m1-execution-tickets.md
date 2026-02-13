@@ -36,7 +36,7 @@ BE-003: Stripe webhook finalization
 - Implement `POST /v1/payments/webhooks/stripe`.
 - Verify signature, idempotent event handling, and dedupe by provider event ID.
 - Publish `payment_succeeded` server event after successful settlement confirmation.
-Status: in progress (signature cryptographic verification + event dedupe done; server event bus pending)
+Status: in progress (signature cryptographic verification + event dedupe + `payment_succeeded` server emit done; provider-authenticated event bus transport pending)
 
 BE-004: Journal write path
 - Implement journal entries/lines for:
@@ -78,6 +78,7 @@ BE-009: Notification event queue
 DA-001: Event contract validator
 - Build ingestion validator for event-contract-v1 required fields.
 - Route invalid events to dead-letter storage with alerting.
+Status: in progress (`/v1/events/ingest` + validator + DLQ persistence implemented; alerting/p95 monitor pending)
 
 DA-002: Funnel materialization
 - Materialize 5-step funnel views and drop-off tables.
@@ -115,7 +116,7 @@ Status: in progress (`app.contract.test.ts` extended with signature-invalid and 
 X-002: Migration packaging
 - Convert `db-schema-draft.sql` sections into ordered migrations.
 - Add rollback notes for non-destructive fallback.
-Status: in progress (`0001_m1_contract_freeze.sql`, `0002_idempotency_and_webhooks.sql`, `db:migrate`, `db:seed` wired)
+Status: in progress (`0001_m1_contract_freeze.sql`, `0002_idempotency_and_webhooks.sql`, `0003_event_ingestion.sql`, `db:migrate`, `db:seed` wired)
 
 X-003: Runbook baseline
 - Add operational runbooks for:

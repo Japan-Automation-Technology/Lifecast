@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { dbPool, hasDb } from "./db.js";
 import { InMemoryStore } from "./inMemory.js";
+import { buildServerEvent, validateEventPayload } from "../events/contract.js";
 import type {
   DisputeRecord,
   DisputeRecoveryResult,
@@ -37,6 +38,14 @@ interface JournalEntryRow {
 
 const memory = new InMemoryStore();
 const webhookMemoryDedup = new Set<string>();
+const eventMemoryDedup = new Set<string>();
+const eventMemoryDlq: Array<{
+  event_id?: string;
+  reason_code: string;
+  reason_message: string;
+  raw_payload: unknown;
+  source: "client" | "server";
+}> = [];
 
 function normalizeCurrency(value: string | undefined, fallback = "JPY") {
   return (value ?? fallback).toUpperCase().slice(0, 3);
@@ -868,7 +877,21 @@ export class HybridStore {
       }
       webhookMemoryDedup.add(dedupeKey);
       if (input.supportId && ["checkout.session.completed", "payment_intent.succeeded"].includes(input.eventType)) {
-        await this.markSupportSucceededByWebhook(input.supportId);
+        const support = await this.markSupportSucceededByWebhook(input.supportId);
+        if (support) {
+          await this.emitServerEvent({
+            eventName: "payment_succeeded",
+            anonymousId: `supporter:${support.supportId}`,
+            attributes: {
+              project_id: support.projectId,
+              plan_id: support.planId,
+              support_id: support.supportId,
+              payment_provider: "stripe",
+              amount_minor: support.amountMinor,
+              currency: support.currency,
+            },
+          });
+        }
         return { deduped: false, processed: true };
       }
       if (input.supportId && input.eventType === "charge.refunded") {
@@ -907,7 +930,21 @@ export class HybridStore {
       const webhookSupportId = input.supportId ?? metadataSupportId;
 
       if (input.supportId && ["checkout.session.completed", "payment_intent.succeeded"].includes(input.eventType)) {
-        await this.markSupportSucceededByWebhook(input.supportId);
+        const support = await this.markSupportSucceededByWebhook(input.supportId);
+        if (support) {
+          await this.emitServerEvent({
+            eventName: "payment_succeeded",
+            anonymousId: `supporter:${support.supportId}`,
+            attributes: {
+              project_id: support.projectId,
+              plan_id: support.planId,
+              support_id: support.supportId,
+              payment_provider: "stripe",
+              amount_minor: support.amountMinor,
+              currency: support.currency,
+            },
+          });
+        }
         processed = true;
       }
       if (webhookSupportId && input.eventType === "charge.refunded") {
@@ -955,6 +992,123 @@ export class HybridStore {
     } finally {
       client.release();
     }
+  }
+
+  async ingestEvents(input: { events: unknown[]; source: "client" | "server" }) {
+    if (!hasDb() || !dbPool) {
+      let accepted = 0;
+      let rejected = 0;
+      const rejectedDetails: Array<{ event_id?: string; reason: string }> = [];
+      for (const raw of input.events) {
+        const validated = validateEventPayload(raw);
+        if (!validated.ok || !validated.normalized) {
+          rejected += 1;
+          rejectedDetails.push({
+            event_id: (raw as { event_id?: string } | null)?.event_id,
+            reason: validated.errors.join("; "),
+          });
+          eventMemoryDlq.push({
+            event_id: (raw as { event_id?: string } | null)?.event_id,
+            reason_code: "SCHEMA_MISMATCH",
+            reason_message: validated.errors.join("; "),
+            raw_payload: raw,
+            source: input.source,
+          });
+          continue;
+        }
+
+        if (eventMemoryDedup.has(validated.normalized.event_id)) {
+          continue;
+        }
+        eventMemoryDedup.add(validated.normalized.event_id);
+        accepted += 1;
+      }
+      return { accepted, rejected, rejectedDetails };
+    }
+
+    const client = await dbPool.connect();
+    try {
+      let accepted = 0;
+      let rejected = 0;
+      const rejectedDetails: Array<{ event_id?: string; reason: string }> = [];
+
+      for (const raw of input.events) {
+        const validated = validateEventPayload(raw);
+        if (!validated.ok || !validated.normalized) {
+          rejected += 1;
+          rejectedDetails.push({
+            event_id: (raw as { event_id?: string } | null)?.event_id,
+            reason: validated.errors.join("; "),
+          });
+          await client.query(
+            `
+            insert into analytics_event_dlq (event_id, reason_code, reason_message, raw_payload, source)
+            values ($1, 'SCHEMA_MISMATCH', $2, $3::jsonb, $4)
+          `,
+            [
+              (raw as { event_id?: string } | null)?.event_id ?? null,
+              validated.errors.join("; "),
+              JSON.stringify(raw ?? {}),
+              input.source,
+            ],
+          );
+          continue;
+        }
+
+        const e = validated.normalized;
+        const result = await client.query(
+          `
+          insert into analytics_events (
+            event_id, event_name, event_time, user_id, anonymous_id, session_id,
+            client_platform, app_version, attributes, raw_payload, source
+          )
+          values (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8, $9::jsonb, $10::jsonb, $11
+          )
+          on conflict (event_id) do nothing
+        `,
+          [
+            e.event_id,
+            e.event_name,
+            e.event_time,
+            e.user_id ?? null,
+            e.anonymous_id ?? null,
+            e.session_id,
+            e.client_platform,
+            e.app_version,
+            JSON.stringify(e.attributes),
+            JSON.stringify(raw ?? {}),
+            input.source,
+          ],
+        );
+        if ((result.rowCount ?? 0) > 0) {
+          accepted += 1;
+        }
+      }
+      return { accepted, rejected, rejectedDetails };
+    } finally {
+      client.release();
+    }
+  }
+
+  async emitServerEvent(input: {
+    eventName: string;
+    userId?: string;
+    anonymousId?: string;
+    sessionId?: string;
+    attributes: Record<string, unknown>;
+  }) {
+    const appVersion = process.env.LIFECAST_SERVER_APP_VERSION ?? "backend-0.1.0";
+    const event = buildServerEvent({
+      eventName: input.eventName,
+      userId: input.userId,
+      anonymousId: input.anonymousId,
+      sessionId: input.sessionId,
+      appVersion,
+      attributes: input.attributes,
+    });
+    return this.ingestEvents({ events: [event], source: "server" });
   }
 
   async listJournalEntries(filters: { projectId?: string; supportId?: string; entryType?: string; limit?: number }) {
