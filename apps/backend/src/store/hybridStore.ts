@@ -1313,6 +1313,65 @@ export class HybridStore {
     }
   }
 
+  async getOpsQueueStatus() {
+    if (!hasDb() || !dbPool) {
+      return {
+        outbox: { pending: 0, failed: 0, oldest_pending_at: null, last_delivery_at: null },
+        notifications: { pending: 0, failed: 0, oldest_pending_at: null },
+      };
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const outbox = await client.query<{
+        pending: string;
+        failed: string;
+        oldest_pending_at: string | null;
+        last_delivery_at: string | null;
+      }>(
+        `
+        select
+          count(*) filter (where oe.status = 'pending')::text as pending,
+          count(*) filter (where oe.status = 'failed')::text as failed,
+          min(oe.created_at) filter (where oe.status = 'pending')::text as oldest_pending_at,
+          max(oda.attempted_at)::text as last_delivery_at
+        from outbox_events oe
+        left join outbox_delivery_attempts oda on oda.outbox_event_id = oe.id
+      `,
+      );
+
+      const notifications = await client.query<{
+        pending: string;
+        failed: string;
+        oldest_pending_at: string | null;
+      }>(
+        `
+        select
+          count(*) filter (where sent_at is null and failed_at is null)::text as pending,
+          count(*) filter (where failed_at is not null)::text as failed,
+          min(created_at) filter (where sent_at is null and failed_at is null)::text as oldest_pending_at
+        from notification_events
+      `,
+      );
+
+      return {
+        outbox: {
+          pending: Number(outbox.rows[0]?.pending ?? "0"),
+          failed: Number(outbox.rows[0]?.failed ?? "0"),
+          oldest_pending_at: outbox.rows[0]?.oldest_pending_at ?? null,
+          last_delivery_at: outbox.rows[0]?.last_delivery_at ?? null,
+        },
+        notifications: {
+          pending: Number(notifications.rows[0]?.pending ?? "0"),
+          failed: Number(notifications.rows[0]?.failed ?? "0"),
+          oldest_pending_at: notifications.rows[0]?.oldest_pending_at ?? null,
+        },
+      };
+    } finally {
+      client.release();
+    }
+  }
+
   async createProjectReport(input: { projectId: string; reasonCode: string; details: string }) {
     if (!hasDb() || !dbPool) {
       return {

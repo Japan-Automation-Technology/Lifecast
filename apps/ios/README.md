@@ -18,3 +18,5 @@ Implemented starter:
   - `confirmSupport`
   - `getSupport`
   - `createUploadSession`
+- `SupportFlowDemoView.swift`
+  - Demo UI for prepare/confirm/status polling against local backend

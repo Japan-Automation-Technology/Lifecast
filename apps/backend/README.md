@@ -26,6 +26,7 @@ Current state:
 - Emits server-side `payment_succeeded` event after webhook-authoritative settlement.
 - Adds outbox transport baseline (`outbox_events` + worker) for server-emitted events.
 - Adds daily analytics views (`analytics_funnel_daily`, `analytics_kpi_daily`) and read APIs.
+- Adds ops queue status API (`GET /v1/ops/queues`) for backlog monitoring.
 - Shapes and enums follow `packages/contracts/openapi/openapi.yaml`.
 - Ready for BE-001..BE-009 iterative implementation.
 
@@ -42,3 +43,8 @@ Commands:
 Next step:
 - Replace outbox placeholder delivery with provider-authenticated bus publish.
 - Harden reconciliation rules against provider settlement exports and chargeback lifecycle edge cases.
+
+Key env vars:
+- `LIFECAST_STRIPE_WEBHOOK_SECRET`
+- `LIFECAST_OUTBOX_WEBHOOK_URL`
+- `LIFECAST_OUTBOX_WEBHOOK_BEARER`

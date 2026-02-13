@@ -5,6 +5,7 @@ import { registerDisputeRoutes } from "./routes/disputes.js";
 import { registerEventRoutes } from "./routes/events.js";
 import { registerJournalRoutes } from "./routes/journal.js";
 import { registerModerationRoutes } from "./routes/moderation.js";
+import { registerOpsRoutes } from "./routes/ops.js";
 import { registerPaymentRoutes } from "./routes/payments.js";
 import { registerPayoutRoutes } from "./routes/payouts.js";
 import { registerSupportRoutes } from "./routes/supports.js";
@@ -25,6 +26,7 @@ export async function buildApp() {
   await registerDisputeRoutes(app);
   await registerPayoutRoutes(app);
   await registerModerationRoutes(app);
+  await registerOpsRoutes(app);
 
   app.setNotFoundHandler((req, reply) => {
     reply.code(404).send({

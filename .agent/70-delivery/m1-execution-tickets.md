@@ -72,6 +72,7 @@ BE-008: Upload session APIs
 BE-009: Notification event queue
 - Implement notification event producer for creator/supporter/ops matrix.
 - Start with push/in-app/email/ops channels and retries.
+Status: in progress (worker + ops queue status API + outbox delivery attempts logging implemented; provider-specific delivery adapters pending)
 
 ## Data/analytics tickets
 
@@ -125,6 +126,7 @@ X-003: Runbook baseline
   - dispute SLA breach
   - upload processing backlog
   - notification queue backlog
+Status: in progress (`runbooks/` added with four baseline procedures; threshold-based alert automation pending)
 
 Definition of done (M1):
 - Core support E2E passes with webhook-authoritative success.

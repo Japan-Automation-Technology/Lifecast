@@ -58,6 +58,9 @@
 - iOS starter API client scaffold added for support/upload API integration.
 - Outbox baseline added (`outbox_events` + worker) for server event transport decoupling.
 - Daily funnel/KPI analytics views and read APIs added for DA-002 baseline.
+- Outbox delivery attempt logging added with retry metadata (`outbox_delivery_attempts`).
+- Ops queue status endpoint added for backlog observability (`GET /v1/ops/queues`).
+- Delivery runbooks baseline added for webhook/dispute/upload/notification incidents.
 
 Cross-reference:
 - `../00-executive/frozen-decisions.md`

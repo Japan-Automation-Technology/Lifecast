@@ -244,3 +244,31 @@ test("events ingest stores valid events and rejects invalid payload to DLQ path"
     await app.close();
   }
 });
+
+test("analytics and ops endpoints return 200 envelopes", async () => {
+  const app = await buildApp();
+  try {
+    const funnel = await app.inject({
+      method: "GET",
+      url: "/v1/analytics/funnel-daily?limit=10",
+    });
+    assert.equal(funnel.statusCode, 200);
+    assert.ok(Array.isArray(funnel.json().result.rows));
+
+    const kpi = await app.inject({
+      method: "GET",
+      url: "/v1/analytics/kpi-daily?limit=10",
+    });
+    assert.equal(kpi.statusCode, 200);
+    assert.ok(Array.isArray(kpi.json().result.rows));
+
+    const ops = await app.inject({
+      method: "GET",
+      url: "/v1/ops/queues",
+    });
+    assert.equal(ops.statusCode, 200);
+    assert.equal(typeof ops.json().result.outbox.pending, "number");
+  } finally {
+    await app.close();
+  }
+});
