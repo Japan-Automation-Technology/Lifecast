@@ -75,6 +75,16 @@ private struct NumberFormatterProvider {
     }()
 }
 
+private func fundingProgressTint(_ percentRaw: Double) -> Color {
+    if percentRaw >= 2.0 {
+        return Color(red: 0.83, green: 0.69, blue: 0.22) // gold
+    }
+    if percentRaw > 1.0 {
+        return Color(red: 0.76, green: 0.76, blue: 0.80) // silver
+    }
+    return .green
+}
+
 struct SupportFlowDemoView: View {
     private let client = LifeCastAPIClient(baseURL: URL(string: "http://localhost:8080")!)
 
@@ -321,7 +331,6 @@ struct SupportFlowDemoView: View {
 
     private func fundingMeta(project: FeedProjectSummary) -> some View {
         let percentRaw = Double(project.fundedAmountMinor) / Double(project.goalAmountMinor)
-        let isOverGoal = percentRaw >= 1
         let percent = Int(percentRaw * 100)
 
         return VStack(alignment: .leading, spacing: 6) {
@@ -333,7 +342,7 @@ struct SupportFlowDemoView: View {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.white.opacity(0.2))
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(isOverGoal ? Color.green : Color.pink)
+                        .fill(fundingProgressTint(percentRaw))
                         .frame(width: geo.size.width * CGFloat(min(percentRaw, 1)))
                 }
             }
@@ -706,7 +715,7 @@ struct CreatorProfileView: View {
                 Text("Current project progress")
                     .font(.subheadline.weight(.semibold))
                 ProgressView(value: min(Double(profile.fundedAmountMinor) / Double(profile.goalAmountMinor), 1))
-                    .tint(Double(profile.fundedAmountMinor) >= Double(profile.goalAmountMinor) ? .green : .pink)
+                    .tint(fundingProgressTint(Double(profile.fundedAmountMinor) / Double(profile.goalAmountMinor)))
                     .padding(.horizontal, 24)
 
                 Spacer()
@@ -1090,6 +1099,7 @@ struct ProjectPageView: View {
         VStack(alignment: .leading, spacing: 10) {
             let funded = max(project.funded_amount_minor, 0)
             let goal = max(project.goal_amount_minor, 1)
+            let rawRatio = Double(funded) / Double(goal)
             let progress = min(Double(funded) / Double(goal), 1.0)
             let percent = Int((Double(funded) / Double(goal)) * 100.0)
 
@@ -1114,7 +1124,7 @@ struct ProjectPageView: View {
             }
 
             ProgressView(value: progress)
-                .tint(progress >= 1 ? .green : .blue)
+                .tint(fundingProgressTint(rawRatio))
             Text("\(percent)% funded (\(funded.formatted()) / \(goal.formatted()) \(project.currency))")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -1567,6 +1577,19 @@ struct PostedVideosListView: View {
                 videos: newestFirstVideos,
                 initialVideoId: video.video_id,
                 client: LifeCastAPIClient(baseURL: URL(string: "http://localhost:8080")!),
+                projectContext: sampleProjects.first ?? FeedProjectSummary(
+                    id: UUID(),
+                    creatorId: UUID(),
+                    username: "lifecast_maker",
+                    caption: "Prototype update",
+                    minPlanPriceMinor: 1000,
+                    goalAmountMinor: 1_000_000,
+                    fundedAmountMinor: 0,
+                    remainingDays: 12,
+                    likes: 4500,
+                    comments: 173,
+                    isSupportedByCurrentUser: false
+                ),
                 isCurrentUserVideo: true,
                 onVideoDeleted: {
                     onRefreshVideos()
@@ -1588,6 +1611,7 @@ struct CreatorPostedFeedView: View {
     let videos: [MyVideo]
     let initialVideoId: UUID
     let client: LifeCastAPIClient
+    let projectContext: FeedProjectSummary
     let isCurrentUserVideo: Bool
     let onVideoDeleted: () -> Void
 
@@ -1604,12 +1628,14 @@ struct CreatorPostedFeedView: View {
         videos: [MyVideo],
         initialVideoId: UUID,
         client: LifeCastAPIClient,
+        projectContext: FeedProjectSummary,
         isCurrentUserVideo: Bool,
         onVideoDeleted: @escaping () -> Void
     ) {
         self.videos = videos
         self.initialVideoId = initialVideoId
         self.client = client
+        self.projectContext = projectContext
         self.isCurrentUserVideo = isCurrentUserVideo
         self.onVideoDeleted = onVideoDeleted
         let initial = videos.firstIndex(where: { $0.video_id == initialVideoId }) ?? 0
@@ -1707,19 +1733,7 @@ struct CreatorPostedFeedView: View {
     }
 
     private var currentProject: FeedProjectSummary {
-        sampleProjects.first ?? FeedProjectSummary(
-            id: UUID(),
-            creatorId: UUID(),
-            username: "lifecast_maker",
-            caption: "Prototype update",
-            minPlanPriceMinor: 1000,
-            goalAmountMinor: 1_000_000,
-            fundedAmountMinor: 1_120_000,
-            remainingDays: 12,
-            likes: 4500,
-            comments: 173,
-            isSupportedByCurrentUser: false
-        )
+        projectContext
     }
 
     private func feedPage(video: MyVideo, project: FeedProjectSummary) -> some View {
@@ -1806,7 +1820,6 @@ struct CreatorPostedFeedView: View {
 
     private func fundingMeta(project: FeedProjectSummary) -> some View {
         let percentRaw = Double(project.fundedAmountMinor) / Double(project.goalAmountMinor)
-        let isOverGoal = percentRaw >= 1
         let percent = Int(percentRaw * 100)
 
         return VStack(alignment: .leading, spacing: 6) {
@@ -1818,7 +1831,7 @@ struct CreatorPostedFeedView: View {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.white.opacity(0.2))
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(isOverGoal ? Color.green : Color.pink)
+                        .fill(fundingProgressTint(percentRaw))
                         .frame(width: geo.size.width * CGFloat(min(percentRaw, 1)))
                 }
             }
@@ -2164,6 +2177,7 @@ struct CreatorPublicPageView: View {
             if let project = page.project {
                 let funded = max(project.funded_amount_minor, 0)
                 let goal = max(project.goal_amount_minor, 1)
+                let rawRatio = Double(funded) / Double(goal)
                 let progress = min(Double(funded) / Double(goal), 1.0)
                 let percent = Int((Double(funded) / Double(goal)) * 100.0)
 
@@ -2189,7 +2203,7 @@ struct CreatorPublicPageView: View {
                 }
 
                 ProgressView(value: progress)
-                    .tint(progress >= 1 ? .green : .blue)
+                    .tint(fundingProgressTint(rawRatio))
                 Text("\(percent)% funded (\(funded.formatted()) / \(goal.formatted()) \(project.currency))")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -2357,6 +2371,7 @@ struct CreatorPublicPageView: View {
                 videos: convertCreatorVideosToMyVideos(page.videos),
                 initialVideoId: video.video_id,
                 client: client,
+                projectContext: makeCreatorFeedProject(page),
                 isCurrentUserVideo: false,
                 onVideoDeleted: {}
             )
@@ -2382,6 +2397,50 @@ struct CreatorPublicPageView: View {
                 created_at: video.created_at
             )
         }
+    }
+
+    private func makeCreatorFeedProject(_ page: CreatorPublicPageResult) -> FeedProjectSummary {
+        if let project = page.project {
+            let minPlanPrice = project.minimum_plan?.price_minor ?? project.plans?.first?.price_minor ?? 1000
+            let remainingDays = max(0, daysUntil(iso: project.deadline_at))
+            let trimmedDescription = project.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let caption = trimmedDescription.isEmpty ? (project.subtitle ?? project.title) : trimmedDescription
+            return FeedProjectSummary(
+                id: project.id,
+                creatorId: project.creator_user_id,
+                username: page.profile.username,
+                caption: caption,
+                minPlanPriceMinor: minPlanPrice,
+                goalAmountMinor: max(project.goal_amount_minor, 1),
+                fundedAmountMinor: max(project.funded_amount_minor, 0),
+                remainingDays: remainingDays,
+                likes: 4500,
+                comments: 173,
+                isSupportedByCurrentUser: page.viewer_relationship.is_supported
+            )
+        }
+
+        return FeedProjectSummary(
+            id: UUID(),
+            creatorId: page.profile.creator_user_id,
+            username: page.profile.username,
+            caption: page.profile.bio ?? "Creator update",
+            minPlanPriceMinor: 1000,
+            goalAmountMinor: 1,
+            fundedAmountMinor: 0,
+            remainingDays: 0,
+            likes: 4500,
+            comments: 173,
+            isSupportedByCurrentUser: page.viewer_relationship.is_supported
+        )
+    }
+
+    private func daysUntil(iso: String) -> Int {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: iso) else { return 0 }
+        let seconds = date.timeIntervalSinceNow
+        if seconds <= 0 { return 0 }
+        return Int(ceil(seconds / 86_400))
     }
 
     private func load() async {
