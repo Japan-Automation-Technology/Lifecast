@@ -133,6 +133,12 @@ struct CreatorViewerRelationship: Decodable {
     let is_supported: Bool
 }
 
+struct CreatorProfileStats: Decodable {
+    let following_count: Int
+    let followers_count: Int
+    let supported_project_count: Int
+}
+
 struct CreatorPublicVideo: Decodable, Identifiable {
     let video_id: UUID
     let status: String
@@ -147,8 +153,14 @@ struct CreatorPublicVideo: Decodable, Identifiable {
 struct CreatorPublicPageResult: Decodable {
     let profile: CreatorPublicProfile
     let viewer_relationship: CreatorViewerRelationship
+    let profile_stats: CreatorProfileStats
     let project: MyProjectResult?
     let videos: [CreatorPublicVideo]
+}
+
+struct MyProfileResult: Decodable {
+    let profile: CreatorPublicProfile
+    let profile_stats: CreatorProfileStats
 }
 
 struct CreatorRelationshipResult: Decodable {
@@ -365,6 +377,15 @@ final class LifeCastAPIClient {
     func getCreatorPage(creatorUserId: UUID) async throws -> CreatorPublicPageResult {
         try await send(
             path: "/v1/creators/\(creatorUserId.uuidString)",
+            method: "GET",
+            body: Optional<String>.none,
+            idempotencyKey: nil
+        )
+    }
+
+    func getMyProfile() async throws -> MyProfileResult {
+        try await send(
+            path: "/v1/me/profile",
             method: "GET",
             body: Optional<String>.none,
             idempotencyKey: nil

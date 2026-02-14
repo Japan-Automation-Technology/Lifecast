@@ -19,6 +19,80 @@ function resolveViewerUserId(): string | null {
   );
 }
 
+function resolveViewerUserIdForStats(): string | null {
+  return (
+    process.env.LIFECAST_DEV_VIEWER_USER_ID ??
+    process.env.LIFECAST_DEV_SUPPORTER_USER_ID ??
+    process.env.LIFECAST_DEV_CREATOR_USER_ID ??
+    null
+  );
+}
+
+function resolveProfileUserIdForMe(): string | null {
+  return (
+    process.env.LIFECAST_DEV_CREATOR_USER_ID ??
+    process.env.LIFECAST_DEV_VIEWER_USER_ID ??
+    process.env.LIFECAST_DEV_SUPPORTER_USER_ID ??
+    null
+  );
+}
+
+async function loadProfileStats(client: PoolClient, creatorUserId: string, excludeCreatorUserId?: string) {
+  let followersCount = 0;
+  let followingCount = 0;
+  const followTableResult = await client.query<{ exists: boolean }>(
+    `select to_regclass('public.user_follows') is not null as exists`,
+  );
+  if (followTableResult.rows[0]?.exists) {
+    const followStatsResult = await client.query<{
+      followers_count: string | number;
+      following_count: string | number;
+    }>(
+      `
+      select
+        (select count(*) from user_follows where followed_creator_user_id = $1) as followers_count,
+        (select count(*) from user_follows where follower_user_id = $1) as following_count
+    `,
+      [creatorUserId],
+    );
+    followersCount = Number(followStatsResult.rows[0]?.followers_count ?? 0);
+    followingCount = Number(followStatsResult.rows[0]?.following_count ?? 0);
+  }
+
+  const supportedResult = excludeCreatorUserId
+    ? await client.query<{ supported_project_count: string | number }>(
+        `
+        select count(distinct st.project_id) as supported_project_count
+        from support_transactions st
+        inner join projects p on p.id = st.project_id
+        where st.supporter_user_id = $1
+          and st.status in ('pending_confirmation', 'succeeded')
+          and p.status = 'active'
+          and p.creator_user_id <> st.supporter_user_id
+          and p.creator_user_id <> $2
+      `,
+        [creatorUserId, excludeCreatorUserId],
+      )
+    : await client.query<{ supported_project_count: string | number }>(
+        `
+        select count(distinct st.project_id) as supported_project_count
+        from support_transactions st
+        inner join projects p on p.id = st.project_id
+        where st.supporter_user_id = $1
+          and st.status in ('pending_confirmation', 'succeeded')
+          and p.status = 'active'
+          and p.creator_user_id <> st.supporter_user_id
+      `,
+        [creatorUserId],
+      );
+
+  return {
+    following_count: followingCount,
+    followers_count: followersCount,
+    supported_project_count: Number(supportedResult.rows[0]?.supported_project_count ?? 0),
+  };
+}
+
 async function loadViewerRelationship(client: PoolClient, viewerUserId: string | null, creatorUserId: string) {
   if (!viewerUserId || viewerUserId === creatorUserId) {
     return { is_following: false, is_supported: false };
@@ -150,6 +224,11 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             is_following: false,
             is_supported: false,
           },
+          profile_stats: {
+            following_count: 0,
+            followers_count: 0,
+            supported_project_count: 0,
+          },
           project: project
             ? {
                 id: project.id,
@@ -203,6 +282,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       }
 
       const relationship = await loadViewerRelationship(client, viewerUserId, creatorUserId);
+      const profileStats = await loadProfileStats(client, creatorUserId);
 
       const project = await store.getProjectByCreator(creatorUserId);
       const videos = await store.listCreatorVideos(creatorUserId, 30);
@@ -211,6 +291,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         ok({
           profile: profileResult.rows[0],
           viewer_relationship: relationship,
+          profile_stats: profileStats,
           project: project
             ? {
                 id: project.id,
@@ -261,6 +342,76 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             thumbnail_url: video.thumbnailUrl,
             created_at: video.createdAt,
           })),
+        }),
+      );
+    } finally {
+      client.release();
+    }
+  });
+
+  app.get("/v1/me/profile", async (_req, reply) => {
+    const profileUserId = resolveProfileUserIdForMe();
+    const statsUserId = resolveViewerUserIdForStats();
+    if (!profileUserId || !z.string().uuid().safeParse(profileUserId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Profile user id is not configured"));
+    }
+    if (!statsUserId || !z.string().uuid().safeParse(statsUserId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Viewer user id is not configured"));
+    }
+
+    if (!hasDb() || !dbPool) {
+      return reply.send(
+        ok({
+          profile: {
+            creator_user_id: profileUserId,
+            username: "lifecast_maker",
+            display_name: "LifeCast Maker",
+            bio: null,
+            avatar_url: null,
+          },
+          profile_stats: {
+            following_count: 0,
+            followers_count: 0,
+            supported_project_count: 0,
+          },
+        }),
+      );
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const profileResult = await client.query<{
+        creator_user_id: string;
+        username: string;
+        display_name: string | null;
+        bio: string | null;
+        avatar_url: string | null;
+      }>(
+        `
+        select creator_user_id, username, display_name, bio, avatar_url
+        from creator_profiles
+        where creator_user_id = $1
+        limit 1
+      `,
+        [profileUserId],
+      );
+
+      const profileStats = await loadProfileStats(client, statsUserId, profileUserId);
+      const fallbackUsername = profileUserId === process.env.LIFECAST_DEV_CREATOR_USER_ID ? "lifecast_maker" : "user";
+      const hasProfile = profileResult.rows.length > 0;
+      const profile = hasProfile
+        ? profileResult.rows[0]
+        : {
+            creator_user_id: profileUserId,
+            username: fallbackUsername,
+            display_name: fallbackUsername === "lifecast_maker" ? "LifeCast Maker" : "User",
+            bio: null,
+            avatar_url: null,
+          };
+      return reply.send(
+        ok({
+          profile,
+          profile_stats: profileStats,
         }),
       );
     } finally {

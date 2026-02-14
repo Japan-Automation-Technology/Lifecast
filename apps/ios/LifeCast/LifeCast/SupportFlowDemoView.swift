@@ -108,6 +108,8 @@ struct SupportFlowDemoView: View {
     @State private var liveSupportProject: MyProjectResult?
     @State private var supportTargetProject: MyProjectResult?
     @State private var feedProjects: [FeedProjectSummary] = sampleProjects
+    @State private var myProfile: CreatorPublicProfile?
+    @State private var myProfileStats: CreatorProfileStats?
     @State private var myVideos: [MyVideo] = []
     @State private var myVideosError = ""
 
@@ -167,8 +169,15 @@ struct SupportFlowDemoView: View {
 
             MeTabView(
                 client: client,
+                myProfile: myProfile,
+                myProfileStats: myProfileStats,
                 myVideos: myVideos,
                 myVideosError: myVideosError,
+                onRefreshProfile: {
+                    Task {
+                        await refreshMyProfile()
+                    }
+                },
                 onRefreshVideos: {
                     Task {
                         await refreshMyVideos()
@@ -199,6 +208,7 @@ struct SupportFlowDemoView: View {
         .task {
             await refreshMyVideos()
             await refreshLiveSupportProject()
+            await refreshMyProfile()
             await refreshFeedProjectsFromAPI()
         }
         .onChange(of: selectedTab) { _, newValue in
@@ -206,6 +216,7 @@ struct SupportFlowDemoView: View {
                 Task {
                     await refreshMyVideos()
                     await refreshLiveSupportProject()
+                    await refreshMyProfile()
                 }
             } else if newValue == 0 {
                 Task {
@@ -666,6 +677,21 @@ struct SupportFlowDemoView: View {
         }
     }
 
+    private func refreshMyProfile() async {
+        do {
+            let profile = try await client.getMyProfile()
+            await MainActor.run {
+                myProfile = profile.profile
+                myProfileStats = profile.profile_stats
+            }
+        } catch {
+            await MainActor.run {
+                myProfile = nil
+                myProfileStats = nil
+            }
+        }
+    }
+
     private var sortedComments: [FeedComment] {
         sampleComments.sorted { lhs, rhs in
             if lhs.isSupporter != rhs.isSupporter {
@@ -813,8 +839,11 @@ struct CreatorProfileView: View {
 
 struct MeTabView: View {
     let client: LifeCastAPIClient
+    let myProfile: CreatorPublicProfile?
+    let myProfileStats: CreatorProfileStats?
     let myVideos: [MyVideo]
     let myVideosError: String
+    let onRefreshProfile: () -> Void
     let onRefreshVideos: () -> Void
     let onProjectChanged: () -> Void
 
@@ -827,20 +856,24 @@ struct MeTabView: View {
                     Circle()
                         .fill(Color.gray.opacity(0.3))
                         .frame(width: 90, height: 90)
-                    Text("@lifecast_maker")
+                    Text("@\(myProfile?.username ?? "lifecast_maker")")
                         .font(.headline)
-                    Text("Creator profile")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if let displayName = myProfile?.display_name, !displayName.isEmpty {
+                        Text(displayName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 28) {
+                        profileStatItem(value: myProfileStats?.following_count ?? 0, label: "Following")
+                        profileStatItem(value: myProfileStats?.followers_count ?? 0, label: "Followers")
+                        profileStatItem(value: myProfileStats?.supported_project_count ?? 0, label: "Support")
+                    }
+                    Button("Edit Profile") {}
+                        .buttonStyle(.bordered)
                 }
 
-                Picker("ProfileTabs", selection: $selectedIndex) {
-                    Text("Project").tag(0)
-                    Text("Posts").tag(1)
-                    Text("Liked").tag(2)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
+                ProfileTabIconStrip(selectedIndex: $selectedIndex)
+                    .padding(.horizontal, 16)
                 .onChange(of: selectedIndex) { _, newValue in
                     if newValue == 1 {
                         onRefreshVideos()
@@ -865,12 +898,30 @@ struct MeTabView: View {
                 }
                 .frame(maxHeight: .infinity)
             }
-            .navigationTitle("Me")
             .task {
+                onRefreshProfile()
                 onRefreshVideos()
             }
         }
     }
+
+    private func profileStatItem(value: Int, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value.formatted())
+                .font(.headline.weight(.semibold))
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func shortCount(_ value: Int) -> String {
+        if value >= 1000 {
+            return String(format: "%.1fK", Double(value) / 1000.0)
+        }
+        return "\(value)"
+    }
+
 }
 
 struct ProjectPageView: View {
@@ -2084,6 +2135,36 @@ struct VideoGridPlaceholder: View {
     }
 }
 
+struct ProfileTabIconStrip: View {
+    @Binding var selectedIndex: Int
+
+    var body: some View {
+        HStack(spacing: 0) {
+            iconButton(index: 0, systemName: "folder")
+            iconButton(index: 1, systemName: "square.grid.3x3")
+            iconButton(index: 2, systemName: "heart")
+        }
+        .padding(4)
+        .background(Color.secondary.opacity(0.12))
+        .clipShape(Capsule())
+    }
+
+    private func iconButton(index: Int, systemName: String) -> some View {
+        Button {
+            selectedIndex = index
+        } label: {
+            Image(systemName: selectedIndex == index ? "\(systemName).fill" : systemName)
+                .font(.system(size: 16, weight: .semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(selectedIndex == index ? Color.white : Color.clear)
+                .clipShape(Capsule())
+                .foregroundStyle(.primary)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct DiscoverSearchView: View {
     let client: LifeCastAPIClient
     let onSupportTap: (MyProjectResult) -> Void
@@ -2201,6 +2282,11 @@ struct CreatorPublicPageView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                        HStack(spacing: 28) {
+                            profileStatItem(value: page.profile_stats.following_count, label: "Following")
+                            profileStatItem(value: page.profile_stats.followers_count, label: "Followers")
+                            profileStatItem(value: page.profile_stats.supported_project_count, label: "Support")
+                        }
                         HStack(spacing: 10) {
                             Button(page.viewer_relationship.is_following ? "Following" : "Follow") {
                                 Task {
@@ -2222,12 +2308,7 @@ struct CreatorPublicPageView: View {
                     }
                     .padding(.top, 8)
 
-                    Picker("CreatorTabs", selection: $selectedIndex) {
-                        Text("Project").tag(0)
-                        Text("Posts").tag(1)
-                        Text("Liked").tag(2)
-                    }
-                    .pickerStyle(.segmented)
+                    ProfileTabIconStrip(selectedIndex: $selectedIndex)
                     .padding(.horizontal, 16)
 
                     Group {
@@ -2251,7 +2332,6 @@ struct CreatorPublicPageView: View {
                 }
             }
         }
-        .navigationTitle("Creator")
         .task {
             await load()
         }
@@ -2261,6 +2341,16 @@ struct CreatorPublicPageView: View {
             Task {
                 await load()
             }
+        }
+    }
+
+    private func profileStatItem(value: Int, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value.formatted())
+                .font(.headline.weight(.semibold))
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -2563,9 +2653,15 @@ struct CreatorPublicPageView: View {
                 relationship = try await client.followCreator(creatorUserId: creatorId)
             }
             await MainActor.run {
+                let followers = current.profile_stats.followers_count + (current.viewer_relationship.is_following ? -1 : 1)
                 page = CreatorPublicPageResult(
                     profile: current.profile,
                     viewer_relationship: relationship,
+                    profile_stats: CreatorProfileStats(
+                        following_count: current.profile_stats.following_count,
+                        followers_count: max(0, followers),
+                        supported_project_count: current.profile_stats.supported_project_count
+                    ),
                     project: current.project,
                     videos: current.videos
                 )
