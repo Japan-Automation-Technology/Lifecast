@@ -60,7 +60,7 @@ struct FeedComment: Identifiable {
     let isSupporter: Bool
 }
 
-struct CreatorRoute: Identifiable {
+struct CreatorRoute: Identifiable, Hashable {
     let id: UUID
 }
 
@@ -121,7 +121,22 @@ struct SupportFlowDemoView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            homeTab
+            NavigationStack {
+                homeTab
+                    .navigationDestination(item: $selectedCreatorRoute) { route in
+                        CreatorPublicPageView(
+                            client: client,
+                            creatorId: route.id,
+                            onSupportTap: { project in
+                                supportEntryPoint = .feed
+                                supportTargetProject = project
+                                selectedPlan = nil
+                                supportStep = .planSelect
+                                showSupportFlow = true
+                            }
+                        )
+                    }
+            }
                 .tabItem { Label("Home", systemImage: "house") }
                 .tag(0)
 
@@ -165,21 +180,6 @@ struct SupportFlowDemoView: View {
         }
         .sheet(isPresented: $showComments) {
             commentsSheet
-        }
-        .sheet(item: $selectedCreatorRoute) { route in
-            NavigationStack {
-                CreatorPublicPageView(
-                    client: client,
-                    creatorId: route.id,
-                    onSupportTap: { project in
-                        supportEntryPoint = .feed
-                        supportTargetProject = project
-                        selectedPlan = nil
-                        supportStep = .planSelect
-                        showSupportFlow = true
-                    }
-                )
-            }
         }
         .confirmationDialog("Share", isPresented: $showShare, titleVisibility: .visible) {
             Button("Export video") {}
