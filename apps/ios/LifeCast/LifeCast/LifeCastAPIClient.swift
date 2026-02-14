@@ -120,6 +120,26 @@ struct DiscoverCreatorsResult: Decodable {
     let rows: [DiscoverCreatorRow]
 }
 
+struct FeedProjectRow: Decodable, Identifiable {
+    let project_id: UUID
+    let creator_user_id: UUID
+    let username: String
+    let caption: String
+    let min_plan_price_minor: Int
+    let goal_amount_minor: Int
+    let funded_amount_minor: Int
+    let remaining_days: Int
+    let likes: Int
+    let comments: Int
+    let is_supported_by_current_user: Bool
+
+    var id: UUID { project_id }
+}
+
+struct FeedProjectsResult: Decodable {
+    let rows: [FeedProjectRow]
+}
+
 struct CreatorPublicProfile: Decodable {
     let creator_user_id: UUID
     let username: String
@@ -371,6 +391,43 @@ final class LifeCastAPIClient {
         }
 
         let envelope = try JSONDecoder().decode(APIEnvelope<DiscoverCreatorsResult>.self, from: data)
+        return envelope.result.rows
+    }
+
+    func listFeedProjects(limit: Int = 20) async throws -> [FeedProjectRow] {
+        guard var components = URLComponents(
+            url: baseURL.appendingPathComponent("v1/feed/projects"),
+            resolvingAgainstBaseURL: false
+        ) else {
+            throw NSError(
+                domain: "LifeCastAPI",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "invalid feed URL"]
+            )
+        }
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "\(max(1, min(limit, 50)))")
+        ]
+        guard let url = components.url else {
+            throw NSError(
+                domain: "LifeCastAPI",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "invalid feed URL"]
+            )
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let payloadText = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "LifeCastAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: payloadText])
+        }
+
+        let envelope = try JSONDecoder().decode(APIEnvelope<FeedProjectsResult>.self, from: data)
         return envelope.result.rows
     }
 

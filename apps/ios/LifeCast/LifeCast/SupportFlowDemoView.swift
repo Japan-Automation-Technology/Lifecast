@@ -22,7 +22,7 @@ struct SupportFlowDemoView: View {
     @State private var supportResultMessage = ""
     @State private var liveSupportProject: MyProjectResult?
     @State private var supportTargetProject: MyProjectResult?
-    @State private var feedProjects: [FeedProjectSummary] = sampleProjects
+    @State private var feedProjects: [FeedProjectSummary] = []
     @State private var myProfile: CreatorPublicProfile?
     @State private var myProfileStats: CreatorProfileStats?
     @State private var myVideos: [MyVideo] = []
@@ -37,8 +37,9 @@ struct SupportFlowDemoView: View {
         }
     }
 
-    private var currentProject: FeedProjectSummary {
-        feedProjects[max(0, min(currentFeedIndex, feedProjects.count - 1))]
+    private var currentProject: FeedProjectSummary? {
+        guard !feedProjects.isEmpty else { return nil }
+        return feedProjects[max(0, min(currentFeedIndex, feedProjects.count - 1))]
     }
 
     var body: some View {
@@ -156,27 +157,46 @@ struct SupportFlowDemoView: View {
                 .padding(.top, 16)
 
                 ZStack(alignment: .bottomTrailing) {
-                    feedCard(project: currentProject)
-                        .gesture(
-                            DragGesture(minimumDistance: 24)
-                                .onEnded { value in
-                                    if value.translation.height < -50 {
-                                        nextFeed()
-                                    } else if value.translation.height > 50 {
-                                        previousFeed()
+                    if let project = currentProject {
+                        feedCard(project: project)
+                            .gesture(
+                                DragGesture(minimumDistance: 24)
+                                    .onEnded { value in
+                                        if value.translation.height < -50 {
+                                            nextFeed()
+                                        } else if value.translation.height > 50 {
+                                            previousFeed()
+                                        }
                                     }
+                            )
+                    } else {
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color.white.opacity(0.08))
+                            .overlay(
+                                VStack(spacing: 8) {
+                                    Image(systemName: "video.slash")
+                                        .font(.system(size: 30))
+                                        .foregroundStyle(.white.opacity(0.7))
+                                    Text("No feed videos yet")
+                                        .foregroundStyle(.white.opacity(0.9))
+                                    Text("Ask creators to upload videos")
+                                        .font(.caption)
+                                        .foregroundStyle(.white.opacity(0.65))
                                 }
-                        )
-
-                    VStack(spacing: 8) {
-                        ForEach(0..<feedProjects.count, id: \.self) { idx in
-                            Circle()
-                                .fill(idx == currentFeedIndex ? Color.white : Color.white.opacity(0.3))
-                                .frame(width: 6, height: 6)
-                        }
+                            )
                     }
-                    .padding(.trailing, 10)
-                    .padding(.bottom, 120)
+
+                    if !feedProjects.isEmpty {
+                        VStack(spacing: 8) {
+                            ForEach(0..<feedProjects.count, id: \.self) { idx in
+                                Circle()
+                                    .fill(idx == currentFeedIndex ? Color.white : Color.white.opacity(0.3))
+                                    .frame(width: 6, height: 6)
+                            }
+                        }
+                        .padding(.trailing, 10)
+                        .padding(.bottom, 120)
+                    }
                 }
                 .padding(.top, 8)
                 .padding(.horizontal, 8)
@@ -197,7 +217,11 @@ struct SupportFlowDemoView: View {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 10) {
                     Button("@\(project.username)") {
-                        selectedCreatorRoute = CreatorRoute(id: project.creatorId)
+                        if project.creatorId == myProfile?.creator_user_id {
+                            selectedTab = 3
+                        } else {
+                            selectedCreatorRoute = CreatorRoute(id: project.creatorId)
+                        }
                     }
                     .font(.headline)
                     .foregroundStyle(.white)
@@ -662,28 +686,25 @@ struct SupportFlowDemoView: View {
     }
 
     private func refreshFeedProjectsFromAPI() async {
-        var updated = feedProjects
-        for (index, item) in feedProjects.enumerated() {
-            guard let page = try? await client.getCreatorPage(creatorUserId: item.creatorId),
-                  let project = page.project else {
-                continue
-            }
-            updated[index] = FeedProjectSummary(
-                id: item.id,
-                creatorId: item.creatorId,
-                username: item.username,
-                caption: item.caption,
-                minPlanPriceMinor: project.minimum_plan?.price_minor ?? item.minPlanPriceMinor,
-                goalAmountMinor: project.goal_amount_minor,
-                fundedAmountMinor: project.funded_amount_minor,
-                remainingDays: item.remainingDays,
-                likes: item.likes,
-                comments: item.comments,
-                isSupportedByCurrentUser: page.viewer_relationship.is_supported
+        let rows = (try? await client.listFeedProjects(limit: 20)) ?? []
+        let updated = rows.map {
+            FeedProjectSummary(
+                id: $0.project_id,
+                creatorId: $0.creator_user_id,
+                username: $0.username,
+                caption: $0.caption,
+                minPlanPriceMinor: $0.min_plan_price_minor,
+                goalAmountMinor: $0.goal_amount_minor,
+                fundedAmountMinor: $0.funded_amount_minor,
+                remainingDays: $0.remaining_days,
+                likes: $0.likes,
+                comments: $0.comments,
+                isSupportedByCurrentUser: $0.is_supported_by_current_user
             )
         }
         await MainActor.run {
             feedProjects = updated
+            currentFeedIndex = min(currentFeedIndex, max(0, updated.count - 1))
         }
     }
 

@@ -10,6 +10,10 @@ const discoverQuery = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional(),
 });
 
+const feedQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+});
+
 function resolveViewerUserId(): string | null {
   return (
     process.env.LIFECAST_DEV_VIEWER_USER_ID ??
@@ -135,6 +139,112 @@ async function loadViewerRelationship(client: PoolClient, viewerUserId: string |
 }
 
 export async function registerDiscoverRoutes(app: FastifyInstance) {
+  app.get("/v1/feed/projects", async (req, reply) => {
+    const parsed = feedQuery.safeParse(req.query ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid feed query"));
+    }
+
+    const limit = parsed.data.limit ?? 20;
+    const viewerUserId = resolveViewerUserId();
+
+    if (!hasDb() || !dbPool) {
+      return reply.send(
+        ok({
+          rows: [],
+        }),
+      );
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const result = await client.query<{
+        project_id: string;
+        creator_user_id: string;
+        username: string;
+        caption: string | null;
+        min_plan_price_minor: string | number;
+        goal_amount_minor: string | number;
+        funded_amount_minor: string | number;
+        remaining_days: string | number;
+        likes: string | number;
+        comments: string | number;
+        is_supported_by_current_user: boolean;
+      }>(
+        `
+        select
+          p.id as project_id,
+          p.creator_user_id,
+          cp.username,
+          nullif(coalesce(p.subtitle, p.description, ''), '') as caption,
+          coalesce(min_plan.price_minor, 0) as min_plan_price_minor,
+          p.goal_amount_minor,
+          coalesce((
+            select sum(st.amount_minor)
+            from support_transactions st
+            where st.project_id = p.id and st.status = 'succeeded'
+          ), 0) as funded_amount_minor,
+          greatest(
+            0,
+            ceil(extract(epoch from (p.deadline_at - now())) / 86400.0)
+          )::int as remaining_days,
+          0::int as likes,
+          0::int as comments,
+          case
+            when $1::uuid is null then false
+            else exists(
+              select 1
+              from support_transactions st
+              where st.project_id = p.id
+                and st.supporter_user_id = $1::uuid
+                and st.status = 'succeeded'
+            )
+          end as is_supported_by_current_user
+        from projects p
+        inner join creator_profiles cp on cp.creator_user_id = p.creator_user_id
+        left join lateral (
+          select price_minor
+          from project_plans
+          where project_id = p.id
+          order by price_minor asc, created_at asc
+          limit 1
+        ) min_plan on true
+        where p.status in ('active', 'draft')
+          and exists (
+            select 1
+            from video_assets va
+            where va.creator_user_id = p.creator_user_id
+              and va.status = 'ready'
+          )
+          and ($1::uuid is null or p.creator_user_id <> $1::uuid)
+        order by p.created_at desc
+        limit $2
+      `,
+        [viewerUserId, limit],
+      );
+
+      return reply.send(
+        ok({
+          rows: result.rows.map((row) => ({
+            project_id: row.project_id,
+            creator_user_id: row.creator_user_id,
+            username: row.username,
+            caption: row.caption ?? "Project update",
+            min_plan_price_minor: Number(row.min_plan_price_minor),
+            goal_amount_minor: Number(row.goal_amount_minor),
+            funded_amount_minor: Number(row.funded_amount_minor),
+            remaining_days: Number(row.remaining_days),
+            likes: Number(row.likes),
+            comments: Number(row.comments),
+            is_supported_by_current_user: row.is_supported_by_current_user,
+          })),
+        }),
+      );
+    } finally {
+      client.release();
+    }
+  });
+
   app.get("/v1/discover/creators", async (req, reply) => {
     const parsed = discoverQuery.safeParse(req.query ?? {});
     if (!parsed.success) {
