@@ -1,5 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import { resolveRequestUserId } from "./auth/requestContext.js";
+import { registerAuthRoutes } from "./routes/auth.js";
 import { registerAnalyticsRoutes } from "./routes/analytics.js";
 import { registerDisputeRoutes } from "./routes/disputes.js";
 import { registerDiscoverRoutes } from "./routes/discover.js";
@@ -25,9 +27,13 @@ export async function buildApp() {
     done(null, body);
   });
   await app.register(cors, { origin: true });
+  app.addHook("onRequest", async (req) => {
+    req.lifecastAuth = await resolveRequestUserId(req);
+  });
 
   app.get("/health", async () => ({ ok: true, service: "lifecast-backend" }));
 
+  await registerAuthRoutes(app);
   await registerSupportRoutes(app);
   await registerEventRoutes(app);
   await registerAnalyticsRoutes(app);

@@ -49,7 +49,7 @@ export class InMemoryStore {
     }[];
   }>();
 
-  prepareSupport(input: { projectId: string; planId: string; quantity: number }) {
+  prepareSupport(input: { projectId: string; planId: string; quantity: number; supporterUserId?: string }) {
     const supportId = randomUUID();
     const record: SupportRecord = {
       supportId,
@@ -86,11 +86,12 @@ export class InMemoryStore {
     return record;
   }
 
-  createUploadSession(input?: { fileName?: string; projectId?: string }) {
+  createUploadSession(input?: { fileName?: string; projectId?: string; creatorUserId?: string }) {
     if (!input?.projectId) return null;
     const project = this.projectsById.get(input.projectId);
     if (!project) return null;
     if (!(project.status === "active" || project.status === "draft")) return null;
+    if (input.creatorUserId && project.creatorUserId !== input.creatorUserId) return null;
 
     const uploadSessionId = randomUUID();
     const session: UploadSession = {

@@ -199,7 +199,7 @@ export class HybridStore {
   private readonly projectsService = new ProjectsService(memory);
   private readonly uploadsService = new UploadsService(memory);
 
-  async prepareSupport(input: { projectId: string; planId: string; quantity: number }) {
+  async prepareSupport(input: { projectId: string; planId: string; quantity: number; supporterUserId: string }) {
     return this.supportsService.prepareSupport(input);
   }
 
@@ -1053,7 +1053,13 @@ export class HybridStore {
     return this.projectsService.endProjectForCreator(input);
   }
 
-  async createUploadSession(input?: { fileName?: string; contentType?: string; fileSizeBytes?: number; projectId?: string }) {
+  async createUploadSession(input?: {
+    fileName?: string;
+    contentType?: string;
+    fileSizeBytes?: number;
+    projectId?: string;
+    creatorUserId?: string;
+  }) {
     return this.uploadsService.createUploadSession(input);
   }
 

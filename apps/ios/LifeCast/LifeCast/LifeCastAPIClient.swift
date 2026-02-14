@@ -245,6 +245,71 @@ struct UploadProjectImageResult: Decodable {
     let image_url: String
 }
 
+struct AuthMeResult: Decodable {
+    let user_id: UUID
+    let auth_source: String
+    let profile: CreatorPublicProfile?
+}
+
+struct DevAuthUser: Decodable, Identifiable {
+    let user_id: UUID
+    let username: String
+    let display_name: String?
+    let is_creator: Bool
+
+    var id: UUID { user_id }
+}
+
+struct DevAuthUsersResult: Decodable {
+    let rows: [DevAuthUser]
+}
+
+struct DevSwitchUserRequest: Encodable {
+    let user_id: UUID
+}
+
+struct DevSwitchUserResult: Decodable {
+    let user_id: UUID
+    let header_name: String
+    let header_value: String
+    let switched: Bool
+}
+
+struct EmailSignInRequest: Encodable {
+    let email: String
+    let password: String
+}
+
+struct EmailSignUpRequest: Encodable {
+    let email: String
+    let password: String
+    let username: String?
+    let display_name: String?
+}
+
+struct RefreshTokenRequest: Encodable {
+    let refresh_token: String
+}
+
+struct AuthSessionResult: Decodable {
+    let access_token: String?
+    let refresh_token: String?
+    let expires_in: Int?
+    let token_type: String?
+    let user: AuthUser?
+}
+
+struct AuthUser: Decodable {
+    let id: UUID
+    let email: String?
+}
+
+struct OAuthURLResult: Decodable {
+    let provider: String
+    let redirect_to: String
+    let authorize_url: String
+}
+
 struct DevSampleVideo {
     let data: Data
     let fileName: String
@@ -258,12 +323,136 @@ struct APIEnvelope<T: Decodable>: Decodable {
 }
 
 final class LifeCastAPIClient {
+    private static let actingUserIdKey = "lifecast.acting_user_id"
+    private static let accessTokenKey = "lifecast.auth.access_token"
+    private static let refreshTokenKey = "lifecast.auth.refresh_token"
+
     private let baseURL: URL
     private let session: URLSession
+    private var actingUserId: UUID?
+    private var accessToken: String?
+    private var refreshToken: String?
 
-    init(baseURL: URL, session: URLSession = .shared) {
+    init(baseURL: URL, session: URLSession = .shared, actingUserId: UUID? = nil) {
         self.baseURL = baseURL
         self.session = session
+        self.actingUserId = actingUserId ?? Self.loadPersistedActingUserId()
+        self.accessToken = UserDefaults.standard.string(forKey: Self.accessTokenKey)
+        self.refreshToken = UserDefaults.standard.string(forKey: Self.refreshTokenKey)
+    }
+
+    func setActingUserId(_ userId: UUID?) {
+        actingUserId = userId
+        if let userId {
+            UserDefaults.standard.set(userId.uuidString, forKey: Self.actingUserIdKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.actingUserIdKey)
+        }
+    }
+
+    private func setAuthTokens(accessToken: String?, refreshToken: String?) {
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        if let accessToken {
+            UserDefaults.standard.set(accessToken, forKey: Self.accessTokenKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.accessTokenKey)
+        }
+        if let refreshToken {
+            UserDefaults.standard.set(refreshToken, forKey: Self.refreshTokenKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.refreshTokenKey)
+        }
+    }
+
+    private static func loadPersistedActingUserId() -> UUID? {
+        guard let raw = UserDefaults.standard.string(forKey: Self.actingUserIdKey) else { return nil }
+        return UUID(uuidString: raw)
+    }
+
+    private func applyAuthHeaders(_ request: inout URLRequest) {
+        if accessToken == nil {
+            accessToken = UserDefaults.standard.string(forKey: Self.accessTokenKey)
+        }
+        if refreshToken == nil {
+            refreshToken = UserDefaults.standard.string(forKey: Self.refreshTokenKey)
+        }
+        if let actingUserId {
+            request.setValue(actingUserId.uuidString, forHTTPHeaderField: "x-lifecast-user-id")
+        }
+        if let accessToken, !accessToken.isEmpty {
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        }
+    }
+
+    var hasAuthSession: Bool {
+        if let accessToken, !accessToken.isEmpty { return true }
+        let persisted = UserDefaults.standard.string(forKey: Self.accessTokenKey)
+        return persisted?.isEmpty == false
+    }
+
+    static func handleOAuthCallback(url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "lifecast" else { return false }
+        guard url.host?.lowercased() == "auth" else { return false }
+        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).lowercased()
+        guard path == "callback" else { return false }
+
+        var pairs: [String: String] = [:]
+        if let query = url.query {
+            pairs.merge(parseURLEncodedPairs(query)) { _, new in new }
+        }
+        if let fragment = url.fragment {
+            pairs.merge(parseURLEncodedPairs(fragment)) { _, new in new }
+        }
+
+        let accessToken = pairs["access_token"]
+        let refreshToken = pairs["refresh_token"]
+        guard accessToken != nil || refreshToken != nil else { return false }
+
+        if let accessToken {
+            UserDefaults.standard.set(accessToken, forKey: accessTokenKey)
+        }
+        if let refreshToken {
+            UserDefaults.standard.set(refreshToken, forKey: refreshTokenKey)
+        }
+        if let userId = jwtSubject(accessToken), UUID(uuidString: userId) != nil {
+            UserDefaults.standard.set(userId, forKey: actingUserIdKey)
+        }
+        return true
+    }
+
+    private static func parseURLEncodedPairs(_ text: String) -> [String: String] {
+        var result: [String: String] = [:]
+        for chunk in text.split(separator: "&", omittingEmptySubsequences: true) {
+            let parts = chunk.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard let rawKey = parts.first, !rawKey.isEmpty else { continue }
+            let rawValue = parts.count > 1 ? String(parts[1]) : ""
+            let key = String(rawKey).removingPercentEncoding ?? String(rawKey)
+            let value = rawValue.removingPercentEncoding ?? rawValue
+            result[key] = value
+        }
+        return result
+    }
+
+    private static func jwtSubject(_ token: String?) -> String? {
+        guard let token else { return nil }
+        let segments = token.split(separator: ".")
+        guard segments.count >= 2 else { return nil }
+        var payload = String(segments[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let padding = payload.count % 4
+        if padding > 0 {
+            payload += String(repeating: "=", count: 4 - padding)
+        }
+        guard let payloadData = Data(base64Encoded: payload) else { return nil }
+        guard
+            let json = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
+            let sub = json["sub"] as? String
+        else {
+            return nil
+        }
+        return sub
     }
 
     func prepareSupport(projectId: UUID, planId: UUID, quantity: Int, idempotencyKey: String) async throws -> PrepareSupportResult {
@@ -319,6 +508,7 @@ final class LifeCastAPIClient {
         request.httpMethod = "PUT"
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.httpBody = data
+        applyAuthHeaders(&request)
 
         let (payload, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -338,6 +528,7 @@ final class LifeCastAPIClient {
         request.httpMethod = "POST"
         let boundary = "LifeCastBoundary-\(UUID().uuidString)"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        applyAuthHeaders(&request)
 
         var body = Data()
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -405,6 +596,7 @@ final class LifeCastAPIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        applyAuthHeaders(&request)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
@@ -442,6 +634,7 @@ final class LifeCastAPIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        applyAuthHeaders(&request)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
@@ -481,6 +674,7 @@ final class LifeCastAPIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        applyAuthHeaders(&request)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
@@ -510,6 +704,7 @@ final class LifeCastAPIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        applyAuthHeaders(&request)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
@@ -523,12 +718,136 @@ final class LifeCastAPIClient {
     }
 
     func getMyProfile() async throws -> MyProfileResult {
-        try await send(
+        let result: MyProfileResult = try await send(
             path: "/v1/me/profile",
             method: "GET",
             body: Optional<String>.none,
             idempotencyKey: nil
         )
+        if actingUserId == nil {
+            setActingUserId(result.profile.creator_user_id)
+        }
+        return result
+    }
+
+    func getAuthMe() async throws -> AuthMeResult {
+        let result: AuthMeResult = try await send(
+            path: "/v1/auth/me",
+            method: "GET",
+            body: Optional<String>.none,
+            idempotencyKey: nil
+        )
+        if actingUserId == nil || actingUserId != result.user_id {
+            setActingUserId(result.user_id)
+        }
+        return result
+    }
+
+    func signUpWithEmail(email: String, password: String, username: String?, displayName: String?) async throws -> AuthSessionResult {
+        let result: AuthSessionResult = try await send(
+            path: "/v1/auth/email/sign-up",
+            method: "POST",
+            body: EmailSignUpRequest(email: email, password: password, username: username, display_name: displayName),
+            idempotencyKey: "ios-auth-signup-\(UUID().uuidString)"
+        )
+        if let userId = result.user?.id {
+            setActingUserId(userId)
+        }
+        if result.access_token != nil || result.refresh_token != nil {
+            setAuthTokens(accessToken: result.access_token, refreshToken: result.refresh_token)
+        }
+        return result
+    }
+
+    func signInWithEmail(email: String, password: String) async throws -> AuthSessionResult {
+        let result: AuthSessionResult = try await send(
+            path: "/v1/auth/email/sign-in",
+            method: "POST",
+            body: EmailSignInRequest(email: email, password: password),
+            idempotencyKey: "ios-auth-signin-\(UUID().uuidString)"
+        )
+        if let userId = result.user?.id {
+            setActingUserId(userId)
+        }
+        setAuthTokens(accessToken: result.access_token, refreshToken: result.refresh_token)
+        return result
+    }
+
+    func refreshAuthSession() async throws -> AuthSessionResult {
+        guard let refreshToken, !refreshToken.isEmpty else {
+            throw NSError(domain: "LifeCastAuth", code: 400, userInfo: [NSLocalizedDescriptionKey: "No refresh token"])
+        }
+        let result: AuthSessionResult = try await send(
+            path: "/v1/auth/token/refresh",
+            method: "POST",
+            body: RefreshTokenRequest(refresh_token: refreshToken),
+            idempotencyKey: "ios-auth-refresh-\(UUID().uuidString)"
+        )
+        if let userId = result.user?.id {
+            setActingUserId(userId)
+        }
+        setAuthTokens(accessToken: result.access_token, refreshToken: result.refresh_token ?? refreshToken)
+        return result
+    }
+
+    func signOut() async throws {
+        struct SignOutResult: Decodable { let signed_out: Bool }
+        _ = try await send(
+            path: "/v1/auth/sign-out",
+            method: "POST",
+            body: Optional<String>.none,
+            idempotencyKey: "ios-auth-signout-\(UUID().uuidString)"
+        ) as SignOutResult
+        setAuthTokens(accessToken: nil, refreshToken: nil)
+    }
+
+    func oauthURL(provider: String, redirectTo: String? = nil) async throws -> URL {
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("v1/auth/oauth/url"),
+            resolvingAgainstBaseURL: false
+        )!
+        var queryItems = [URLQueryItem(name: "provider", value: provider)]
+        if let redirectTo {
+            queryItems.append(URLQueryItem(name: "redirect_to", value: redirectTo))
+        }
+        components.queryItems = queryItems
+        guard let url = components.url else {
+            throw NSError(domain: "LifeCastAuth", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid OAuth URL"])
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        applyAuthHeaders(&request)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let text = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "LifeCastAuth", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: text])
+        }
+        let envelope = try JSONDecoder().decode(APIEnvelope<OAuthURLResult>.self, from: data)
+        guard let authorizeURL = URL(string: envelope.result.authorize_url) else {
+            throw NSError(domain: "LifeCastAuth", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid authorize URL"])
+        }
+        return authorizeURL
+    }
+
+    func listDevAuthUsers() async throws -> [DevAuthUser] {
+        let result: DevAuthUsersResult = try await send(
+            path: "/v1/auth/dev/users",
+            method: "GET",
+            body: Optional<String>.none,
+            idempotencyKey: nil
+        )
+        return result.rows
+    }
+
+    func switchDevUser(userId: UUID) async throws {
+        let _: DevSwitchUserResult = try await send(
+            path: "/v1/auth/dev/switch",
+            method: "POST",
+            body: DevSwitchUserRequest(user_id: userId),
+            idempotencyKey: "ios-dev-switch-\(UUID().uuidString)"
+        )
+        setActingUserId(userId)
     }
 
     func followCreator(creatorUserId: UUID) async throws -> CreatorViewerRelationship {
@@ -639,6 +958,7 @@ final class LifeCastAPIClient {
     func downloadDevSampleVideo() async throws -> DevSampleVideo {
         var request = URLRequest(url: baseURL.appendingPathComponent("v1/dev/sample-video"))
         request.httpMethod = "GET"
+        applyAuthHeaders(&request)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw NSError(domain: "LifeCastAPIClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "failed to fetch sample video"])
@@ -661,6 +981,7 @@ final class LifeCastAPIClient {
     ) async throws -> T {
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.httpMethod = method
+        applyAuthHeaders(&request)
         if let idempotencyKey {
             request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
         }

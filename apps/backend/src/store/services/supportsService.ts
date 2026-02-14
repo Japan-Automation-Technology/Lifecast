@@ -9,7 +9,7 @@ function normalizeCurrency(value: string | undefined, fallback = "JPY") {
 
 export class SupportsService {
   constructor(private readonly memory: InMemoryStore) {}
-  async prepareSupport(input: { projectId: string; planId: string; quantity: number }) {
+  async prepareSupport(input: { projectId: string; planId: string; quantity: number; supporterUserId: string }) {
     if (!hasDb() || !dbPool) {
       return this.memory.prepareSupport(input);
     }
@@ -34,13 +34,6 @@ export class SupportsService {
       const supportId = randomUUID();
       const checkoutSessionId = randomUUID();
 
-      const devSupporter =
-        process.env.LIFECAST_DEV_VIEWER_USER_ID ??
-        process.env.LIFECAST_DEV_SUPPORTER_USER_ID;
-      if (!devSupporter) {
-        return this.memory.prepareSupport(input);
-      }
-
       await client.query(
         `
         insert into support_transactions (
@@ -58,7 +51,7 @@ export class SupportsService {
           now(), now(), now()
         )
       `,
-        [supportId, input.projectId, input.planId, devSupporter, amountMinor, currency, checkoutSessionId],
+        [supportId, input.projectId, input.planId, input.supporterUserId, amountMinor, currency, checkoutSessionId],
       );
 
       await client.query(

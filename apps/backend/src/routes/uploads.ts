@@ -3,6 +3,7 @@ import { createReadStream, existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { z } from "zod";
+import { requireRequestUserId } from "../auth/requestContext.js";
 import { getStoredIdempotentResponse, requestFingerprint, storeIdempotentResponse } from "../idempotency.js";
 import { fail, ok } from "../response.js";
 import { store } from "../store/hybridStore.js";
@@ -26,6 +27,9 @@ export async function registerUploadRoutes(app: FastifyInstance) {
   const devAssetsDir = resolve(process.cwd(), "dev-assets");
 
   app.post("/v1/videos/uploads", async (req, reply) => {
+    const creatorUserId = requireRequestUserId(req, reply);
+    if (!creatorUserId) return;
+
     const body = createUploadBody.safeParse(req.body);
     if (!body.success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid upload request"));
@@ -46,6 +50,7 @@ export async function registerUploadRoutes(app: FastifyInstance) {
     }
 
     const session = await store.createUploadSession({
+      creatorUserId,
       projectId: body.data.project_id,
       fileName: body.data.file_name,
       contentType: body.data.content_type,
@@ -213,11 +218,9 @@ export async function registerUploadRoutes(app: FastifyInstance) {
     );
   });
 
-  app.get("/v1/videos/mine", async (_req, reply) => {
-    const creatorUserId = process.env.LIFECAST_DEV_CREATOR_USER_ID;
-    if (!creatorUserId) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "LIFECAST_DEV_CREATOR_USER_ID is not configured"));
-    }
+  app.get("/v1/videos/mine", async (req, reply) => {
+    const creatorUserId = requireRequestUserId(req, reply);
+    if (!creatorUserId) return;
 
     const rows = await store.listCreatorVideos(creatorUserId, 30);
     return reply.send(
@@ -296,15 +299,13 @@ export async function registerUploadRoutes(app: FastifyInstance) {
   });
 
   app.delete("/v1/videos/:videoId", async (req, reply) => {
+    const creatorUserId = requireRequestUserId(req, reply);
+    if (!creatorUserId) return;
+
     const videoId = (req.params as { videoId: string }).videoId;
     if (!z.string().uuid().safeParse(videoId).success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid video id"));
     }
-    const creatorUserId = process.env.LIFECAST_DEV_CREATOR_USER_ID;
-    if (!creatorUserId) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "LIFECAST_DEV_CREATOR_USER_ID is not configured"));
-    }
-
     const result = await store.deleteCreatorVideo(creatorUserId, videoId);
     if (result === "not_found") {
       return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Video not found"));

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { z } from "zod";
+import { requireRequestUserId } from "../auth/requestContext.js";
 import { fail, ok } from "../response.js";
 import { store } from "../store/hybridStore.js";
 
@@ -209,11 +210,9 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     return reply.send(binary);
   });
 
-  app.get("/v1/me/project", async (_req, reply) => {
-    const creatorUserId = process.env.LIFECAST_DEV_CREATOR_USER_ID;
-    if (!creatorUserId) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "LIFECAST_DEV_CREATOR_USER_ID is not configured"));
-    }
+  app.get("/v1/me/project", async (req, reply) => {
+    const creatorUserId = requireRequestUserId(req, reply);
+    if (!creatorUserId) return;
 
     const project = await store.getProjectByCreator(creatorUserId);
     if (!project) {
@@ -223,24 +222,21 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     return reply.send(ok(mapProject(project)));
   });
 
-  app.get("/v1/me/projects", async (_req, reply) => {
-    const creatorUserId = process.env.LIFECAST_DEV_CREATOR_USER_ID;
-    if (!creatorUserId) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "LIFECAST_DEV_CREATOR_USER_ID is not configured"));
-    }
+  app.get("/v1/me/projects", async (req, reply) => {
+    const creatorUserId = requireRequestUserId(req, reply);
+    if (!creatorUserId) return;
 
     const projects = await store.listProjectsByCreator(creatorUserId);
     return reply.send(ok({ rows: projects.map(mapProject) }));
   });
 
   app.post("/v1/projects", async (req, reply) => {
+    const creatorUserId = requireRequestUserId(req, reply);
+    if (!creatorUserId) return;
+
     const body = createProjectBody.safeParse(req.body);
     if (!body.success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid project payload"));
-    }
-    const creatorUserId = process.env.LIFECAST_DEV_CREATOR_USER_ID;
-    if (!creatorUserId) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "LIFECAST_DEV_CREATOR_USER_ID is not configured"));
     }
     const goalAmountMinor = body.data.goal_amount_minor ?? body.data.funding_goal_minor;
     if (!goalAmountMinor || goalAmountMinor <= 0) {
@@ -292,13 +288,12 @@ export async function registerProjectRoutes(app: FastifyInstance) {
   });
 
   app.delete("/v1/projects/:projectId", async (req, reply) => {
+    const creatorUserId = requireRequestUserId(req, reply);
+    if (!creatorUserId) return;
+
     const projectId = (req.params as { projectId: string }).projectId;
     if (!z.string().uuid().safeParse(projectId).success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid project id"));
-    }
-    const creatorUserId = process.env.LIFECAST_DEV_CREATOR_USER_ID;
-    if (!creatorUserId) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "LIFECAST_DEV_CREATOR_USER_ID is not configured"));
     }
 
     const deleted = await store.deleteProjectForCreator({ creatorUserId, projectId });
@@ -324,6 +319,9 @@ export async function registerProjectRoutes(app: FastifyInstance) {
   });
 
   app.post("/v1/projects/:projectId/end", async (req, reply) => {
+    const creatorUserId = requireRequestUserId(req, reply);
+    if (!creatorUserId) return;
+
     const projectId = (req.params as { projectId: string }).projectId;
     if (!z.string().uuid().safeParse(projectId).success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid project id"));
@@ -332,11 +330,6 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     if (!body.success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid end project payload"));
     }
-    const creatorUserId = process.env.LIFECAST_DEV_CREATOR_USER_ID;
-    if (!creatorUserId) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "LIFECAST_DEV_CREATOR_USER_ID is not configured"));
-    }
-
     const ended = await store.endProjectForCreator({
       creatorUserId,
       projectId,

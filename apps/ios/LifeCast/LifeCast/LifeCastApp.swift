@@ -12,6 +12,9 @@ struct LifeCastApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onOpenURL { url in
+                    _ = LifeCastAPIClient.handleOAuthCallback(url: url)
+                }
         }
     }
 }

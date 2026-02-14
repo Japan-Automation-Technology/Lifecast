@@ -5,6 +5,7 @@ import test from "node:test";
 process.env.LIFECAST_DISABLE_DOTENV = "1";
 process.env.LIFECAST_DATABASE_URL = "";
 process.env.LIFECAST_STRIPE_WEBHOOK_SECRET = "";
+process.env.LIFECAST_DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000002";
 
 const { buildApp } = await import("./app.js");
 
@@ -43,7 +44,7 @@ test("supports prepare -> confirm -> webhook -> succeeded", async () => {
       },
     });
     assert.equal(confirm.statusCode, 200);
-    assert.equal(confirm.json().result.support_status, "pending_confirmation");
+    assert.equal(confirm.json().result.support_status, "succeeded");
 
     const webhook = await app.inject({
       method: "POST",

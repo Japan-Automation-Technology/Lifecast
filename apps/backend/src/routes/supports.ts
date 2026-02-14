@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { requireRequestUserId } from "../auth/requestContext.js";
 import { getStoredIdempotentResponse, requestFingerprint, storeIdempotentResponse } from "../idempotency.js";
 import { fail, ok } from "../response.js";
 import { store } from "../store/hybridStore.js";
@@ -17,6 +18,9 @@ const confirmBody = z.object({
 
 export async function registerSupportRoutes(app: FastifyInstance) {
   app.post("/v1/projects/:projectId/supports/prepare", async (req, reply) => {
+    const supporterUserId = requireRequestUserId(req, reply);
+    if (!supporterUserId) return;
+
     const projectId = z.string().uuid().safeParse((req.params as { projectId: string }).projectId);
     const body = prepareBody.safeParse(req.body);
     if (!projectId.success || !body.success) {
@@ -42,6 +46,7 @@ export async function registerSupportRoutes(app: FastifyInstance) {
       projectId: projectId.data,
       planId: body.data.plan_id,
       quantity: body.data.quantity,
+      supporterUserId,
     });
     if (!support) {
       const notFound = fail("RESOURCE_NOT_FOUND", "Project or plan not found");

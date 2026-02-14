@@ -127,21 +127,31 @@ function toIso(value: Date | string) {
 
 export class UploadsService {
   constructor(private readonly memory: InMemoryStore) {}
-  async createUploadSession(input?: { fileName?: string; contentType?: string; fileSizeBytes?: number; projectId?: string }) {
+  async createUploadSession(input?: {
+    fileName?: string;
+    contentType?: string;
+    fileSizeBytes?: number;
+    projectId?: string;
+    creatorUserId?: string;
+  }) {
     if (!hasDb() || !dbPool) {
-      return this.memory.createUploadSession({ fileName: input?.fileName });
+      return this.memory.createUploadSession({
+        fileName: input?.fileName,
+        projectId: input?.projectId,
+        creatorUserId: input?.creatorUserId,
+      });
     }
 
     const client = await dbPool.connect();
     try {
       const uploadSessionId = randomUUID();
-      let creatorUserId = process.env.LIFECAST_DEV_CREATOR_USER_ID;
+      const creatorUserId = input?.creatorUserId;
       if (!creatorUserId) {
-        const fallbackCreator = await client.query<{ id: string }>(`select id from users order by created_at asc limit 1`);
-        creatorUserId = fallbackCreator.rows[0]?.id;
-      }
-      if (!creatorUserId) {
-        return this.memory.createUploadSession({ fileName: input?.fileName });
+        return this.memory.createUploadSession({
+          fileName: input?.fileName,
+          projectId: input?.projectId,
+          creatorUserId: input?.creatorUserId,
+        });
       }
 
       const safeFileName = input?.fileName?.trim().slice(0, 255) || `upload-${uploadSessionId}.mp4`;
@@ -195,7 +205,11 @@ export class UploadsService {
         expiresAt,
       } satisfies UploadSession;
     } catch {
-      return this.memory.createUploadSession({ fileName: input?.fileName });
+      return this.memory.createUploadSession({
+        fileName: input?.fileName,
+        projectId: input?.projectId,
+        creatorUserId: input?.creatorUserId,
+      });
     } finally {
       client.release();
     }

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { PoolClient } from "pg";
 import { z } from "zod";
+import { requireRequestUserId } from "../auth/requestContext.js";
 import { fail, ok } from "../response.js";
 import { dbPool, hasDb } from "../store/db.js";
 import { store } from "../store/hybridStore.js";
@@ -18,24 +19,6 @@ const networkQuery = z.object({
   tab: z.enum(["followers", "following", "support"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
-
-function resolveViewerUserId(): string | null {
-  return (
-    process.env.LIFECAST_DEV_CREATOR_USER_ID ??
-    process.env.LIFECAST_DEV_VIEWER_USER_ID ??
-    process.env.LIFECAST_DEV_SUPPORTER_USER_ID ??
-    null
-  );
-}
-
-function resolveProfileUserIdForMe(): string | null {
-  return (
-    process.env.LIFECAST_DEV_CREATOR_USER_ID ??
-    process.env.LIFECAST_DEV_VIEWER_USER_ID ??
-    process.env.LIFECAST_DEV_SUPPORTER_USER_ID ??
-    null
-  );
-}
 
 async function loadProfileStats(client: PoolClient, creatorUserId: string, excludeCreatorUserId?: string) {
   let followersCount = 0;
@@ -148,7 +131,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
     }
 
     const limit = parsed.data.limit ?? 20;
-    const viewerUserId = resolveViewerUserId();
+    const viewerUserId = req.lifecastAuth.userId;
 
     if (!hasDb() || !dbPool) {
       return reply.send(
@@ -372,7 +355,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
 
     const client = await dbPool.connect();
     try {
-      const viewerUserId = resolveViewerUserId();
+      const viewerUserId = req.lifecastAuth.userId;
       const profileResult = await client.query<{
         creator_user_id: string;
         username: string;
@@ -489,7 +472,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
 
     const client = await dbPool.connect();
     try {
-      const viewerUserId = resolveViewerUserId();
+      const viewerUserId = req.lifecastAuth.userId;
       const profileStats = await loadProfileStats(client, creatorUserId);
       const followTableResult = await client.query<{ exists: boolean }>(
         `select to_regclass('public.user_follows') is not null as exists`,
@@ -637,17 +620,15 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
   });
 
   app.get("/v1/me/network", async (req, reply) => {
+    const profileUserId = requireRequestUserId(req, reply);
+    if (!profileUserId) return;
+
     const parsed = networkQuery.safeParse(req.query ?? {});
     if (!parsed.success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid network query"));
     }
     const tab = parsed.data.tab ?? "following";
     const limit = parsed.data.limit ?? 100;
-
-    const profileUserId = resolveProfileUserIdForMe();
-    if (!profileUserId || !z.string().uuid().safeParse(profileUserId).success) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "Profile user id is not configured"));
-    }
 
     if (!hasDb() || !dbPool) {
       return reply.send(
@@ -800,11 +781,9 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get("/v1/me/profile", async (_req, reply) => {
-    const profileUserId = resolveProfileUserIdForMe();
-    if (!profileUserId || !z.string().uuid().safeParse(profileUserId).success) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "Profile user id is not configured"));
-    }
+  app.get("/v1/me/profile", async (req, reply) => {
+    const profileUserId = requireRequestUserId(req, reply);
+    if (!profileUserId) return;
 
     if (!hasDb() || !dbPool) {
       return reply.send(
@@ -844,14 +823,13 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       );
 
       const profileStats = await loadProfileStats(client, profileUserId, profileUserId);
-      const fallbackUsername = profileUserId === process.env.LIFECAST_DEV_CREATOR_USER_ID ? "lifecast_maker" : "user";
       const hasProfile = profileResult.rows.length > 0;
       const profile = hasProfile
         ? profileResult.rows[0]
         : {
             creator_user_id: profileUserId,
-            username: fallbackUsername,
-            display_name: fallbackUsername === "lifecast_maker" ? "LifeCast Maker" : "User",
+            username: `user_${profileUserId.slice(0, 8)}`,
+            display_name: "User",
             bio: null,
             avatar_url: null,
           };
@@ -867,13 +845,12 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
   });
 
   app.post("/v1/creators/:creatorUserId/follow", async (req, reply) => {
+    const viewerUserId = requireRequestUserId(req, reply);
+    if (!viewerUserId) return;
+
     const creatorUserId = (req.params as { creatorUserId: string }).creatorUserId;
     if (!z.string().uuid().safeParse(creatorUserId).success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid creator id"));
-    }
-    const viewerUserId = resolveViewerUserId();
-    if (!viewerUserId) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "Viewer user id is not configured"));
     }
     if (viewerUserId === creatorUserId) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Cannot follow yourself"));
@@ -900,13 +877,12 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
   });
 
   app.delete("/v1/creators/:creatorUserId/follow", async (req, reply) => {
+    const viewerUserId = requireRequestUserId(req, reply);
+    if (!viewerUserId) return;
+
     const creatorUserId = (req.params as { creatorUserId: string }).creatorUserId;
     if (!z.string().uuid().safeParse(creatorUserId).success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid creator id"));
-    }
-    const viewerUserId = resolveViewerUserId();
-    if (!viewerUserId) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "Viewer user id is not configured"));
     }
     if (viewerUserId === creatorUserId) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Cannot unfollow yourself"));

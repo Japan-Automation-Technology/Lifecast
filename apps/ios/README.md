@@ -35,5 +35,17 @@ Implemented:
     - Canonical support polling after checkout simulation
     - Create tab upload state machine (`created -> uploading -> processing -> ready|failed`)
 
+Auth setup (Email/Password + Google + Apple via Supabase):
+- Backend env required:
+  - `LIFECAST_SUPABASE_URL`
+  - `LIFECAST_SUPABASE_ANON_KEY`
+  - `LIFECAST_AUTH_REDIRECT_URL=lifecast://auth/callback`
+- iOS URL scheme:
+  - `lifecast` is registered in project build settings.
+- OAuth flow:
+  - iOS opens `/v1/auth/oauth/url?provider=google|apple`.
+  - Supabase redirects back to `lifecast://auth/callback#access_token=...&refresh_token=...`.
+  - `LifeCastApp` handles callback and persists tokens in `UserDefaults`.
+
 Local typecheck command used:
 - `xcrun swiftc -typecheck LifeCast/LifeCast/LifeCastAPIClient.swift LifeCast/LifeCast/SupportFlowDemoView.swift`

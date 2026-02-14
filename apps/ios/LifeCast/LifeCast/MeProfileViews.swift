@@ -15,6 +15,7 @@ struct MeTabView: View {
     @State private var selectedIndex = 0
     @State private var showNetwork = false
     @State private var selectedNetworkTab: CreatorNetworkTab = .following
+    @State private var showUserSwitcher = false
 
     var body: some View {
         NavigationStack {
@@ -84,6 +85,24 @@ struct MeTabView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("User") {
+                        showUserSwitcher = true
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+            }
+            .sheet(isPresented: $showUserSwitcher) {
+                DevUserSwitcherSheet(
+                    client: client,
+                    onSwitched: {
+                        onRefreshProfile()
+                        onRefreshVideos()
+                        onProjectChanged()
+                    }
+                )
+            }
         }
     }
 
@@ -110,6 +129,254 @@ struct MeTabView: View {
         return "\(value)"
     }
 
+}
+
+private struct DevUserSwitcherSheet: View {
+    let client: LifeCastAPIClient
+    let onSwitched: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var rows: [DevAuthUser] = []
+    @State private var loading = false
+    @State private var errorText = ""
+    @State private var email = ""
+    @State private var password = ""
+    @State private var username = ""
+    @State private var displayName = ""
+    @State private var signedInUserEmail = ""
+    @State private var signedInUserId = ""
+    @State private var isSignedIn = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if isSignedIn {
+                    Section("Session") {
+                        LabeledContent("User ID", value: signedInUserId)
+                            .font(.caption)
+                        if !signedInUserEmail.isEmpty {
+                            LabeledContent("Email", value: signedInUserEmail)
+                                .font(.caption)
+                        }
+                        Button("Sign Out", role: .destructive) {
+                            Task { await signOut() }
+                        }
+                    }
+                } else {
+                    Section("Email / Password") {
+                        TextField("Email", text: $email)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.emailAddress)
+                        SecureField("Password", text: $password)
+                        TextField("Username (Sign Up)", text: $username)
+                            .textInputAutocapitalization(.never)
+                        TextField("Display Name (Sign Up)", text: $displayName)
+
+                        HStack {
+                            Button("Sign In") {
+                                Task { await signInWithEmail() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            Button("Sign Up") {
+                                Task { await signUpWithEmail() }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+
+                    Section("OAuth") {
+                        Button("Continue with Google") {
+                            Task { await openOAuth(provider: "google") }
+                        }
+                        Button("Continue with Apple") {
+                            Task { await openOAuth(provider: "apple") }
+                        }
+                    }
+                }
+
+                Section("Dev User Switch") {
+                    ForEach(rows) { row in
+                        Button {
+                            Task {
+                                await switchUser(row.user_id)
+                            }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("@\(row.username)")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                    if let displayName = row.display_name, !displayName.isEmpty {
+                                        Text(displayName)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text(row.user_id.uuidString)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if row.is_creator {
+                                    Text("Creator")
+                                        .font(.caption2.bold())
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.green.opacity(0.15))
+                                        .clipShape(Capsule())
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .overlay {
+                if loading {
+                    ProgressView("Switching user...")
+                        .padding(20)
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else if rows.isEmpty && errorText.isEmpty {
+                    ContentUnavailableView("No users", systemImage: "person.3")
+                }
+            }
+            .navigationTitle("Switch User")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if !errorText.isEmpty {
+                    Text(errorText)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.thinMaterial)
+                }
+            }
+            .task {
+                await loadUsers()
+                await refreshSessionState()
+            }
+            .refreshable {
+                await loadUsers()
+                await refreshSessionState()
+            }
+        }
+    }
+
+    private func loadUsers() async {
+        loading = true
+        defer { loading = false }
+        do {
+            rows = try await client.listDevAuthUsers()
+            errorText = ""
+        } catch {
+            rows = []
+            errorText = error.localizedDescription
+        }
+    }
+
+    private func signInWithEmail() async {
+        loading = true
+        defer { loading = false }
+        do {
+            _ = try await client.signInWithEmail(
+                email: email.trimmingCharacters(in: .whitespacesAndNewlines),
+                password: password
+            )
+            errorText = ""
+            await refreshSessionState()
+            onSwitched()
+            dismiss()
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
+    private func signUpWithEmail() async {
+        loading = true
+        defer { loading = false }
+        do {
+            _ = try await client.signUpWithEmail(
+                email: email.trimmingCharacters(in: .whitespacesAndNewlines),
+                password: password,
+                username: username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : username.trimmingCharacters(in: .whitespacesAndNewlines),
+                displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            errorText = ""
+            await refreshSessionState()
+            onSwitched()
+            dismiss()
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
+    private func openOAuth(provider: String) async {
+        loading = true
+        defer { loading = false }
+        do {
+            let url = try await client.oauthURL(provider: provider, redirectTo: "lifecast://auth/callback")
+            errorText = ""
+            await MainActor.run {
+                UIApplication.shared.open(url)
+            }
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
+    private func switchUser(_ userId: UUID) async {
+        loading = true
+        defer { loading = false }
+        do {
+            try await client.switchDevUser(userId: userId)
+            errorText = ""
+            await refreshSessionState()
+            onSwitched()
+            dismiss()
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
+    private func signOut() async {
+        loading = true
+        defer { loading = false }
+        do {
+            try await client.signOut()
+            errorText = ""
+            isSignedIn = false
+            signedInUserEmail = ""
+            signedInUserId = ""
+            onSwitched()
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
+    private func refreshSessionState() async {
+        guard client.hasAuthSession else {
+            isSignedIn = false
+            signedInUserEmail = ""
+            signedInUserId = ""
+            return
+        }
+        do {
+            let session = try await client.getAuthMe()
+            isSignedIn = true
+            signedInUserId = session.user_id.uuidString
+            signedInUserEmail = session.profile?.display_name ?? ""
+        } catch {
+            isSignedIn = false
+            signedInUserEmail = ""
+            signedInUserId = ""
+        }
+    }
 }
 
 struct ProjectPageView: View {
