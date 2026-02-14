@@ -217,9 +217,15 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         avatar_url: string | null;
       }>(
         `
-        select creator_user_id, username, display_name, bio, avatar_url
-        from creator_profiles
-        where creator_user_id = $1
+        select
+          u.id as creator_user_id,
+          coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
+          coalesce(cp.display_name, u.display_name) as display_name,
+          coalesce(cp.bio, u.bio) as bio,
+          coalesce(cp.avatar_url, u.avatar_url) as avatar_url
+        from users u
+        left join creator_profiles cp on cp.creator_user_id = u.id
+        where u.id = $1
         limit 1
       `,
         [userId],
@@ -239,19 +245,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   app.get("/v1/auth/dev/users", async (_req, reply) => {
     if (!hasDb() || !dbPool) {
-      const fallback = [
-        process.env.LIFECAST_DEFAULT_USER_ID,
-        process.env.LIFECAST_DEV_CREATOR_USER_ID,
-        process.env.LIFECAST_DEV_SUPPORTER_USER_ID,
-      ]
-        .filter((v): v is string => Boolean(v))
-        .map((id, index) => ({
-          user_id: id,
-          username: `user_${index + 1}`,
-          display_name: null,
-          is_creator: false,
-        }));
-      return reply.send(ok({ rows: fallback }));
+      return reply.send(ok({ rows: [] }));
     }
 
     const client = await dbPool.connect();

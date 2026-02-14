@@ -27,6 +27,8 @@ struct SupportFlowDemoView: View {
     @State private var myProfileStats: CreatorProfileStats?
     @State private var myVideos: [MyVideo] = []
     @State private var myVideosError = ""
+    @State private var isAuthenticated = false
+    @State private var showAuthSheet = false
 
     @State private var errorText = ""
 
@@ -73,18 +75,21 @@ struct SupportFlowDemoView: View {
                 .tabItem { Label("Discover", systemImage: "magnifyingglass") }
                 .tag(1)
 
-            UploadCreateView(client: client, onUploadReady: {
+            UploadCreateView(client: client, isAuthenticated: isAuthenticated, onUploadReady: {
                 Task {
                     await refreshMyVideos()
                 }
             }, onOpenProjectTab: {
                 selectedTab = 3
+            }, onOpenAuth: {
+                showAuthSheet = true
             })
                 .tabItem { Label("Create", systemImage: "plus.square") }
                 .tag(2)
 
             MeTabView(
                 client: client,
+                isAuthenticated: isAuthenticated,
                 myProfile: myProfile,
                 myProfileStats: myProfileStats,
                 myVideos: myVideos,
@@ -103,6 +108,9 @@ struct SupportFlowDemoView: View {
                     Task {
                         await refreshMyVideos()
                     }
+                },
+                onOpenAuth: {
+                    showAuthSheet = true
                 }
             )
             .tabItem { Label("Me", systemImage: "person") }
@@ -121,7 +129,20 @@ struct SupportFlowDemoView: View {
         .sheet(isPresented: $showSupportFlow, onDismiss: handleSupportFlowDismiss) {
             supportFlowSheet
         }
+        .sheet(isPresented: $showAuthSheet) {
+            DevUserSwitcherSheet(
+                client: client,
+                onSwitched: {
+                    Task {
+                        await refreshMyProfile()
+                        await refreshMyVideos()
+                        await refreshAuthState()
+                    }
+                }
+            )
+        }
         .task {
+            await refreshAuthState()
             await refreshMyVideos()
             await refreshLiveSupportProject()
             await refreshMyProfile()
@@ -130,6 +151,7 @@ struct SupportFlowDemoView: View {
         .onChange(of: selectedTab) { _, newValue in
             if newValue == 3 {
                 Task {
+                    await refreshAuthState()
                     await refreshMyVideos()
                     await refreshLiveSupportProject()
                     await refreshMyProfile()
@@ -138,6 +160,14 @@ struct SupportFlowDemoView: View {
                 Task {
                     await refreshFeedProjectsFromAPI()
                 }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .lifecastAuthSessionUpdated)) { _ in
+            Task {
+                await refreshAuthState()
+                await refreshMyProfile()
+                await refreshMyVideos()
+                await refreshLiveSupportProject()
             }
         }
     }
@@ -590,6 +620,12 @@ struct SupportFlowDemoView: View {
     }
 
     private func refreshLiveSupportProject() async {
+        guard client.hasAuthSession else {
+            await MainActor.run {
+                liveSupportProject = nil
+            }
+            return
+        }
         do {
             let project = try await client.getMyProject()
             await MainActor.run {
@@ -603,6 +639,13 @@ struct SupportFlowDemoView: View {
     }
 
     private func refreshMyVideos() async {
+        guard client.hasAuthSession else {
+            await MainActor.run {
+                myVideos = []
+                myVideosError = ""
+            }
+            return
+        }
         do {
             let rows = try await client.listMyVideos()
             await MainActor.run {
@@ -617,16 +660,45 @@ struct SupportFlowDemoView: View {
     }
 
     private func refreshMyProfile() async {
+        guard client.hasAuthSession else {
+            await MainActor.run {
+                myProfile = nil
+                myProfileStats = nil
+                isAuthenticated = false
+            }
+            return
+        }
         do {
             let profile = try await client.getMyProfile()
             await MainActor.run {
                 myProfile = profile.profile
                 myProfileStats = profile.profile_stats
+                isAuthenticated = true
             }
         } catch {
             await MainActor.run {
                 myProfile = nil
                 myProfileStats = nil
+                isAuthenticated = client.hasAuthSession
+            }
+        }
+    }
+
+    private func refreshAuthState() async {
+        if !client.hasAuthSession {
+            await MainActor.run {
+                isAuthenticated = false
+            }
+            return
+        }
+        do {
+            _ = try await client.getAuthMe()
+            await MainActor.run {
+                isAuthenticated = true
+            }
+        } catch {
+            await MainActor.run {
+                isAuthenticated = false
             }
         }
     }

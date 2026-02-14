@@ -11,6 +11,7 @@
     "db:seed": "tsx src/db/seed.ts",
     "db:seed:second-creator": "tsx src/scripts/setupSecondCreatorDemo.ts",
     "db:bootstrap": "pnpm db:migrate && pnpm db:seed",
+    "db:reset-app-data": "tsx src/scripts/resetAppData.ts",
     "db:reset-dev-videos": "tsx src/scripts/resetDevVideos.ts",
     "verify:cloudflare-stream": "tsx src/scripts/verifyCloudflareStream.ts",
     "smoke:payments": "tsx src/scripts/paymentsSmoke.ts",

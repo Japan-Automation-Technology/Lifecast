@@ -5,9 +5,16 @@ import test from "node:test";
 process.env.LIFECAST_DISABLE_DOTENV = "1";
 process.env.LIFECAST_DATABASE_URL = "";
 process.env.LIFECAST_STRIPE_WEBHOOK_SECRET = "";
-process.env.LIFECAST_DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000002";
 
 const { buildApp } = await import("./app.js");
+const ACTING_USER_ID = "00000000-0000-0000-0000-000000000002";
+
+function authHeaders(headers: Record<string, string> = {}) {
+  return {
+    "x-lifecast-user-id": ACTING_USER_ID,
+    ...headers,
+  };
+}
 
 function stripeSignature(payload: Record<string, unknown>, secret: string, timestamp = "1700000000") {
   const signed = `${timestamp}.${JSON.stringify(payload)}`;
@@ -24,7 +31,7 @@ test("supports prepare -> confirm -> webhook -> succeeded", async () => {
     const prepare = await app.inject({
       method: "POST",
       url: `/v1/projects/${projectId}/supports/prepare`,
-      headers: { "idempotency-key": "prepare-1" },
+      headers: authHeaders({ "idempotency-key": "prepare-1" }),
       payload: { plan_id: planId, quantity: 1 },
     });
     assert.equal(prepare.statusCode, 200);
@@ -80,7 +87,7 @@ test("idempotency key payload mismatch returns STATE_CONFLICT", async () => {
     const first = await app.inject({
       method: "POST",
       url: `/v1/projects/${projectId}/supports/prepare`,
-      headers: { "idempotency-key": idempotencyKey },
+      headers: authHeaders({ "idempotency-key": idempotencyKey }),
       payload: { plan_id: planId, quantity: 1 },
     });
     assert.equal(first.statusCode, 200);
@@ -88,7 +95,7 @@ test("idempotency key payload mismatch returns STATE_CONFLICT", async () => {
     const second = await app.inject({
       method: "POST",
       url: `/v1/projects/${projectId}/supports/prepare`,
-      headers: { "idempotency-key": idempotencyKey },
+      headers: authHeaders({ "idempotency-key": idempotencyKey }),
       payload: { plan_id: planId, quantity: 2 },
     });
     assert.equal(second.statusCode, 409);
@@ -161,7 +168,7 @@ test("stripe webhook accepts valid signature and processes refund transition", a
     const prepare = await app.inject({
       method: "POST",
       url: `/v1/projects/${projectId}/supports/prepare`,
-      headers: { "idempotency-key": "prepare-refund-1" },
+      headers: authHeaders({ "idempotency-key": "prepare-refund-1" }),
       payload: { plan_id: planId, quantity: 1 },
     });
     const supportId = prepare.json().result.support_id as string;

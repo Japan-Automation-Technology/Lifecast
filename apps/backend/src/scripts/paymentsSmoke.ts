@@ -8,6 +8,7 @@ import { loadEnv } from "../env.js";
 loadEnv();
 
 const API_BASE_URL = process.env.LIFECAST_API_BASE_URL ?? "http://localhost:8080";
+const SMOKE_USER_ID = process.env.LIFECAST_SMOKE_USER_ID ?? process.env.LIFECAST_DEV_SUPPORTER_USER_ID;
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -43,11 +44,15 @@ async function getJson(path: string) {
 async function main() {
   const secret = process.env.LIFECAST_STRIPE_WEBHOOK_SECRET;
   assert(secret && secret.startsWith("whsec_"), "LIFECAST_STRIPE_WEBHOOK_SECRET is required");
+  assert(SMOKE_USER_ID, "LIFECAST_SMOKE_USER_ID (or LIFECAST_DEV_SUPPORTER_USER_ID) is required");
 
   const prepare = await postJson(`/v1/projects/${DEV_PROJECT_ID}/supports/prepare`, {
     plan_id: DEV_PLAN_BASIC_ID,
     quantity: 1,
-  }, { "idempotency-key": `smoke-prepare-${Date.now()}` });
+  }, {
+    "idempotency-key": `smoke-prepare-${Date.now()}`,
+    "x-lifecast-user-id": SMOKE_USER_ID,
+  });
   assert(prepare.status === 200, `prepare failed: ${prepare.status}`);
 
   const prepareResult = (prepare.body.result as Record<string, unknown> | undefined) ?? {};

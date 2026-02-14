@@ -4,6 +4,7 @@ import UIKit
 import SwiftUI
 struct MeTabView: View {
     let client: LifeCastAPIClient
+    let isAuthenticated: Bool
     let myProfile: CreatorPublicProfile?
     let myProfileStats: CreatorProfileStats?
     let myVideos: [MyVideo]
@@ -11,6 +12,7 @@ struct MeTabView: View {
     let onRefreshProfile: () -> Void
     let onRefreshVideos: () -> Void
     let onProjectChanged: () -> Void
+    let onOpenAuth: () -> Void
 
     @State private var selectedIndex = 0
     @State private var showNetwork = false
@@ -19,54 +21,78 @@ struct MeTabView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                VStack(spacing: 8) {
-                    Circle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(width: 90, height: 90)
-                    Text("@\(myProfile?.username ?? "lifecast_maker")")
-                        .font(.headline)
-                    if let displayName = myProfile?.display_name, !displayName.isEmpty {
-                        Text(displayName)
-                            .font(.caption)
+            Group {
+                if isAuthenticated {
+                    VStack(spacing: 16) {
+                        VStack(spacing: 8) {
+                            Circle()
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(width: 90, height: 90)
+                            Text("@\(myProfile?.username ?? "lifecast_maker")")
+                                .font(.headline)
+                            if let displayName = myProfile?.display_name, !displayName.isEmpty {
+                                Text(displayName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            HStack(spacing: 28) {
+                                profileStatButton(value: myProfileStats?.following_count ?? 0, label: "Following", tab: .following)
+                                profileStatButton(value: myProfileStats?.followers_count ?? 0, label: "Followers", tab: .followers)
+                                profileStatButton(value: myProfileStats?.supported_project_count ?? 0, label: "Support", tab: .support)
+                            }
+                            Button("Edit Profile") {}
+                                .buttonStyle(.bordered)
+                        }
+
+                        ProfileTabIconStrip(selectedIndex: $selectedIndex)
+                            .padding(.horizontal, 16)
+                        .onChange(of: selectedIndex) { _, newValue in
+                            if newValue == 1 {
+                                onRefreshVideos()
+                            }
+                        }
+
+                        Group {
+                            if selectedIndex == 0 {
+                                ProjectPageView(
+                                    client: client,
+                                    onProjectChanged: onProjectChanged
+                                )
+                            } else if selectedIndex == 1 {
+                                PostedVideosListView(
+                                    videos: myVideos,
+                                    errorText: myVideosError,
+                                    onRefreshVideos: onRefreshVideos
+                                )
+                            } else {
+                                VideoGridPlaceholder(title: "Liked videos")
+                            }
+                        }
+                        .frame(maxHeight: .infinity)
+                    }
+                } else {
+                    VStack(spacing: 14) {
+                        Spacer()
+                        Image(systemName: "person.crop.circle.badge.exclamationmark")
+                            .font(.system(size: 46))
                             .foregroundStyle(.secondary)
-                    }
-                    HStack(spacing: 28) {
-                        profileStatButton(value: myProfileStats?.following_count ?? 0, label: "Following", tab: .following)
-                        profileStatButton(value: myProfileStats?.followers_count ?? 0, label: "Followers", tab: .followers)
-                        profileStatButton(value: myProfileStats?.supported_project_count ?? 0, label: "Support", tab: .support)
-                    }
-                    Button("Edit Profile") {}
-                        .buttonStyle(.bordered)
-                }
-
-                ProfileTabIconStrip(selectedIndex: $selectedIndex)
-                    .padding(.horizontal, 16)
-                .onChange(of: selectedIndex) { _, newValue in
-                    if newValue == 1 {
-                        onRefreshVideos()
+                        Text("Sign in to use your profile")
+                            .font(.headline)
+                        Text("Follow creators, support projects, and manage your own posts after signing in.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
+                        Button("Sign In / Sign Up") {
+                            onOpenAuth()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Spacer()
                     }
                 }
-
-                Group {
-                    if selectedIndex == 0 {
-                        ProjectPageView(
-                            client: client,
-                            onProjectChanged: onProjectChanged
-                        )
-                    } else if selectedIndex == 1 {
-                        PostedVideosListView(
-                            videos: myVideos,
-                            errorText: myVideosError,
-                            onRefreshVideos: onRefreshVideos
-                        )
-                    } else {
-                        VideoGridPlaceholder(title: "Liked videos")
-                    }
-                }
-                .frame(maxHeight: .infinity)
             }
             .task {
+                guard isAuthenticated else { return }
                 onRefreshProfile()
                 onRefreshVideos()
             }
@@ -131,7 +157,7 @@ struct MeTabView: View {
 
 }
 
-private struct DevUserSwitcherSheet: View {
+struct DevUserSwitcherSheet: View {
     let client: LifeCastAPIClient
     let onSwitched: () -> Void
 

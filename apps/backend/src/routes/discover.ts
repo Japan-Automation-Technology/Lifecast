@@ -35,11 +35,9 @@ async function loadProfileStats(client: PoolClient, creatorUserId: string, exclu
       select
         (select count(*)
          from user_follows uf
-         inner join creator_profiles cp on cp.creator_user_id = uf.follower_user_id
          where uf.followed_creator_user_id = $1) as followers_count,
         (select count(*)
          from user_follows uf
-         inner join creator_profiles cp on cp.creator_user_id = uf.followed_creator_user_id
          where uf.follower_user_id = $1) as following_count
     `,
       [creatorUserId],
@@ -160,7 +158,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         select
           p.id as project_id,
           p.creator_user_id,
-          cp.username,
+          coalesce(cp.username, u.username, 'user_' || left(p.creator_user_id::text, 8)) as username,
           nullif(coalesce(p.subtitle, p.description, ''), '') as caption,
           coalesce(min_plan.price_minor, 0) as min_plan_price_minor,
           p.goal_amount_minor,
@@ -186,7 +184,8 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             )
           end as is_supported_by_current_user
         from projects p
-        inner join creator_profiles cp on cp.creator_user_id = p.creator_user_id
+        inner join users u on u.id = p.creator_user_id
+        left join creator_profiles cp on cp.creator_user_id = p.creator_user_id
         left join lateral (
           select price_minor
           from project_plans
@@ -264,24 +263,20 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       }>(
         `
         select
-          cp.creator_user_id,
-          cp.username,
-          cp.display_name,
+          p.creator_user_id,
+          coalesce(cp.username, u.username, 'user_' || left(p.creator_user_id::text, 8)) as username,
+          coalesce(cp.display_name, u.display_name) as display_name,
           p.title as project_title
-        from creator_profiles cp
-        left join lateral (
-          select title
-          from projects
-          where creator_user_id = cp.creator_user_id
-            and status in ('active', 'draft')
-          order by created_at desc
-          limit 1
-        ) p on true
+        from projects p
+        inner join users u on u.id = p.creator_user_id
+        left join creator_profiles cp on cp.creator_user_id = p.creator_user_id
         where
+          p.status in ('active', 'draft')
+          and
           ($1 = ''
-           or cp.username ilike '%' || $1 || '%'
-           or coalesce(cp.display_name, '') ilike '%' || $1 || '%')
-        order by cp.username asc
+           or coalesce(cp.username, u.username, '') ilike '%' || $1 || '%'
+           or coalesce(cp.display_name, u.display_name, '') ilike '%' || $1 || '%')
+        order by p.created_at desc, username asc
         limit $2
       `,
         [query, limit],
@@ -364,16 +359,22 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         avatar_url: string | null;
       }>(
         `
-        select creator_user_id, username, display_name, bio, avatar_url
-        from creator_profiles
-        where creator_user_id = $1
+        select
+          u.id as creator_user_id,
+          coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
+          coalesce(cp.display_name, u.display_name) as display_name,
+          coalesce(cp.bio, u.bio) as bio,
+          coalesce(cp.avatar_url, u.avatar_url) as avatar_url
+        from users u
+        left join creator_profiles cp on cp.creator_user_id = u.id
+        where u.id = $1
         limit 1
       `,
         [creatorUserId],
       );
 
       if (profileResult.rowCount === 0) {
-        return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Creator not found"));
+        return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "User not found"));
       }
 
       const relationship = await loadViewerRelationship(client, viewerUserId, creatorUserId);
@@ -485,7 +486,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
                 select 1
                 from user_follows uf2
                 where uf2.follower_user_id = $2::uuid
-                  and uf2.followed_creator_user_id = cp.creator_user_id
+                  and uf2.followed_creator_user_id = u.id
               )
             end`
         : "false";
@@ -508,25 +509,26 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             limit $3
           )
           select
-            cp.creator_user_id,
-            cp.username,
-            cp.display_name,
-            cp.bio,
-            cp.avatar_url,
+            u.id as creator_user_id,
+            coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
+            coalesce(cp.display_name, u.display_name) as display_name,
+            coalesce(cp.bio, u.bio) as bio,
+            coalesce(cp.avatar_url, u.avatar_url) as avatar_url,
             p.title as project_title,
             ${viewerFollowExpr} as is_following,
-            case when $2::uuid is null then false else cp.creator_user_id = $2::uuid end as is_self
+            case when $2::uuid is null then false else u.id = $2::uuid end as is_self
           from listed l
-          join creator_profiles cp on cp.creator_user_id = l.listed_creator_user_id
+          join users u on u.id = l.listed_creator_user_id
+          left join creator_profiles cp on cp.creator_user_id = u.id
           left join lateral (
             select title
             from projects
-            where creator_user_id = cp.creator_user_id
+            where creator_user_id = u.id
               and status in ('active', 'draft')
             order by created_at desc
             limit 1
           ) p on true
-          order by cp.username asc
+          order by username asc
         `;
       } else if (tab === "following") {
         if (!followTableExists) {
@@ -545,25 +547,26 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             limit $3
           )
           select
-            cp.creator_user_id,
-            cp.username,
-            cp.display_name,
-            cp.bio,
-            cp.avatar_url,
+            u.id as creator_user_id,
+            coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
+            coalesce(cp.display_name, u.display_name) as display_name,
+            coalesce(cp.bio, u.bio) as bio,
+            coalesce(cp.avatar_url, u.avatar_url) as avatar_url,
             p.title as project_title,
             ${viewerFollowExpr} as is_following,
-            case when $2::uuid is null then false else cp.creator_user_id = $2::uuid end as is_self
+            case when $2::uuid is null then false else u.id = $2::uuid end as is_self
           from listed l
-          join creator_profiles cp on cp.creator_user_id = l.listed_creator_user_id
+          join users u on u.id = l.listed_creator_user_id
+          left join creator_profiles cp on cp.creator_user_id = u.id
           left join lateral (
             select title
             from projects
-            where creator_user_id = cp.creator_user_id
+            where creator_user_id = u.id
               and status in ('active', 'draft')
             order by created_at desc
             limit 1
           ) p on true
-          order by cp.username asc
+          order by username asc
         `;
       } else {
         sql = `
@@ -576,25 +579,26 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             limit $3
           )
           select
-            cp.creator_user_id,
-            cp.username,
-            cp.display_name,
-            cp.bio,
-            cp.avatar_url,
+            u.id as creator_user_id,
+            coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
+            coalesce(cp.display_name, u.display_name) as display_name,
+            coalesce(cp.bio, u.bio) as bio,
+            coalesce(cp.avatar_url, u.avatar_url) as avatar_url,
             p.title as project_title,
             ${viewerFollowExpr} as is_following,
-            case when $2::uuid is null then false else cp.creator_user_id = $2::uuid end as is_self
+            case when $2::uuid is null then false else u.id = $2::uuid end as is_self
           from listed l
-          join creator_profiles cp on cp.creator_user_id = l.listed_creator_user_id
+          join users u on u.id = l.listed_creator_user_id
+          left join creator_profiles cp on cp.creator_user_id = u.id
           left join lateral (
             select title
             from projects
-            where creator_user_id = cp.creator_user_id
+            where creator_user_id = u.id
               and status in ('active', 'draft')
             order by created_at desc
             limit 1
           ) p on true
-          order by cp.username asc
+          order by username asc
         `;
       }
 
@@ -657,7 +661,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
                 select 1
                 from user_follows uf2
                 where uf2.follower_user_id = $2::uuid
-                  and uf2.followed_creator_user_id = cp.creator_user_id
+                  and uf2.followed_creator_user_id = u.id
               )
             end`
         : "false";
@@ -675,25 +679,26 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             limit $3
           )
           select
-            cp.creator_user_id,
-            cp.username,
-            cp.display_name,
-            cp.bio,
-            cp.avatar_url,
+            u.id as creator_user_id,
+            coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
+            coalesce(cp.display_name, u.display_name) as display_name,
+            coalesce(cp.bio, u.bio) as bio,
+            coalesce(cp.avatar_url, u.avatar_url) as avatar_url,
             p.title as project_title,
             ${viewerFollowExpr} as is_following,
-            case when $2::uuid is null then false else cp.creator_user_id = $2::uuid end as is_self
+            case when $2::uuid is null then false else u.id = $2::uuid end as is_self
           from listed l
-          join creator_profiles cp on cp.creator_user_id = l.listed_creator_user_id
+          join users u on u.id = l.listed_creator_user_id
+          left join creator_profiles cp on cp.creator_user_id = u.id
           left join lateral (
             select title
             from projects
-            where creator_user_id = cp.creator_user_id
+            where creator_user_id = u.id
               and status in ('active', 'draft')
             order by created_at desc
             limit 1
           ) p on true
-          order by cp.username asc
+          order by username asc
         `;
       } else if (tab === "following") {
         if (!followTableExists) {
@@ -707,25 +712,26 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             limit $3
           )
           select
-            cp.creator_user_id,
-            cp.username,
-            cp.display_name,
-            cp.bio,
-            cp.avatar_url,
+            u.id as creator_user_id,
+            coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
+            coalesce(cp.display_name, u.display_name) as display_name,
+            coalesce(cp.bio, u.bio) as bio,
+            coalesce(cp.avatar_url, u.avatar_url) as avatar_url,
             p.title as project_title,
             ${viewerFollowExpr} as is_following,
-            case when $2::uuid is null then false else cp.creator_user_id = $2::uuid end as is_self
+            case when $2::uuid is null then false else u.id = $2::uuid end as is_self
           from listed l
-          join creator_profiles cp on cp.creator_user_id = l.listed_creator_user_id
+          join users u on u.id = l.listed_creator_user_id
+          left join creator_profiles cp on cp.creator_user_id = u.id
           left join lateral (
             select title
             from projects
-            where creator_user_id = cp.creator_user_id
+            where creator_user_id = u.id
               and status in ('active', 'draft')
             order by created_at desc
             limit 1
           ) p on true
-          order by cp.username asc
+          order by username asc
         `;
       } else {
         sql = `
@@ -738,25 +744,26 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             limit $3
           )
           select
-            cp.creator_user_id,
-            cp.username,
-            cp.display_name,
-            cp.bio,
-            cp.avatar_url,
+            u.id as creator_user_id,
+            coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
+            coalesce(cp.display_name, u.display_name) as display_name,
+            coalesce(cp.bio, u.bio) as bio,
+            coalesce(cp.avatar_url, u.avatar_url) as avatar_url,
             p.title as project_title,
             ${viewerFollowExpr} as is_following,
-            case when $2::uuid is null then false else cp.creator_user_id = $2::uuid end as is_self
+            case when $2::uuid is null then false else u.id = $2::uuid end as is_self
           from listed l
-          join creator_profiles cp on cp.creator_user_id = l.listed_creator_user_id
+          join users u on u.id = l.listed_creator_user_id
+          left join creator_profiles cp on cp.creator_user_id = u.id
           left join lateral (
             select title
             from projects
-            where creator_user_id = cp.creator_user_id
+            where creator_user_id = u.id
               and status in ('active', 'draft')
             order by created_at desc
             limit 1
           ) p on true
-          order by cp.username asc
+          order by username asc
         `;
       }
 
@@ -814,9 +821,15 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         avatar_url: string | null;
       }>(
         `
-        select creator_user_id, username, display_name, bio, avatar_url
-        from creator_profiles
-        where creator_user_id = $1
+        select
+          u.id as creator_user_id,
+          coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
+          coalesce(cp.display_name, u.display_name) as display_name,
+          coalesce(cp.bio, u.bio) as bio,
+          coalesce(cp.avatar_url, u.avatar_url) as avatar_url
+        from users u
+        left join creator_profiles cp on cp.creator_user_id = u.id
+        where u.id = $1
         limit 1
       `,
         [profileUserId],
@@ -829,7 +842,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         : {
             creator_user_id: profileUserId,
             username: `user_${profileUserId.slice(0, 8)}`,
-            display_name: "User",
+            display_name: null,
             bio: null,
             avatar_url: null,
           };

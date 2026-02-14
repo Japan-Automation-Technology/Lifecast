@@ -3,8 +3,10 @@ import UniformTypeIdentifiers
 import SwiftUI
 struct UploadCreateView: View {
     let client: LifeCastAPIClient
+    let isAuthenticated: Bool
     let onUploadReady: () -> Void
     let onOpenProjectTab: () -> Void
+    let onOpenAuth: () -> Void
 
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var selectedUploadVideo: SelectedUploadVideo?
@@ -24,7 +26,9 @@ struct UploadCreateView: View {
                 Text("Create")
                     .font(.headline)
 
-                if let myProject {
+                if !isAuthenticated {
+                    loggedOutSection
+                } else if let myProject {
                     projectSummary(project: myProject)
                     uploadSection
                 } else {
@@ -43,6 +47,20 @@ struct UploadCreateView: View {
                     await loadSelectedVideo(from: newValue)
                 }
             }
+        }
+    }
+
+    private var loggedOutSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Sign in required")
+                .font(.subheadline.weight(.semibold))
+            Text("Create and upload are available after signing in.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Button("Sign In / Sign Up") {
+                onOpenAuth()
+            }
+            .buttonStyle(.borderedProminent)
         }
     }
 
@@ -384,6 +402,14 @@ struct UploadCreateView: View {
     }
 
     private func loadActiveProject() async {
+        guard isAuthenticated else {
+            await MainActor.run {
+                myProject = nil
+                projectLoading = false
+                projectErrorText = ""
+            }
+            return
+        }
         projectLoading = true
         defer { projectLoading = false }
         do {

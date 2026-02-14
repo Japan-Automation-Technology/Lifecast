@@ -418,6 +418,7 @@ final class LifeCastAPIClient {
         if let userId = jwtSubject(accessToken), UUID(uuidString: userId) != nil {
             UserDefaults.standard.set(userId, forKey: actingUserIdKey)
         }
+        NotificationCenter.default.post(name: .lifecastAuthSessionUpdated, object: nil)
         return true
     }
 
@@ -799,6 +800,8 @@ final class LifeCastAPIClient {
             idempotencyKey: "ios-auth-signout-\(UUID().uuidString)"
         ) as SignOutResult
         setAuthTokens(accessToken: nil, refreshToken: nil)
+        setActingUserId(nil)
+        NotificationCenter.default.post(name: .lifecastAuthSessionUpdated, object: nil)
     }
 
     func oauthURL(provider: String, redirectTo: String? = nil) async throws -> URL {
@@ -1023,4 +1026,8 @@ final class LifeCastAPIClient {
         let envelope = try JSONDecoder().decode(APIEnvelope<T>.self, from: data)
         return envelope.result
     }
+}
+
+extension Notification.Name {
+    static let lifecastAuthSessionUpdated = Notification.Name("lifecast.auth.session.updated")
 }

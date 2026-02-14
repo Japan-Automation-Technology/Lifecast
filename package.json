@@ -14,6 +14,7 @@
     "db:migrate:backend": "pnpm --filter @lifecast/backend db:migrate",
     "db:seed:backend": "pnpm --filter @lifecast/backend db:seed",
     "db:bootstrap:backend": "pnpm --filter @lifecast/backend db:bootstrap",
+    "db:reset-app-data:backend": "pnpm --filter @lifecast/backend db:reset-app-data",
     "db:reset-videos:backend": "pnpm --filter @lifecast/backend db:reset-dev-videos",
     "verify:cloudflare-stream:backend": "pnpm --filter @lifecast/backend verify:cloudflare-stream",
     "dev:backend:worker:video-processing": "pnpm --filter @lifecast/backend dev:worker:video-processing",
