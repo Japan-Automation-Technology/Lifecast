@@ -96,6 +96,8 @@ struct CreatorPublicPageView: View {
     @State private var selectedIndex = 0
     @State private var selectedVideo: CreatorPublicVideo?
     @State private var thumbnailCacheBust = UUID().uuidString
+    @State private var showNetwork = false
+    @State private var selectedNetworkTab: CreatorNetworkTab = .following
 
     var body: some View {
         ScrollView {
@@ -118,9 +120,9 @@ struct CreatorPublicPageView: View {
                             .foregroundStyle(.secondary)
                     }
                         HStack(spacing: 28) {
-                            profileStatItem(value: page.profile_stats.following_count, label: "Following")
-                            profileStatItem(value: page.profile_stats.followers_count, label: "Followers")
-                            profileStatItem(value: page.profile_stats.supported_project_count, label: "Support")
+                            profileStatButton(value: page.profile_stats.following_count, label: "Following", tab: .following)
+                            profileStatButton(value: page.profile_stats.followers_count, label: "Followers", tab: .followers)
+                            profileStatButton(value: page.profile_stats.supported_project_count, label: "Support", tab: .support)
                         }
                         HStack(spacing: 10) {
                             Button(page.viewer_relationship.is_following ? "Following" : "Follow") {
@@ -177,16 +179,36 @@ struct CreatorPublicPageView: View {
                 await load()
             }
         }
+        .navigationDestination(isPresented: $showNetwork) {
+            if let page {
+                CreatorNetworkView(
+                    client: client,
+                    creatorUserId: page.profile.creator_user_id,
+                    creatorUsername: page.profile.username,
+                    initialTab: selectedNetworkTab
+                )
+            } else {
+                Text("Creator not loaded")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
-    private func profileStatItem(value: Int, label: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value.formatted())
-                .font(.headline.weight(.semibold))
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private func profileStatButton(value: Int, label: String, tab: CreatorNetworkTab) -> some View {
+        Button {
+            selectedNetworkTab = tab
+            showNetwork = true
+        } label: {
+            VStack(spacing: 2) {
+                Text(value.formatted())
+                    .font(.headline.weight(.semibold))
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+        .buttonStyle(.plain)
     }
 
     private func creatorProjectSection(page: CreatorPublicPageResult) -> some View {

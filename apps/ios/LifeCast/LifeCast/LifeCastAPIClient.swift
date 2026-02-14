@@ -140,6 +140,30 @@ struct FeedProjectsResult: Decodable {
     let rows: [FeedProjectRow]
 }
 
+enum CreatorNetworkTab: String, CaseIterable {
+    case followers
+    case following
+    case support
+}
+
+struct CreatorNetworkRow: Decodable, Identifiable {
+    let creator_user_id: UUID
+    let username: String
+    let display_name: String?
+    let bio: String?
+    let avatar_url: String?
+    let project_title: String?
+    let is_following: Bool
+    let is_self: Bool?
+
+    var id: UUID { creator_user_id }
+}
+
+struct CreatorNetworkResult: Decodable {
+    let profile_stats: CreatorProfileStats
+    let rows: [CreatorNetworkRow]
+}
+
 struct CreatorPublicProfile: Decodable {
     let creator_user_id: UUID
     let username: String
@@ -438,6 +462,64 @@ final class LifeCastAPIClient {
             body: Optional<String>.none,
             idempotencyKey: nil
         )
+    }
+
+    func getCreatorNetwork(creatorUserId: UUID, tab: CreatorNetworkTab, limit: Int = 100) async throws -> CreatorNetworkResult {
+        guard var components = URLComponents(
+            url: baseURL.appendingPathComponent("v1/creators/\(creatorUserId.uuidString)/network"),
+            resolvingAgainstBaseURL: false
+        ) else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid network URL"])
+        }
+        components.queryItems = [
+            URLQueryItem(name: "tab", value: tab.rawValue),
+            URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))")
+        ]
+        guard let url = components.url else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid network URL"])
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let payloadText = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "LifeCastAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: payloadText])
+        }
+        let envelope = try JSONDecoder().decode(APIEnvelope<CreatorNetworkResult>.self, from: data)
+        return envelope.result
+    }
+
+    func getMyNetwork(tab: CreatorNetworkTab, limit: Int = 100) async throws -> CreatorNetworkResult {
+        guard var components = URLComponents(
+            url: baseURL.appendingPathComponent("v1/me/network"),
+            resolvingAgainstBaseURL: false
+        ) else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid me network URL"])
+        }
+        components.queryItems = [
+            URLQueryItem(name: "tab", value: tab.rawValue),
+            URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))")
+        ]
+        guard let url = components.url else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid me network URL"])
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let payloadText = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "LifeCastAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: payloadText])
+        }
+        let envelope = try JSONDecoder().decode(APIEnvelope<CreatorNetworkResult>.self, from: data)
+        return envelope.result
     }
 
     func getMyProfile() async throws -> MyProfileResult {

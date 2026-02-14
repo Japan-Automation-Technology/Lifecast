@@ -13,6 +13,8 @@ struct MeTabView: View {
     let onProjectChanged: () -> Void
 
     @State private var selectedIndex = 0
+    @State private var showNetwork = false
+    @State private var selectedNetworkTab: CreatorNetworkTab = .following
 
     var body: some View {
         NavigationStack {
@@ -29,9 +31,9 @@ struct MeTabView: View {
                             .foregroundStyle(.secondary)
                     }
                     HStack(spacing: 28) {
-                        profileStatItem(value: myProfileStats?.following_count ?? 0, label: "Following")
-                        profileStatItem(value: myProfileStats?.followers_count ?? 0, label: "Followers")
-                        profileStatItem(value: myProfileStats?.supported_project_count ?? 0, label: "Support")
+                        profileStatButton(value: myProfileStats?.following_count ?? 0, label: "Following", tab: .following)
+                        profileStatButton(value: myProfileStats?.followers_count ?? 0, label: "Followers", tab: .followers)
+                        profileStatButton(value: myProfileStats?.supported_project_count ?? 0, label: "Support", tab: .support)
                     }
                     Button("Edit Profile") {}
                         .buttonStyle(.bordered)
@@ -67,17 +69,38 @@ struct MeTabView: View {
                 onRefreshProfile()
                 onRefreshVideos()
             }
+            .navigationDestination(isPresented: $showNetwork) {
+                if let profile = myProfile {
+                    CreatorNetworkView(
+                        client: client,
+                        creatorUserId: profile.creator_user_id,
+                        creatorUsername: profile.username,
+                        initialTab: selectedNetworkTab,
+                        useMyNetworkEndpoint: true
+                    )
+                } else {
+                    Text("Profile not loaded")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
-    private func profileStatItem(value: Int, label: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value.formatted())
-                .font(.headline.weight(.semibold))
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private func profileStatButton(value: Int, label: String, tab: CreatorNetworkTab) -> some View {
+        Button {
+            selectedNetworkTab = tab
+            showNetwork = true
+        } label: {
+            VStack(spacing: 2) {
+                Text(value.formatted())
+                    .font(.headline.weight(.semibold))
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+        .buttonStyle(.plain)
     }
 
     private func shortCount(_ value: Int) -> String {
@@ -780,4 +803,3 @@ struct ProjectPageView: View {
         }
     }
 }
-

@@ -14,20 +14,16 @@ const feedQuery = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional(),
 });
 
+const networkQuery = z.object({
+  tab: z.enum(["followers", "following", "support"]).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
 function resolveViewerUserId(): string | null {
   return (
+    process.env.LIFECAST_DEV_CREATOR_USER_ID ??
     process.env.LIFECAST_DEV_VIEWER_USER_ID ??
     process.env.LIFECAST_DEV_SUPPORTER_USER_ID ??
-    process.env.LIFECAST_DEV_CREATOR_USER_ID ??
-    null
-  );
-}
-
-function resolveViewerUserIdForStats(): string | null {
-  return (
-    process.env.LIFECAST_DEV_VIEWER_USER_ID ??
-    process.env.LIFECAST_DEV_SUPPORTER_USER_ID ??
-    process.env.LIFECAST_DEV_CREATOR_USER_ID ??
     null
   );
 }
@@ -54,8 +50,14 @@ async function loadProfileStats(client: PoolClient, creatorUserId: string, exclu
     }>(
       `
       select
-        (select count(*) from user_follows where followed_creator_user_id = $1) as followers_count,
-        (select count(*) from user_follows where follower_user_id = $1) as following_count
+        (select count(*)
+         from user_follows uf
+         inner join creator_profiles cp on cp.creator_user_id = uf.follower_user_id
+         where uf.followed_creator_user_id = $1) as followers_count,
+        (select count(*)
+         from user_follows uf
+         inner join creator_profiles cp on cp.creator_user_id = uf.followed_creator_user_id
+         where uf.follower_user_id = $1) as following_count
     `,
       [creatorUserId],
     );
@@ -459,14 +461,349 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get("/v1/me/profile", async (_req, reply) => {
+  app.get("/v1/creators/:creatorUserId/network", async (req, reply) => {
+    const creatorUserId = (req.params as { creatorUserId: string }).creatorUserId;
+    if (!z.string().uuid().safeParse(creatorUserId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid creator id"));
+    }
+    const parsed = networkQuery.safeParse(req.query ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid network query"));
+    }
+
+    const tab = parsed.data.tab ?? "following";
+    const limit = parsed.data.limit ?? 100;
+
+    if (!hasDb() || !dbPool) {
+      return reply.send(
+        ok({
+          profile_stats: {
+            following_count: 0,
+            followers_count: 0,
+            supported_project_count: 0,
+          },
+          rows: [],
+        }),
+      );
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const viewerUserId = resolveViewerUserId();
+      const profileStats = await loadProfileStats(client, creatorUserId);
+      const followTableResult = await client.query<{ exists: boolean }>(
+        `select to_regclass('public.user_follows') is not null as exists`,
+      );
+      const followTableExists = Boolean(followTableResult.rows[0]?.exists);
+      const viewerFollowExpr = followTableExists
+        ? `case
+              when $2::uuid is null then false
+              else exists(
+                select 1
+                from user_follows uf2
+                where uf2.follower_user_id = $2::uuid
+                  and uf2.followed_creator_user_id = cp.creator_user_id
+              )
+            end`
+        : "false";
+
+      let sql = "";
+      if (tab === "followers") {
+        if (!followTableExists) {
+          return reply.send(
+            ok({
+              profile_stats: profileStats,
+              rows: [],
+            }),
+          );
+        }
+        sql = `
+          with listed as (
+            select distinct uf.follower_user_id as listed_creator_user_id
+            from user_follows uf
+            where uf.followed_creator_user_id = $1
+            limit $3
+          )
+          select
+            cp.creator_user_id,
+            cp.username,
+            cp.display_name,
+            cp.bio,
+            cp.avatar_url,
+            p.title as project_title,
+            ${viewerFollowExpr} as is_following,
+            case when $2::uuid is null then false else cp.creator_user_id = $2::uuid end as is_self
+          from listed l
+          join creator_profiles cp on cp.creator_user_id = l.listed_creator_user_id
+          left join lateral (
+            select title
+            from projects
+            where creator_user_id = cp.creator_user_id
+              and status in ('active', 'draft')
+            order by created_at desc
+            limit 1
+          ) p on true
+          order by cp.username asc
+        `;
+      } else if (tab === "following") {
+        if (!followTableExists) {
+          return reply.send(
+            ok({
+              profile_stats: profileStats,
+              rows: [],
+            }),
+          );
+        }
+        sql = `
+          with listed as (
+            select distinct uf.followed_creator_user_id as listed_creator_user_id
+            from user_follows uf
+            where uf.follower_user_id = $1
+            limit $3
+          )
+          select
+            cp.creator_user_id,
+            cp.username,
+            cp.display_name,
+            cp.bio,
+            cp.avatar_url,
+            p.title as project_title,
+            ${viewerFollowExpr} as is_following,
+            case when $2::uuid is null then false else cp.creator_user_id = $2::uuid end as is_self
+          from listed l
+          join creator_profiles cp on cp.creator_user_id = l.listed_creator_user_id
+          left join lateral (
+            select title
+            from projects
+            where creator_user_id = cp.creator_user_id
+              and status in ('active', 'draft')
+            order by created_at desc
+            limit 1
+          ) p on true
+          order by cp.username asc
+        `;
+      } else {
+        sql = `
+          with listed as (
+            select distinct p.creator_user_id as listed_creator_user_id
+            from support_transactions st
+            join projects p on p.id = st.project_id
+            where st.supporter_user_id = $1
+              and st.status = 'succeeded'
+            limit $3
+          )
+          select
+            cp.creator_user_id,
+            cp.username,
+            cp.display_name,
+            cp.bio,
+            cp.avatar_url,
+            p.title as project_title,
+            ${viewerFollowExpr} as is_following,
+            case when $2::uuid is null then false else cp.creator_user_id = $2::uuid end as is_self
+          from listed l
+          join creator_profiles cp on cp.creator_user_id = l.listed_creator_user_id
+          left join lateral (
+            select title
+            from projects
+            where creator_user_id = cp.creator_user_id
+              and status in ('active', 'draft')
+            order by created_at desc
+            limit 1
+          ) p on true
+          order by cp.username asc
+        `;
+      }
+
+      const rows = await client.query<{
+        creator_user_id: string;
+        username: string;
+        display_name: string | null;
+        bio: string | null;
+        avatar_url: string | null;
+        project_title: string | null;
+        is_following: boolean;
+      }>(sql, [creatorUserId, viewerUserId, limit]);
+
+      return reply.send(
+        ok({
+          profile_stats: profileStats,
+          rows: rows.rows,
+        }),
+      );
+    } finally {
+      client.release();
+    }
+  });
+
+  app.get("/v1/me/network", async (req, reply) => {
+    const parsed = networkQuery.safeParse(req.query ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid network query"));
+    }
+    const tab = parsed.data.tab ?? "following";
+    const limit = parsed.data.limit ?? 100;
+
     const profileUserId = resolveProfileUserIdForMe();
-    const statsUserId = resolveViewerUserIdForStats();
     if (!profileUserId || !z.string().uuid().safeParse(profileUserId).success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Profile user id is not configured"));
     }
-    if (!statsUserId || !z.string().uuid().safeParse(statsUserId).success) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "Viewer user id is not configured"));
+
+    if (!hasDb() || !dbPool) {
+      return reply.send(
+        ok({
+          profile_stats: {
+            following_count: 0,
+            followers_count: 0,
+            supported_project_count: 0,
+          },
+          rows: [],
+        }),
+      );
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const profileStats = await loadProfileStats(client, profileUserId, profileUserId);
+      const followTableResult = await client.query<{ exists: boolean }>(
+        `select to_regclass('public.user_follows') is not null as exists`,
+      );
+      const followTableExists = Boolean(followTableResult.rows[0]?.exists);
+      const viewerFollowExpr = followTableExists
+        ? `case
+              when $2::uuid is null then false
+              else exists(
+                select 1
+                from user_follows uf2
+                where uf2.follower_user_id = $2::uuid
+                  and uf2.followed_creator_user_id = cp.creator_user_id
+              )
+            end`
+        : "false";
+
+      let sql = "";
+      if (tab === "followers") {
+        if (!followTableExists) {
+          return reply.send(ok({ profile_stats: profileStats, rows: [] }));
+        }
+        sql = `
+          with listed as (
+            select distinct uf.follower_user_id as listed_creator_user_id
+            from user_follows uf
+            where uf.followed_creator_user_id = $1
+            limit $3
+          )
+          select
+            cp.creator_user_id,
+            cp.username,
+            cp.display_name,
+            cp.bio,
+            cp.avatar_url,
+            p.title as project_title,
+            ${viewerFollowExpr} as is_following,
+            case when $2::uuid is null then false else cp.creator_user_id = $2::uuid end as is_self
+          from listed l
+          join creator_profiles cp on cp.creator_user_id = l.listed_creator_user_id
+          left join lateral (
+            select title
+            from projects
+            where creator_user_id = cp.creator_user_id
+              and status in ('active', 'draft')
+            order by created_at desc
+            limit 1
+          ) p on true
+          order by cp.username asc
+        `;
+      } else if (tab === "following") {
+        if (!followTableExists) {
+          return reply.send(ok({ profile_stats: profileStats, rows: [] }));
+        }
+        sql = `
+          with listed as (
+            select distinct uf.followed_creator_user_id as listed_creator_user_id
+            from user_follows uf
+            where uf.follower_user_id = $1
+            limit $3
+          )
+          select
+            cp.creator_user_id,
+            cp.username,
+            cp.display_name,
+            cp.bio,
+            cp.avatar_url,
+            p.title as project_title,
+            ${viewerFollowExpr} as is_following,
+            case when $2::uuid is null then false else cp.creator_user_id = $2::uuid end as is_self
+          from listed l
+          join creator_profiles cp on cp.creator_user_id = l.listed_creator_user_id
+          left join lateral (
+            select title
+            from projects
+            where creator_user_id = cp.creator_user_id
+              and status in ('active', 'draft')
+            order by created_at desc
+            limit 1
+          ) p on true
+          order by cp.username asc
+        `;
+      } else {
+        sql = `
+          with listed as (
+            select distinct p.creator_user_id as listed_creator_user_id
+            from support_transactions st
+            join projects p on p.id = st.project_id
+            where st.supporter_user_id = $1
+              and st.status = 'succeeded'
+            limit $3
+          )
+          select
+            cp.creator_user_id,
+            cp.username,
+            cp.display_name,
+            cp.bio,
+            cp.avatar_url,
+            p.title as project_title,
+            ${viewerFollowExpr} as is_following,
+            case when $2::uuid is null then false else cp.creator_user_id = $2::uuid end as is_self
+          from listed l
+          join creator_profiles cp on cp.creator_user_id = l.listed_creator_user_id
+          left join lateral (
+            select title
+            from projects
+            where creator_user_id = cp.creator_user_id
+              and status in ('active', 'draft')
+            order by created_at desc
+            limit 1
+          ) p on true
+          order by cp.username asc
+        `;
+      }
+
+      const rows = await client.query<{
+        creator_user_id: string;
+        username: string;
+        display_name: string | null;
+        bio: string | null;
+        avatar_url: string | null;
+        project_title: string | null;
+        is_following: boolean;
+      }>(sql, [profileUserId, profileUserId, limit]);
+
+      return reply.send(
+        ok({
+          profile_stats: profileStats,
+          rows: rows.rows,
+        }),
+      );
+    } finally {
+      client.release();
+    }
+  });
+
+  app.get("/v1/me/profile", async (_req, reply) => {
+    const profileUserId = resolveProfileUserIdForMe();
+    if (!profileUserId || !z.string().uuid().safeParse(profileUserId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Profile user id is not configured"));
     }
 
     if (!hasDb() || !dbPool) {
@@ -506,7 +843,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         [profileUserId],
       );
 
-      const profileStats = await loadProfileStats(client, statsUserId, profileUserId);
+      const profileStats = await loadProfileStats(client, profileUserId, profileUserId);
       const fallbackUsername = profileUserId === process.env.LIFECAST_DEV_CREATOR_USER_ID ? "lifecast_maker" : "user";
       const hasProfile = profileResult.rows.length > 0;
       const profile = hasProfile
