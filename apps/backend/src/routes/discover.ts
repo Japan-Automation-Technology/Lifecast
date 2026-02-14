@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { PoolClient } from "pg";
 import { z } from "zod";
 import { fail, ok } from "../response.js";
 import { dbPool, hasDb } from "../store/db.js";
@@ -16,6 +17,47 @@ function resolveViewerUserId(): string | null {
     process.env.LIFECAST_DEV_CREATOR_USER_ID ??
     null
   );
+}
+
+async function loadViewerRelationship(client: PoolClient, viewerUserId: string | null, creatorUserId: string) {
+  if (!viewerUserId || viewerUserId === creatorUserId) {
+    return { is_following: false, is_supported: false };
+  }
+
+  let isFollowing = false;
+  const followTableResult = await client.query<{ exists: boolean }>(
+    `select to_regclass('public.user_follows') is not null as exists`,
+  );
+  if (followTableResult.rows[0]?.exists) {
+    const followResult = await client.query<{ is_following: boolean }>(
+      `
+      select exists(
+        select 1
+        from user_follows
+        where follower_user_id = $1
+          and followed_creator_user_id = $2
+      ) as is_following
+    `,
+      [viewerUserId, creatorUserId],
+    );
+    isFollowing = Boolean(followResult.rows[0]?.is_following);
+  }
+
+  const supportResult = await client.query<{ is_supported: boolean }>(
+    `
+    select exists(
+      select 1
+      from support_transactions st
+      inner join projects p on p.id = st.project_id
+      where p.creator_user_id = $2
+        and st.supporter_user_id = $1
+        and st.status = 'succeeded'
+    ) as is_supported
+  `,
+    [viewerUserId, creatorUserId],
+  );
+  const isSupported = Boolean(supportResult.rows[0]?.is_supported);
+  return { is_following: isFollowing, is_supported: isSupported };
 }
 
 export async function registerDiscoverRoutes(app: FastifyInstance) {
@@ -160,42 +202,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Creator not found"));
       }
 
-      let isFollowing = false;
-      let isSupported = false;
-      if (viewerUserId && viewerUserId !== creatorUserId) {
-        const followTableResult = await client.query<{ exists: boolean }>(
-          `select to_regclass('public.user_follows') is not null as exists`,
-        );
-        if (followTableResult.rows[0]?.exists) {
-          const followResult = await client.query<{ is_following: boolean }>(
-            `
-            select exists(
-              select 1
-              from user_follows
-              where follower_user_id = $1
-                and followed_creator_user_id = $2
-            ) as is_following
-          `,
-            [viewerUserId, creatorUserId],
-          );
-          isFollowing = Boolean(followResult.rows[0]?.is_following);
-        }
-
-        const supportResult = await client.query<{ is_supported: boolean }>(
-          `
-          select exists(
-            select 1
-            from support_transactions st
-            inner join projects p on p.id = st.project_id
-            where p.creator_user_id = $2
-              and st.supporter_user_id = $1
-              and st.status = 'succeeded'
-          ) as is_supported
-        `,
-          [viewerUserId, creatorUserId],
-        );
-        isSupported = Boolean(supportResult.rows[0]?.is_supported);
-      }
+      const relationship = await loadViewerRelationship(client, viewerUserId, creatorUserId);
 
       const project = await store.getProjectByCreator(creatorUserId);
       const videos = await store.listCreatorVideos(creatorUserId, 30);
@@ -203,10 +210,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       return reply.send(
         ok({
           profile: profileResult.rows[0],
-          viewer_relationship: {
-            is_following: isFollowing,
-            is_supported: isSupported,
-          },
+          viewer_relationship: relationship,
           project: project
             ? {
                 id: project.id,
@@ -259,6 +263,72 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
           })),
         }),
       );
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post("/v1/creators/:creatorUserId/follow", async (req, reply) => {
+    const creatorUserId = (req.params as { creatorUserId: string }).creatorUserId;
+    if (!z.string().uuid().safeParse(creatorUserId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid creator id"));
+    }
+    const viewerUserId = resolveViewerUserId();
+    if (!viewerUserId) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Viewer user id is not configured"));
+    }
+    if (viewerUserId === creatorUserId) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Cannot follow yourself"));
+    }
+    if (!hasDb() || !dbPool) {
+      return reply.send(ok({ viewer_relationship: { is_following: true, is_supported: false } }));
+    }
+
+    const client = await dbPool.connect();
+    try {
+      await client.query(
+        `
+        insert into user_follows (follower_user_id, followed_creator_user_id, created_at)
+        values ($1, $2, now())
+        on conflict do nothing
+      `,
+        [viewerUserId, creatorUserId],
+      );
+      const relationship = await loadViewerRelationship(client, viewerUserId, creatorUserId);
+      return reply.send(ok({ viewer_relationship: relationship }));
+    } finally {
+      client.release();
+    }
+  });
+
+  app.delete("/v1/creators/:creatorUserId/follow", async (req, reply) => {
+    const creatorUserId = (req.params as { creatorUserId: string }).creatorUserId;
+    if (!z.string().uuid().safeParse(creatorUserId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid creator id"));
+    }
+    const viewerUserId = resolveViewerUserId();
+    if (!viewerUserId) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Viewer user id is not configured"));
+    }
+    if (viewerUserId === creatorUserId) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Cannot unfollow yourself"));
+    }
+    if (!hasDb() || !dbPool) {
+      return reply.send(ok({ viewer_relationship: { is_following: false, is_supported: false } }));
+    }
+
+    const client = await dbPool.connect();
+    try {
+      await client.query(
+        `
+        delete from user_follows
+        where follower_user_id = $1
+          and followed_creator_user_id = $2
+      `,
+        [viewerUserId, creatorUserId],
+      );
+      const relationship = await loadViewerRelationship(client, viewerUserId, creatorUserId);
+      return reply.send(ok({ viewer_relationship: relationship }));
     } finally {
       client.release();
     }

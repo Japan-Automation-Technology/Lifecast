@@ -217,7 +217,9 @@ export class HybridStore {
       const supportId = randomUUID();
       const checkoutSessionId = randomUUID();
 
-      const devSupporter = process.env.LIFECAST_DEV_SUPPORTER_USER_ID;
+      const devSupporter =
+        process.env.LIFECAST_DEV_VIEWER_USER_ID ??
+        process.env.LIFECAST_DEV_SUPPORTER_USER_ID;
       if (!devSupporter) {
         return memory.prepareSupport(input);
       }

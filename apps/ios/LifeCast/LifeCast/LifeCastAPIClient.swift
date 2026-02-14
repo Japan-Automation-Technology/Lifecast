@@ -151,6 +151,10 @@ struct CreatorPublicPageResult: Decodable {
     let videos: [CreatorPublicVideo]
 }
 
+struct CreatorRelationshipResult: Decodable {
+    let viewer_relationship: CreatorViewerRelationship
+}
+
 struct CreateProjectRequest: Encodable {
     struct Plan: Encodable {
         let name: String
@@ -365,6 +369,26 @@ final class LifeCastAPIClient {
             body: Optional<String>.none,
             idempotencyKey: nil
         )
+    }
+
+    func followCreator(creatorUserId: UUID) async throws -> CreatorViewerRelationship {
+        let result: CreatorRelationshipResult = try await send(
+            path: "/v1/creators/\(creatorUserId.uuidString)/follow",
+            method: "POST",
+            body: Optional<String>.none,
+            idempotencyKey: "ios-follow-\(UUID().uuidString)"
+        )
+        return result.viewer_relationship
+    }
+
+    func unfollowCreator(creatorUserId: UUID) async throws -> CreatorViewerRelationship {
+        let result: CreatorRelationshipResult = try await send(
+            path: "/v1/creators/\(creatorUserId.uuidString)/follow",
+            method: "DELETE",
+            body: Optional<String>.none,
+            idempotencyKey: nil
+        )
+        return result.viewer_relationship
     }
 
     func createProject(

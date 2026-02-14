@@ -118,15 +118,20 @@ export async function registerSupportRoutes(app: FastifyInstance) {
       return reply.code(404).send(notFound);
     }
 
+    const finalizedSupport =
+      body.data.return_status === "success"
+        ? ((await store.markSupportSucceededByWebhook(support.supportId)) ?? support)
+        : support;
+
     const response = ok({
-      support_id: support.supportId,
-      support_status: support.status,
-      amount_minor: support.amountMinor,
-      currency: support.currency,
-      project_id: support.projectId,
-      plan_id: support.planId,
-      reward_type: support.rewardType,
-      cancellation_window_hours: support.cancellationWindowHours,
+      support_id: finalizedSupport.supportId,
+      support_status: finalizedSupport.status,
+      amount_minor: finalizedSupport.amountMinor,
+      currency: finalizedSupport.currency,
+      project_id: finalizedSupport.projectId,
+      plan_id: finalizedSupport.planId,
+      reward_type: finalizedSupport.rewardType,
+      cancellation_window_hours: finalizedSupport.cancellationWindowHours,
     });
     if (idempotencyKey) {
       await storeIdempotentResponse({

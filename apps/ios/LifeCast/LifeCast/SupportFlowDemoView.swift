@@ -85,6 +85,10 @@ private func fundingProgressTint(_ percentRaw: Double) -> Color {
     return .green
 }
 
+extension Notification.Name {
+    static let lifecastRelationshipChanged = Notification.Name("lifecast.relationship.changed")
+}
+
 struct SupportFlowDemoView: View {
     private let client = LifeCastAPIClient(baseURL: URL(string: "http://localhost:8080")!)
 
@@ -103,6 +107,7 @@ struct SupportFlowDemoView: View {
     @State private var supportResultMessage = ""
     @State private var liveSupportProject: MyProjectResult?
     @State private var supportTargetProject: MyProjectResult?
+    @State private var feedProjects: [FeedProjectSummary] = sampleProjects
     @State private var myVideos: [MyVideo] = []
     @State private var myVideosError = ""
 
@@ -116,7 +121,7 @@ struct SupportFlowDemoView: View {
     }
 
     private var currentProject: FeedProjectSummary {
-        sampleProjects[max(0, min(currentFeedIndex, sampleProjects.count - 1))]
+        feedProjects[max(0, min(currentFeedIndex, feedProjects.count - 1))]
     }
 
     var body: some View {
@@ -194,12 +199,17 @@ struct SupportFlowDemoView: View {
         .task {
             await refreshMyVideos()
             await refreshLiveSupportProject()
+            await refreshFeedProjectsFromAPI()
         }
         .onChange(of: selectedTab) { _, newValue in
             if newValue == 3 {
                 Task {
                     await refreshMyVideos()
                     await refreshLiveSupportProject()
+                }
+            } else if newValue == 0 {
+                Task {
+                    await refreshFeedProjectsFromAPI()
                 }
             }
         }
@@ -233,7 +243,7 @@ struct SupportFlowDemoView: View {
                         )
 
                     VStack(spacing: 8) {
-                        ForEach(0..<sampleProjects.count, id: \.self) { idx in
+                        ForEach(0..<feedProjects.count, id: \.self) { idx in
                             Circle()
                                 .fill(idx == currentFeedIndex ? Color.white : Color.white.opacity(0.3))
                                 .frame(width: 6, height: 6)
@@ -284,18 +294,16 @@ struct SupportFlowDemoView: View {
 
     private func rightRail(project: FeedProjectSummary) -> some View {
         VStack(spacing: 16) {
-            Button((liveSupportProject == nil || realPlans.isEmpty) ? "Setup" : (project.isSupportedByCurrentUser ? "Supported" : "Support")) {
-                supportEntryPoint = .feed
-                supportTargetProject = liveSupportProject
-                selectedPlan = nil
-                supportStep = .planSelect
-                showSupportFlow = true
+            Button(project.isSupportedByCurrentUser ? "Supported" : "Support") {
+                if project.isSupportedByCurrentUser { return }
+                Task {
+                    await presentSupportFlow(for: project)
+                }
             }
             .font(.caption.bold())
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background((liveSupportProject == nil || realPlans.isEmpty) ? Color.gray.opacity(0.9) : (project.isSupportedByCurrentUser ? Color.green.opacity(0.9) : Color.pink.opacity(0.9))
-            )
+            .background(project.isSupportedByCurrentUser ? Color.green.opacity(0.9) : Color.pink.opacity(0.9))
             .foregroundStyle(.white)
             .clipShape(Capsule())
 
@@ -574,8 +582,31 @@ struct SupportFlowDemoView: View {
             await refreshLiveSupportProject()
             if let creatorId = supportTargetProject?.creator_user_id,
                creatorId != liveSupportProject?.creator_user_id,
-               let refreshed = try? await client.getCreatorPage(creatorUserId: creatorId).project {
-                supportTargetProject = refreshed
+               let refreshedPage = try? await client.getCreatorPage(creatorUserId: creatorId) {
+                supportTargetProject = refreshedPage.project
+                if let updatedProject = refreshedPage.project {
+                    feedProjects = feedProjects.map { existing in
+                        guard existing.creatorId == creatorId else { return existing }
+                        return FeedProjectSummary(
+                            id: existing.id,
+                            creatorId: existing.creatorId,
+                            username: existing.username,
+                            caption: existing.caption,
+                            minPlanPriceMinor: updatedProject.minimum_plan?.price_minor ?? existing.minPlanPriceMinor,
+                            goalAmountMinor: updatedProject.goal_amount_minor,
+                            fundedAmountMinor: updatedProject.funded_amount_minor,
+                            remainingDays: existing.remainingDays,
+                            likes: existing.likes,
+                            comments: existing.comments,
+                            isSupportedByCurrentUser: refreshedPage.viewer_relationship.is_supported
+                        )
+                    }
+                }
+                NotificationCenter.default.post(
+                    name: .lifecastRelationshipChanged,
+                    object: nil,
+                    userInfo: ["creatorUserId": creatorId.uuidString]
+                )
             }
         } catch {
             supportResultStatus = "failed"
@@ -648,7 +679,7 @@ struct SupportFlowDemoView: View {
     }
 
     private func nextFeed() {
-        guard currentFeedIndex < sampleProjects.count - 1 else { return }
+        guard currentFeedIndex < feedProjects.count - 1 else { return }
         withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) {
             currentFeedIndex += 1
         }
@@ -658,6 +689,60 @@ struct SupportFlowDemoView: View {
         guard currentFeedIndex > 0 else { return }
         withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) {
             currentFeedIndex -= 1
+        }
+    }
+
+    private func presentSupportFlow(for project: FeedProjectSummary) async {
+        do {
+            let page = try await client.getCreatorPage(creatorUserId: project.creatorId)
+            guard let target = page.project, let plans = target.plans, !plans.isEmpty else {
+                await MainActor.run {
+                    errorText = "This creator has no support plans yet."
+                }
+                return
+            }
+            await MainActor.run {
+                supportEntryPoint = .feed
+                supportTargetProject = target
+                selectedPlan = SupportPlan(
+                    id: plans[0].id,
+                    name: plans[0].name,
+                    priceMinor: plans[0].price_minor,
+                    rewardSummary: plans[0].reward_summary
+                )
+                supportStep = .planSelect
+                showSupportFlow = true
+            }
+        } catch {
+            await MainActor.run {
+                errorText = "Failed to load support plans: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func refreshFeedProjectsFromAPI() async {
+        var updated = feedProjects
+        for (index, item) in feedProjects.enumerated() {
+            guard let page = try? await client.getCreatorPage(creatorUserId: item.creatorId),
+                  let project = page.project else {
+                continue
+            }
+            updated[index] = FeedProjectSummary(
+                id: item.id,
+                creatorId: item.creatorId,
+                username: item.username,
+                caption: item.caption,
+                minPlanPriceMinor: project.minimum_plan?.price_minor ?? item.minPlanPriceMinor,
+                goalAmountMinor: project.goal_amount_minor,
+                fundedAmountMinor: project.funded_amount_minor,
+                remainingDays: item.remainingDays,
+                likes: item.likes,
+                comments: item.comments,
+                isSupportedByCurrentUser: page.viewer_relationship.is_supported
+            )
+        }
+        await MainActor.run {
+            feedProjects = updated
         }
     }
 
@@ -2111,19 +2196,19 @@ struct CreatorPublicPageView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
-                        if let bio = page.profile.bio, !bio.isEmpty {
-                            Text(bio)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                    if let bio = page.profile.bio, !bio.isEmpty {
+                        Text(bio)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                         HStack(spacing: 10) {
-                            Text(page.viewer_relationship.is_following ? "Following" : "Follow")
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Color.blue.opacity(0.12))
-                                .foregroundStyle(.blue)
-                                .clipShape(Capsule())
+                            Button(page.viewer_relationship.is_following ? "Following" : "Follow") {
+                                Task {
+                                    await toggleFollow()
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(page.viewer_relationship.is_following ? .gray : .blue)
                             if page.viewer_relationship.is_supported {
                                 Label("Supported", systemImage: "checkmark.seal.fill")
                                     .font(.caption.weight(.semibold))
@@ -2169,6 +2254,13 @@ struct CreatorPublicPageView: View {
         .navigationTitle("Creator")
         .task {
             await load()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .lifecastRelationshipChanged)) { notification in
+            guard let creatorUserId = notification.userInfo?["creatorUserId"] as? String else { return }
+            guard creatorUserId.lowercased() == creatorId.uuidString.lowercased() else { return }
+            Task {
+                await load()
+            }
         }
     }
 
@@ -2302,7 +2394,8 @@ struct CreatorPublicPageView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
 
-                Button("Support this project") {
+                Button(page.viewer_relationship.is_supported ? "Supported" : "Support this project") {
+                    if page.viewer_relationship.is_supported { return }
                     onSupportTap(project)
                 }
                 .buttonStyle(.borderedProminent)
@@ -2455,6 +2548,31 @@ struct CreatorPublicPageView: View {
         } catch {
             await MainActor.run {
                 page = nil
+                errorText = error.localizedDescription
+            }
+        }
+    }
+
+    private func toggleFollow() async {
+        guard let current = page else { return }
+        do {
+            let relationship: CreatorViewerRelationship
+            if current.viewer_relationship.is_following {
+                relationship = try await client.unfollowCreator(creatorUserId: creatorId)
+            } else {
+                relationship = try await client.followCreator(creatorUserId: creatorId)
+            }
+            await MainActor.run {
+                page = CreatorPublicPageResult(
+                    profile: current.profile,
+                    viewer_relationship: relationship,
+                    project: current.project,
+                    videos: current.videos
+                )
+                errorText = ""
+            }
+        } catch {
+            await MainActor.run {
                 errorText = error.localizedDescription
             }
         }
