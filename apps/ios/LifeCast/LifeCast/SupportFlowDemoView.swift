@@ -87,31 +87,18 @@ struct SupportFlowDemoView: View {
     @State private var selectedPlan: SupportPlan? = nil
     @State private var supportResultStatus = "idle"
     @State private var supportResultMessage = ""
+    @State private var liveSupportProject: MyProjectResult?
     @State private var myVideos: [MyVideo] = []
     @State private var myVideosError = ""
 
     @State private var errorText = ""
 
-    private let plans: [SupportPlan] = [
-        SupportPlan(
-            id: UUID(uuidString: "22222222-2222-2222-2222-222222222221")!,
-            name: "Early Support",
-            priceMinor: 1000,
-            rewardSummary: "Prototype update + thank-you card"
-        ),
-        SupportPlan(
-            id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
-            name: "Standard",
-            priceMinor: 3000,
-            rewardSummary: "1 product unit + supporter badge"
-        ),
-        SupportPlan(
-            id: UUID(uuidString: "22222222-2222-2222-2222-222222222223")!,
-            name: "Collector",
-            priceMinor: 7000,
-            rewardSummary: "Signed limited package"
-        )
-    ]
+    private var realPlans: [SupportPlan] {
+        guard let liveSupportProject else { return [] }
+        return (liveSupportProject.plans ?? []).map {
+            SupportPlan(id: $0.id, name: $0.name, priceMinor: $0.price_minor, rewardSummary: $0.reward_summary)
+        }
+    }
 
     private var currentProject: FeedProjectSummary {
         sampleProjects[max(0, min(currentFeedIndex, sampleProjects.count - 1))]
@@ -173,11 +160,13 @@ struct SupportFlowDemoView: View {
         }
         .task {
             await refreshMyVideos()
+            await refreshLiveSupportProject()
         }
         .onChange(of: selectedTab) { _, newValue in
             if newValue == 3 {
                 Task {
                     await refreshMyVideos()
+                    await refreshLiveSupportProject()
                 }
             }
         }
@@ -262,7 +251,7 @@ struct SupportFlowDemoView: View {
 
     private func rightRail(project: FeedProjectSummary) -> some View {
         VStack(spacing: 16) {
-            Button(project.isSupportedByCurrentUser ? "Supported" : "Support") {
+            Button((liveSupportProject == nil || realPlans.isEmpty) ? "Setup" : (project.isSupportedByCurrentUser ? "Supported" : "Support")) {
                 supportEntryPoint = .feed
                 selectedPlan = nil
                 supportStep = .planSelect
@@ -271,7 +260,8 @@ struct SupportFlowDemoView: View {
             .font(.caption.bold())
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(project.isSupportedByCurrentUser ? Color.green.opacity(0.9) : Color.pink.opacity(0.9))
+            .background((liveSupportProject == nil || realPlans.isEmpty) ? Color.gray.opacity(0.9) : (project.isSupportedByCurrentUser ? Color.green.opacity(0.9) : Color.pink.opacity(0.9))
+            )
             .foregroundStyle(.white)
             .clipShape(Capsule())
 
@@ -412,6 +402,9 @@ struct SupportFlowDemoView: View {
                     }
                 }
             }
+            .task {
+                await refreshLiveSupportProject()
+            }
         }
     }
 
@@ -420,26 +413,32 @@ struct SupportFlowDemoView: View {
             Text("1. Select plan")
                 .font(.headline)
 
-            ForEach(plans) { plan in
-                Button {
-                    selectedPlan = plan
-                    supportStep = .confirm
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(plan.name)
-                            .font(.subheadline.bold())
-                        Text(formatJPY(plan.priceMinor))
-                            .font(.subheadline)
-                        Text(plan.rewardSummary)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            if liveSupportProject == nil || realPlans.isEmpty {
+                Text("No active project/plans available for support yet.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(realPlans) { plan in
+                    Button {
+                        selectedPlan = plan
+                        supportStep = .confirm
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(plan.name)
+                                .font(.subheadline.bold())
+                            Text(formatJPY(plan.priceMinor))
+                                .font(.subheadline)
+                            Text(plan.rewardSummary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color.secondary.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(Color.secondary.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
     }
@@ -449,8 +448,8 @@ struct SupportFlowDemoView: View {
             Text("2. Confirm")
                 .font(.headline)
 
-            cardRow(title: "Goal", value: formatJPY(1_000_000))
-            cardRow(title: "Delivery", value: "2026-08")
+            cardRow(title: "Goal", value: formatJPY(liveSupportProject?.goal_amount_minor ?? 0))
+            cardRow(title: "Delivery", value: liveSupportProject.map { formatDeliveryDate(from: $0.deadline_at) } ?? "-")
             cardRow(title: "Prototype", value: "Available")
 
             if let plan = selectedPlan {
@@ -518,12 +517,14 @@ struct SupportFlowDemoView: View {
             errorText = "Select plan first"
             return
         }
-
-        let project = currentProject
+        guard let projectId = liveSupportProject?.id else {
+            errorText = "No active project available for support"
+            return
+        }
 
         do {
             let prepare = try await client.prepareSupport(
-                projectId: project.id,
+                projectId: projectId,
                 planId: plan.id,
                 quantity: 1,
                 idempotencyKey: "ios-m1-prepare-\(UUID().uuidString)"
@@ -536,6 +537,7 @@ struct SupportFlowDemoView: View {
             let canonical = await pollCanonicalSupportStatus(supportId: confirmed.support_id)
             supportResultStatus = canonical?.support_status ?? confirmed.support_status
             supportResultMessage = "Support recorded: \(confirmed.support_id.uuidString)"
+            await refreshLiveSupportProject()
         } catch {
             supportResultStatus = "failed"
             supportResultMessage = ""
@@ -562,6 +564,19 @@ struct SupportFlowDemoView: View {
             selectedTab = 3
         }
         supportStep = .planSelect
+    }
+
+    private func refreshLiveSupportProject() async {
+        do {
+            let project = try await client.getMyProject()
+            await MainActor.run {
+                liveSupportProject = project
+            }
+        } catch {
+            await MainActor.run {
+                liveSupportProject = nil
+            }
+        }
     }
 
     private func refreshMyVideos() async {
@@ -613,6 +628,15 @@ struct SupportFlowDemoView: View {
             return String(format: "%.1fK", Double(value) / 1000.0)
         }
         return "\(value)"
+    }
+
+    private func formatDeliveryDate(from iso8601: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: iso8601) else { return iso8601 }
+        let out = DateFormatter()
+        out.locale = Locale(identifier: "en_US_POSIX")
+        out.dateFormat = "yyyy-MM"
+        return out.string(from: date)
     }
 }
 
