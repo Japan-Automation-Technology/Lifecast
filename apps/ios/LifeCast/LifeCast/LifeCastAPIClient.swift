@@ -107,6 +107,50 @@ struct MyProjectsResult: Decodable {
     let rows: [MyProjectResult]
 }
 
+struct DiscoverCreatorRow: Decodable, Identifiable {
+    let creator_user_id: UUID
+    let username: String
+    let display_name: String?
+    let project_title: String?
+
+    var id: UUID { creator_user_id }
+}
+
+struct DiscoverCreatorsResult: Decodable {
+    let rows: [DiscoverCreatorRow]
+}
+
+struct CreatorPublicProfile: Decodable {
+    let creator_user_id: UUID
+    let username: String
+    let display_name: String?
+    let bio: String?
+    let avatar_url: String?
+}
+
+struct CreatorViewerRelationship: Decodable {
+    let is_following: Bool
+    let is_supported: Bool
+}
+
+struct CreatorPublicVideo: Decodable, Identifiable {
+    let video_id: UUID
+    let status: String
+    let file_name: String
+    let playback_url: String?
+    let thumbnail_url: String?
+    let created_at: String
+
+    var id: UUID { video_id }
+}
+
+struct CreatorPublicPageResult: Decodable {
+    let profile: CreatorPublicProfile
+    let viewer_relationship: CreatorViewerRelationship
+    let project: MyProjectResult?
+    let videos: [CreatorPublicVideo]
+}
+
 struct CreateProjectRequest: Encodable {
     struct Plan: Encodable {
         let name: String
@@ -274,6 +318,53 @@ final class LifeCastAPIClient {
             idempotencyKey: nil
         )
         return result.rows
+    }
+
+    func discoverCreators(query: String) async throws -> [DiscoverCreatorRow] {
+        guard var components = URLComponents(
+            url: baseURL.appendingPathComponent("v1/discover/creators"),
+            resolvingAgainstBaseURL: false
+        ) else {
+            throw NSError(
+                domain: "LifeCastAPI",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "invalid discover URL"]
+            )
+        }
+        components.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "limit", value: "20")
+        ]
+        guard let url = components.url else {
+            throw NSError(
+                domain: "LifeCastAPI",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "invalid discover URL"]
+            )
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let payloadText = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "LifeCastAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: payloadText])
+        }
+
+        let envelope = try JSONDecoder().decode(APIEnvelope<DiscoverCreatorsResult>.self, from: data)
+        return envelope.result.rows
+    }
+
+    func getCreatorPage(creatorUserId: UUID) async throws -> CreatorPublicPageResult {
+        try await send(
+            path: "/v1/creators/\(creatorUserId.uuidString)",
+            method: "GET",
+            body: Optional<String>.none,
+            idempotencyKey: nil
+        )
     }
 
     func createProject(

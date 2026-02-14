@@ -1,5 +1,6 @@
 import { dbPool, hasDb } from "../store/db.js";
 import {
+  DEV_ALT_CREATOR_USER_ID,
   DEV_CREATOR_USER_ID,
   DEV_PLAN_BASIC_ID,
   DEV_PLAN_PREMIUM_ID,
@@ -21,10 +22,40 @@ async function runSeed() {
     await client.query(
       `
       insert into users (id, created_at)
-      values ($1, now()), ($2, now()), ($3, now())
+      values ($1, now()), ($2, now()), ($3, now()), ($4, now())
       on conflict (id) do nothing
     `,
-      [DEV_SUPPORTER_USER_ID, DEV_CREATOR_USER_ID, DEV_REPORTER_USER_ID],
+      [DEV_SUPPORTER_USER_ID, DEV_CREATOR_USER_ID, DEV_REPORTER_USER_ID, DEV_ALT_CREATOR_USER_ID],
+    );
+
+    await client.query(
+      `
+      create table if not exists creator_profiles (
+        creator_user_id uuid primary key references users(id) on delete cascade,
+        username text not null unique,
+        display_name text,
+        bio text,
+        avatar_url text,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `,
+    );
+
+    await client.query(
+      `
+      insert into creator_profiles (creator_user_id, username, display_name, bio, created_at, updated_at)
+      values
+        ($1, 'lifecast_maker', 'LifeCast Maker', 'Building products in public.', now(), now()),
+        ($2, 'tak_game_lab', 'Tak Game Lab', 'Handheld game hardware development.', now(), now())
+      on conflict (creator_user_id)
+      do update set
+        username = excluded.username,
+        display_name = excluded.display_name,
+        bio = excluded.bio,
+        updated_at = now()
+    `,
+      [DEV_CREATOR_USER_ID, DEV_ALT_CREATOR_USER_ID],
     );
 
     await client.query(

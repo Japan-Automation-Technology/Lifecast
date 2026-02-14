@@ -60,6 +60,10 @@ struct FeedComment: Identifiable {
     let isSupporter: Bool
 }
 
+struct CreatorRoute: Identifiable {
+    let id: UUID
+}
+
 private struct NumberFormatterProvider {
     static let jpy: NumberFormatter = {
         let formatter = NumberFormatter()
@@ -79,7 +83,7 @@ struct SupportFlowDemoView: View {
     @State private var currentFeedIndex = 0
     @State private var showComments = false
     @State private var showShare = false
-    @State private var selectedCreatorProfile: FeedProjectSummary? = nil
+    @State private var selectedCreatorRoute: CreatorRoute? = nil
 
     @State private var supportEntryPoint: SupportEntryPoint = .feed
     @State private var supportStep: SupportStep = .planSelect
@@ -88,14 +92,15 @@ struct SupportFlowDemoView: View {
     @State private var supportResultStatus = "idle"
     @State private var supportResultMessage = ""
     @State private var liveSupportProject: MyProjectResult?
+    @State private var supportTargetProject: MyProjectResult?
     @State private var myVideos: [MyVideo] = []
     @State private var myVideosError = ""
 
     @State private var errorText = ""
 
     private var realPlans: [SupportPlan] {
-        guard let liveSupportProject else { return [] }
-        return (liveSupportProject.plans ?? []).map {
+        guard let target = supportTargetProject ?? liveSupportProject else { return [] }
+        return (target.plans ?? []).map {
             SupportPlan(id: $0.id, name: $0.name, priceMinor: $0.price_minor, rewardSummary: $0.reward_summary)
         }
     }
@@ -110,7 +115,13 @@ struct SupportFlowDemoView: View {
                 .tabItem { Label("Home", systemImage: "house") }
                 .tag(0)
 
-            DiscoverPlaceholderView()
+            DiscoverSearchView(client: client) { project in
+                supportEntryPoint = .feed
+                supportTargetProject = project
+                selectedPlan = nil
+                supportStep = .planSelect
+                showSupportFlow = true
+            }
                 .tabItem { Label("Discover", systemImage: "magnifyingglass") }
                 .tag(1)
 
@@ -145,8 +156,20 @@ struct SupportFlowDemoView: View {
         .sheet(isPresented: $showComments) {
             commentsSheet
         }
-        .sheet(item: $selectedCreatorProfile) { profile in
-            CreatorProfileView(profile: profile)
+        .sheet(item: $selectedCreatorRoute) { route in
+            NavigationStack {
+                CreatorPublicPageView(
+                    client: client,
+                    creatorId: route.id,
+                    onSupportTap: { project in
+                        supportEntryPoint = .feed
+                        supportTargetProject = project
+                        selectedPlan = nil
+                        supportStep = .planSelect
+                        showSupportFlow = true
+                    }
+                )
+            }
         }
         .confirmationDialog("Share", isPresented: $showShare, titleVisibility: .visible) {
             Button("Export video") {}
@@ -228,7 +251,7 @@ struct SupportFlowDemoView: View {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 10) {
                     Button("@\(project.username)") {
-                        selectedCreatorProfile = project
+                        selectedCreatorRoute = CreatorRoute(id: project.creatorId)
                     }
                     .font(.headline)
                     .foregroundStyle(.white)
@@ -253,6 +276,7 @@ struct SupportFlowDemoView: View {
         VStack(spacing: 16) {
             Button((liveSupportProject == nil || realPlans.isEmpty) ? "Setup" : (project.isSupportedByCurrentUser ? "Supported" : "Support")) {
                 supportEntryPoint = .feed
+                supportTargetProject = liveSupportProject
                 selectedPlan = nil
                 supportStep = .planSelect
                 showSupportFlow = true
@@ -448,8 +472,8 @@ struct SupportFlowDemoView: View {
             Text("2. Confirm")
                 .font(.headline)
 
-            cardRow(title: "Goal", value: formatJPY(liveSupportProject?.goal_amount_minor ?? 0))
-            cardRow(title: "Delivery", value: liveSupportProject.map { formatDeliveryDate(from: $0.deadline_at) } ?? "-")
+            cardRow(title: "Goal", value: formatJPY((supportTargetProject ?? liveSupportProject)?.goal_amount_minor ?? 0))
+            cardRow(title: "Delivery", value: (supportTargetProject ?? liveSupportProject).map { formatDeliveryDate(from: $0.deadline_at) } ?? "-")
             cardRow(title: "Prototype", value: "Available")
 
             if let plan = selectedPlan {
@@ -517,10 +541,11 @@ struct SupportFlowDemoView: View {
             errorText = "Select plan first"
             return
         }
-        guard let projectId = liveSupportProject?.id else {
+        guard let targetProject = supportTargetProject ?? liveSupportProject else {
             errorText = "No active project available for support"
             return
         }
+        let projectId = targetProject.id
 
         do {
             let prepare = try await client.prepareSupport(
@@ -538,6 +563,11 @@ struct SupportFlowDemoView: View {
             supportResultStatus = canonical?.support_status ?? confirmed.support_status
             supportResultMessage = "Support recorded: \(confirmed.support_id.uuidString)"
             await refreshLiveSupportProject()
+            if let creatorId = supportTargetProject?.creator_user_id,
+               creatorId != liveSupportProject?.creator_user_id,
+               let refreshed = try? await client.getCreatorPage(creatorUserId: creatorId).project {
+                supportTargetProject = refreshed
+            }
         } catch {
             supportResultStatus = "failed"
             supportResultMessage = ""
@@ -564,6 +594,9 @@ struct SupportFlowDemoView: View {
             selectedTab = 3
         }
         supportStep = .planSelect
+        selectedPlan = nil
+        errorText = ""
+        supportTargetProject = nil
     }
 
     private func refreshLiveSupportProject() async {
@@ -654,7 +687,7 @@ struct CreatorProfileView: View {
                     .font(.title3.bold())
 
                 HStack(spacing: 12) {
-                    Button("Following") {}
+                    Button("Follow") {}
                         .buttonStyle(.bordered)
                     if profile.isSupportedByCurrentUser {
                         Label("Supported", systemImage: "checkmark.seal.fill")
@@ -1685,7 +1718,7 @@ struct CreatorPostedFeedView: View {
             remainingDays: 12,
             likes: 4500,
             comments: 173,
-            isSupportedByCurrentUser: true
+            isSupportedByCurrentUser: false
         )
     }
 
@@ -1953,12 +1986,418 @@ struct VideoGridPlaceholder: View {
     }
 }
 
-struct DiscoverPlaceholderView: View {
+struct DiscoverSearchView: View {
+    let client: LifeCastAPIClient
+    let onSupportTap: (MyProjectResult) -> Void
+
+    @State private var query = ""
+    @State private var rows: [DiscoverCreatorRow] = []
+    @State private var loading = false
+    @State private var errorText = ""
+
     var body: some View {
         NavigationStack {
-            Text("Discover (M1 placeholder)")
-                .foregroundStyle(.secondary)
-                .navigationTitle("Discover")
+            VStack(spacing: 12) {
+                HStack {
+                    TextField("Search creators", text: $query)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Search") {
+                        Task { await search() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding(.horizontal, 16)
+
+                if loading {
+                    ProgressView("Searching...")
+                        .font(.caption)
+                }
+
+                if !errorText.isEmpty {
+                    Text(errorText)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 16)
+                }
+
+                List(rows) { creator in
+                    NavigationLink {
+                        CreatorPublicPageView(
+                            client: client,
+                            creatorId: creator.creator_user_id,
+                            onSupportTap: onSupportTap
+                        )
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("@\(creator.username)")
+                                .font(.headline)
+                            if let displayName = creator.display_name, !displayName.isEmpty {
+                                Text(displayName)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let projectTitle = creator.project_title, !projectTitle.isEmpty {
+                                Text(projectTitle)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+            .navigationTitle("Discover")
+            .task {
+                await search()
+            }
+        }
+    }
+
+    private func search() async {
+        loading = true
+        defer { loading = false }
+        do {
+            let result = try await client.discoverCreators(query: query)
+            await MainActor.run {
+                rows = result
+                errorText = ""
+            }
+        } catch {
+            await MainActor.run {
+                rows = []
+                errorText = error.localizedDescription
+            }
+        }
+    }
+}
+
+struct CreatorPublicPageView: View {
+    let client: LifeCastAPIClient
+    let creatorId: UUID
+    let onSupportTap: (MyProjectResult) -> Void
+
+    @State private var page: CreatorPublicPageResult?
+    @State private var loading = false
+    @State private var errorText = ""
+    @State private var selectedIndex = 0
+    @State private var selectedVideo: CreatorPublicVideo?
+    @State private var thumbnailCacheBust = UUID().uuidString
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                if let page {
+                    VStack(spacing: 8) {
+                        Circle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(width: 90, height: 90)
+                        Text("@\(page.profile.username)")
+                            .font(.headline)
+                        if let displayName = page.profile.display_name, !displayName.isEmpty {
+                            Text(displayName)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let bio = page.profile.bio, !bio.isEmpty {
+                            Text(bio)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 10) {
+                            Text(page.viewer_relationship.is_following ? "Following" : "Follow")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.blue.opacity(0.12))
+                                .foregroundStyle(.blue)
+                                .clipShape(Capsule())
+                            if page.viewer_relationship.is_supported {
+                                Label("Supported", systemImage: "checkmark.seal.fill")
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.green.opacity(0.12))
+                                    .foregroundStyle(.green)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                    .padding(.top, 8)
+
+                    Picker("CreatorTabs", selection: $selectedIndex) {
+                        Text("Project").tag(0)
+                        Text("Posts").tag(1)
+                        Text("Liked").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+
+                    Group {
+                        if selectedIndex == 0 {
+                            creatorProjectSection(page: page)
+                        } else if selectedIndex == 1 {
+                            creatorPostsSection(page: page)
+                        } else {
+                            VideoGridPlaceholder(title: "Liked videos")
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else if loading {
+                    ProgressView("Loading creator...")
+                        .padding(.top, 20)
+                } else if !errorText.isEmpty {
+                    Text(errorText)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 16)
+                }
+            }
+        }
+        .navigationTitle("Creator")
+        .task {
+            await load()
+        }
+    }
+
+    private func creatorProjectSection(page: CreatorPublicPageResult) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let project = page.project {
+                let funded = max(project.funded_amount_minor, 0)
+                let goal = max(project.goal_amount_minor, 1)
+                let progress = min(Double(funded) / Double(goal), 1.0)
+                let percent = Int((Double(funded) / Double(goal)) * 100.0)
+
+                Text("Project page")
+                    .font(.headline)
+                if let imageUrl = project.image_url, let url = URL(string: imageUrl) {
+                    AsyncImage(url: url) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        Rectangle().fill(Color.secondary.opacity(0.15))
+                    }
+                    .frame(height: 180)
+                    .frame(maxWidth: .infinity)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                Text(project.title)
+                    .font(.title3.weight(.semibold))
+                if let subtitle = project.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                ProgressView(value: progress)
+                    .tint(progress >= 1 ? .green : .blue)
+                Text("\(percent)% funded (\(funded.formatted()) / \(goal.formatted()) \(project.currency))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text("Supporters: \(project.supporter_count)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Text("Goal: \(project.goal_amount_minor.formatted()) \(project.currency)")
+                    .font(.footnote)
+                if let days = project.duration_days {
+                    Text("Duration: \(days) days")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Deadline: \(project.deadline_at)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                if let category = project.category, !category.isEmpty {
+                    Text("Category: \(category)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if let location = project.location, !location.isEmpty {
+                    Text("Location: \(location)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if let description = project.description, !description.isEmpty {
+                    Text(description)
+                        .font(.footnote)
+                }
+                if let urls = project.urls, !urls.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("URLs")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ForEach(urls, id: \.self) { raw in
+                            if let url = URL(string: raw) {
+                                Link(raw, destination: url)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                            } else {
+                                Text(raw)
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                }
+                Text("Plans")
+                    .font(.subheadline.weight(.semibold))
+                ForEach(project.plans ?? [], id: \.id) { plan in
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let image = plan.image_url, let url = URL(string: image) {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .empty:
+                                    Rectangle().fill(Color.secondary.opacity(0.15))
+                                case .success(let image):
+                                    image.resizable().scaledToFill()
+                                case .failure:
+                                    Rectangle().fill(Color.secondary.opacity(0.15))
+                                @unknown default:
+                                    Rectangle().fill(Color.secondary.opacity(0.15))
+                                }
+                            }
+                            .frame(height: 120)
+                            .frame(maxWidth: .infinity)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        } else {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.gray.opacity(0.25))
+                                Image(systemName: "photo")
+                                    .font(.system(size: 28, weight: .semibold))
+                                    .foregroundStyle(.gray.opacity(0.9))
+                            }
+                            .frame(height: 120)
+                            .frame(maxWidth: .infinity)
+                        }
+                        Text(plan.name)
+                            .font(.subheadline.weight(.semibold))
+                        Text("\(plan.price_minor.formatted()) \(plan.currency)")
+                            .font(.caption)
+                        Text(plan.reward_summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let description = plan.description, !description.isEmpty {
+                            Text(description)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(10)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+
+                Button("Support this project") {
+                    onSupportTap(project)
+                }
+                .buttonStyle(.borderedProminent)
+            } else {
+                Text("No active project")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func creatorPostsSection(page: CreatorPublicPageResult) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Posted videos")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("Refresh") {
+                    thumbnailCacheBust = UUID().uuidString
+                    Task { await load() }
+                }
+                .font(.caption)
+            }
+            if page.videos.isEmpty {
+                Text("No videos yet")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                    ForEach(Array(page.videos.enumerated()), id: \.element.video_id) { index, video in
+                        Button {
+                            selectedVideo = video
+                        } label: {
+                            Group {
+                                if let thumbnail = video.thumbnail_url, let url = thumbnailURL(base: thumbnail) {
+                                    AsyncImage(url: url) { phase in
+                                        switch phase {
+                                        case .empty:
+                                            RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.15))
+                                        case .success(let image):
+                                            image.resizable().scaledToFill()
+                                        case .failure:
+                                            RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.2))
+                                        @unknown default:
+                                            RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.15))
+                                        }
+                                    }
+                                } else {
+                                    RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.15))
+                                }
+                            }
+                            .frame(height: 150)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("creator-posted-grid-video-\(index)")
+                        .accessibilityLabel("Open creator posted \(index)")
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .fullScreenCover(item: $selectedVideo) { video in
+            CreatorPostedFeedView(
+                videos: convertCreatorVideosToMyVideos(page.videos),
+                initialVideoId: video.video_id,
+                client: client,
+                isCurrentUserVideo: false,
+                onVideoDeleted: {}
+            )
+        }
+    }
+
+    private func thumbnailURL(base: String) -> URL? {
+        guard var components = URLComponents(string: base) else { return nil }
+        var items = components.queryItems ?? []
+        items.append(URLQueryItem(name: "cb", value: thumbnailCacheBust))
+        components.queryItems = items
+        return components.url
+    }
+
+    private func convertCreatorVideosToMyVideos(_ videos: [CreatorPublicVideo]) -> [MyVideo] {
+        videos.map { video in
+            MyVideo(
+                video_id: video.video_id,
+                status: video.status,
+                file_name: video.file_name,
+                playback_url: video.playback_url,
+                thumbnail_url: video.thumbnail_url,
+                created_at: video.created_at
+            )
+        }
+    }
+
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        do {
+            let result = try await client.getCreatorPage(creatorUserId: creatorId)
+            await MainActor.run {
+                page = result
+                errorText = ""
+            }
+        } catch {
+            await MainActor.run {
+                page = nil
+                errorText = error.localizedDescription
+            }
         }
     }
 }
@@ -2430,7 +2869,7 @@ private struct SelectedProjectImage {
 private let sampleProjects: [FeedProjectSummary] = [
     FeedProjectSummary(
         id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
-        creatorId: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+        creatorId: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
         username: "tak_game_lab",
         caption: "Building our handheld game prototype. Today: thermal and battery test.",
         minPlanPriceMinor: 1000,
@@ -2439,12 +2878,12 @@ private let sampleProjects: [FeedProjectSummary] = [
         remainingDays: 12,
         likes: 4520,
         comments: 173,
-        isSupportedByCurrentUser: true
+        isSupportedByCurrentUser: false
     ),
     FeedProjectSummary(
         id: UUID(uuidString: "11111111-1111-1111-1111-111111111112")!,
-        creatorId: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
-        username: "neo_arcade",
+        creatorId: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+        username: "lifecast_maker",
         caption: "Arcade stick case redesign with fan voting feedback.",
         minPlanPriceMinor: 2000,
         goalAmountMinor: 800_000,
@@ -2456,8 +2895,8 @@ private let sampleProjects: [FeedProjectSummary] = [
     ),
     FeedProjectSummary(
         id: UUID(uuidString: "11111111-1111-1111-1111-111111111113")!,
-        creatorId: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!,
-        username: "pixel_hardware",
+        creatorId: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+        username: "tak_game_lab",
         caption: "Low-profile keyboard prototype: key feel tuning sprint.",
         minPlanPriceMinor: 1500,
         goalAmountMinor: 1_500_000,
@@ -2465,7 +2904,7 @@ private let sampleProjects: [FeedProjectSummary] = [
         remainingDays: 9,
         likes: 3380,
         comments: 129,
-        isSupportedByCurrentUser: true
+        isSupportedByCurrentUser: false
     )
 ]
 

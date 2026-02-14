@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { registerAnalyticsRoutes } from "./routes/analytics.js";
 import { registerDisputeRoutes } from "./routes/disputes.js";
+import { registerDiscoverRoutes } from "./routes/discover.js";
 import { registerEventRoutes } from "./routes/events.js";
 import { registerJournalRoutes } from "./routes/journal.js";
 import { registerModerationRoutes } from "./routes/moderation.js";
@@ -32,6 +33,7 @@ export async function buildApp() {
   await registerAnalyticsRoutes(app);
   await registerPaymentRoutes(app);
   await registerProjectRoutes(app);
+  await registerDiscoverRoutes(app);
   await registerUploadRoutes(app);
   await registerJournalRoutes(app);
   await registerDisputeRoutes(app);

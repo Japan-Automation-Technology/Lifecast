@@ -9,6 +9,7 @@
     "dev:worker:outbox": "tsx watch src/workers/outbox.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
+    "db:seed:second-creator": "tsx src/scripts/setupSecondCreatorDemo.ts",
     "db:bootstrap": "pnpm db:migrate && pnpm db:seed",
     "db:reset-dev-videos": "tsx src/scripts/resetDevVideos.ts",
     "verify:cloudflare-stream": "tsx src/scripts/verifyCloudflareStream.ts",
