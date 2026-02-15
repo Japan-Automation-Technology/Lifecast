@@ -11,6 +11,10 @@ struct SupportFlowDemoView: View {
     @State private var feedMode: FeedMode = .forYou
     @State private var currentFeedIndex = 0
     @State private var homeFeedPlayer: AVPlayer? = nil
+    @State private var showFeedProjectPanel = false
+    @State private var feedProjectDetail: MyProjectResult?
+    @State private var feedProjectDetailLoading = false
+    @State private var feedProjectDetailError = ""
     @State private var showComments = false
     @State private var showShare = false
     @State private var selectedCreatorRoute: CreatorRoute? = nil
@@ -192,14 +196,10 @@ struct SupportFlowDemoView: View {
                 ZStack(alignment: .bottomTrailing) {
                     if let project = currentProject {
                         feedCard(project: project)
-                            .gesture(
+                            .highPriorityGesture(
                                 DragGesture(minimumDistance: 24)
                                     .onEnded { value in
-                                        if value.translation.height < -50 {
-                                            nextFeed()
-                                        } else if value.translation.height > 50 {
-                                            previousFeed()
-                                        }
+                                        handleHomeFeedDragEnded(value, project: project)
                                     }
                             )
                     } else {
@@ -219,17 +219,6 @@ struct SupportFlowDemoView: View {
                             )
                     }
 
-                    if !feedProjects.isEmpty {
-                        VStack(spacing: 8) {
-                            ForEach(0..<feedProjects.count, id: \.self) { idx in
-                                Circle()
-                                    .fill(idx == currentFeedIndex ? Color.white : Color.white.opacity(0.3))
-                                    .frame(width: 6, height: 6)
-                            }
-                        }
-                        .padding(.trailing, 10)
-                        .padding(.bottom, 120)
-                    }
                 }
                 .padding(.top, 8)
                 .padding(.horizontal, 8)
@@ -240,45 +229,19 @@ struct SupportFlowDemoView: View {
 
     private func feedCard(project: FeedProjectSummary) -> some View {
         ZStack(alignment: .bottom) {
-            Group {
-                if let player = homeFeedPlayer {
-                    VideoPlayer(player: player)
-                        .onAppear { player.play() }
-                        .onDisappear { player.pause() }
-                } else if let thumbnail = project.thumbnailURL, let thumbnailURL = URL(string: thumbnail) {
-                    AsyncImage(url: thumbnailURL) { phase in
-                        switch phase {
-                        case .empty:
-                            LinearGradient(
-                                colors: [Color.blue.opacity(0.35), Color.black.opacity(0.6), Color.pink.opacity(0.3)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        case .failure:
-                            LinearGradient(
-                                colors: [Color.blue.opacity(0.35), Color.black.opacity(0.6), Color.pink.opacity(0.3)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        @unknown default:
-                            LinearGradient(
-                                colors: [Color.blue.opacity(0.35), Color.black.opacity(0.6), Color.pink.opacity(0.3)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        }
-                    }
-                } else {
-                    LinearGradient(
-                        colors: [Color.blue.opacity(0.35), Color.black.opacity(0.6), Color.pink.opacity(0.3)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
+            GeometryReader { geo in
+                let panelWidth = geo.size.width
+                ZStack(alignment: .leading) {
+                    feedVideoLayer(project: project)
+                        .offset(x: showFeedProjectPanel ? -panelWidth : 0)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: showFeedProjectPanel)
+
+                    feedProjectPanel(project: project, width: panelWidth)
+                        .offset(x: geo.size.width - (showFeedProjectPanel ? panelWidth : 0))
+                        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: showFeedProjectPanel)
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 20))
             }
-            .clipShape(RoundedRectangle(cornerRadius: 20))
 
             LinearGradient(
                 colors: [Color.black.opacity(0.0), Color.black.opacity(0.55)],
@@ -313,6 +276,117 @@ struct SupportFlowDemoView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
         }
+    }
+
+    private func feedVideoLayer(project: FeedProjectSummary) -> some View {
+        Group {
+            if let player = homeFeedPlayer {
+                VideoPlayer(player: player)
+                    .onAppear {
+                        if !showFeedProjectPanel {
+                            player.play()
+                        } else {
+                            player.pause()
+                        }
+                    }
+                    .onDisappear { player.pause() }
+            } else if let thumbnail = project.thumbnailURL, let thumbnailURL = URL(string: thumbnail) {
+                AsyncImage(url: thumbnailURL) { phase in
+                    switch phase {
+                    case .empty:
+                        LinearGradient(
+                            colors: [Color.blue.opacity(0.35), Color.black.opacity(0.6), Color.pink.opacity(0.3)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        LinearGradient(
+                            colors: [Color.blue.opacity(0.35), Color.black.opacity(0.6), Color.pink.opacity(0.3)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    @unknown default:
+                        LinearGradient(
+                            colors: [Color.blue.opacity(0.35), Color.black.opacity(0.6), Color.pink.opacity(0.3)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    }
+                }
+            } else {
+                LinearGradient(
+                    colors: [Color.blue.opacity(0.35), Color.black.opacity(0.6), Color.pink.opacity(0.3)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        }
+    }
+
+    private func feedProjectPanel(project: FeedProjectSummary, width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Project")
+                .font(.headline)
+                .foregroundStyle(.white)
+
+            if feedProjectDetailLoading && feedProjectDetail?.id != project.id {
+                ProgressView("Loading project...")
+                    .tint(.white)
+                    .foregroundStyle(.white.opacity(0.85))
+            } else if let detail = feedProjectDetail, detail.id == project.id {
+                Text(detail.title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                if let subtitle = detail.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+                Text("Goal: \(formatJPY(detail.goal_amount_minor))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+                Text("Funded: \(formatJPY(detail.funded_amount_minor)) / \(formatJPY(detail.goal_amount_minor))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+                Text("Supporters: \(detail.supporter_count)")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+                Text("Deadline: \(formatDeliveryDate(from: detail.deadline_at))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+                if let description = detail.description, !description.isEmpty {
+                    Text(description)
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+            } else {
+                Text(project.caption)
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.9))
+                Text("Goal: \(formatJPY(project.goalAmountMinor))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+                Text("Funded: \(formatJPY(project.fundedAmountMinor))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+
+            if !feedProjectDetailError.isEmpty {
+                Text(feedProjectDetailError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 18)
+        .frame(width: width, alignment: .leading)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .contentShape(Rectangle())
+        .background(Color.black.opacity(0.86))
     }
 
     private func rightRail(project: FeedProjectSummary) -> some View {
@@ -763,6 +837,7 @@ struct SupportFlowDemoView: View {
 
     private func nextFeed() {
         guard currentFeedIndex < feedProjects.count - 1 else { return }
+        closeFeedProjectPanel()
         withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) {
             currentFeedIndex += 1
         }
@@ -771,6 +846,7 @@ struct SupportFlowDemoView: View {
 
     private func previousFeed() {
         guard currentFeedIndex > 0 else { return }
+        closeFeedProjectPanel()
         withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) {
             currentFeedIndex -= 1
         }
@@ -828,6 +904,11 @@ struct SupportFlowDemoView: View {
         await MainActor.run {
             feedProjects = updated
             currentFeedIndex = min(currentFeedIndex, max(0, updated.count - 1))
+            if let selected = updated[safe: currentFeedIndex] {
+                feedProjectDetail = (feedProjectDetail?.id == selected.id) ? feedProjectDetail : nil
+            } else {
+                feedProjectDetail = nil
+            }
             syncHomeFeedPlayer()
         }
     }
@@ -849,7 +930,11 @@ struct SupportFlowDemoView: View {
         if let existing = homeFeedPlayer,
            let existingAsset = existing.currentItem?.asset as? AVURLAsset,
            existingAsset.url == url {
-            existing.play()
+            if showFeedProjectPanel {
+                existing.pause()
+            } else {
+                existing.play()
+            }
             return
         }
 
@@ -857,7 +942,92 @@ struct SupportFlowDemoView: View {
         let player = AVPlayer(url: url)
         player.actionAtItemEnd = .none
         homeFeedPlayer = player
-        player.play()
+        if showFeedProjectPanel {
+            player.pause()
+        } else {
+            player.play()
+        }
+    }
+
+    private func handleHomeFeedDragEnded(_ value: DragGesture.Value, project: FeedProjectSummary) {
+        let dx = value.translation.width
+        let dy = value.translation.height
+
+        if showFeedProjectPanel && abs(dy) > 36 {
+            if dy < 0 {
+                if currentFeedIndex < feedProjects.count - 1 {
+                    nextFeed()
+                } else {
+                    closeFeedProjectPanel()
+                }
+            } else {
+                if currentFeedIndex > 0 {
+                    previousFeed()
+                } else {
+                    closeFeedProjectPanel()
+                }
+            }
+            return
+        }
+
+        if abs(dx) > abs(dy) {
+            if dx < -50 {
+                openFeedProjectPanel(for: project)
+            } else if dx > 50 {
+                closeFeedProjectPanel()
+            }
+            return
+        }
+
+        if dy < -50 {
+            nextFeed()
+        } else if dy > 50 {
+            previousFeed()
+        }
+    }
+
+    private func openFeedProjectPanel(for project: FeedProjectSummary) {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+            showFeedProjectPanel = true
+        }
+        homeFeedPlayer?.pause()
+        Task {
+            await loadFeedProjectDetail(for: project)
+        }
+    }
+
+    private func closeFeedProjectPanel() {
+        guard showFeedProjectPanel else { return }
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
+            showFeedProjectPanel = false
+        }
+        syncHomeFeedPlayer()
+    }
+
+    private func loadFeedProjectDetail(for project: FeedProjectSummary) async {
+        await MainActor.run {
+            feedProjectDetailLoading = true
+            feedProjectDetailError = ""
+        }
+        defer {
+            Task { @MainActor in
+                feedProjectDetailLoading = false
+            }
+        }
+        do {
+            let page = try await client.getCreatorPage(creatorUserId: project.creatorId)
+            await MainActor.run {
+                if currentProject?.id == project.id {
+                    feedProjectDetail = page.project
+                }
+            }
+        } catch {
+            await MainActor.run {
+                if currentProject?.id == project.id {
+                    feedProjectDetailError = error.localizedDescription
+                }
+            }
+        }
     }
 
     private func formatJPY(_ amountMinor: Int) -> String {
@@ -878,6 +1048,12 @@ struct SupportFlowDemoView: View {
         out.locale = Locale(identifier: "en_US_POSIX")
         out.dateFormat = "yyyy-MM"
         return out.string(from: date)
+    }
+}
+
+private extension Array {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 
