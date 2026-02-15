@@ -7,6 +7,10 @@ private struct DiscoverSearchHistoryEntry: Codable, Identifiable, Hashable {
     var id: UUID { creatorId }
 }
 
+private struct DiscoverCreatorDestination: Identifiable, Hashable {
+    let id: UUID
+}
+
 struct DiscoverSearchView: View {
     let client: LifeCastAPIClient
     let onSupportTap: (MyProjectResult) -> Void
@@ -18,6 +22,7 @@ struct DiscoverSearchView: View {
     @State private var hasSearched = false
     @State private var searchHistory: [DiscoverSearchHistoryEntry] = []
     @State private var liveSearchTask: Task<Void, Never>?
+    @State private var destination: DiscoverCreatorDestination?
 
     private static let historyKey = "discover.search.history.v1"
     private let historyLimit = 10
@@ -79,6 +84,13 @@ struct DiscoverSearchView: View {
                 }
             }
             .navigationTitle("Discover")
+            .navigationDestination(item: $destination) { target in
+                CreatorPublicPageView(
+                    client: client,
+                    creatorId: target.id,
+                    onSupportTap: onSupportTap
+                )
+            }
             .task {
                 loadSearchHistory()
             }
@@ -93,12 +105,9 @@ struct DiscoverSearchView: View {
 
     private var resultsSection: some View {
         List(rows) { creator in
-            NavigationLink {
-                CreatorPublicPageView(
-                    client: client,
-                    creatorId: creator.creator_user_id,
-                    onSupportTap: onSupportTap
-                )
+            Button {
+                rememberVisitedCreator(creator)
+                destination = DiscoverCreatorDestination(id: creator.creator_user_id)
             } label: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(creator.username)")
@@ -115,11 +124,7 @@ struct DiscoverSearchView: View {
                     }
                 }
             }
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    rememberVisitedCreator(creator)
-                }
-            )
+            .buttonStyle(.plain)
         }
         .listStyle(.plain)
     }
@@ -143,7 +148,7 @@ struct DiscoverSearchView: View {
 
                             Button {
                                 query = entry.username
-                                Task { await search() }
+                                destination = DiscoverCreatorDestination(id: entry.creatorId)
                             } label: {
                                 Text("@\(entry.username)")
                                     .foregroundStyle(.primary)
