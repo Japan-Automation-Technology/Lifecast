@@ -10,6 +10,7 @@ struct SupportFlowDemoView: View {
     @State private var selectedTab = 0
     @State private var feedMode: FeedMode = .forYou
     @State private var currentFeedIndex = 0
+    @State private var homeFeedMotionDirection: VerticalFeedMotionDirection = .next
     @State private var homeFeedPlayer: AVPlayer? = nil
     @State private var showFeedProjectPanel = false
     @State private var feedProjectDetail: MyProjectResult?
@@ -154,6 +155,8 @@ struct SupportFlowDemoView: View {
         }
         .onChange(of: selectedTab) { _, newValue in
             if newValue == 3 {
+                homeFeedPlayer?.pause()
+                homeFeedPlayer = nil
                 Task {
                     await refreshAuthState()
                     await refreshMyVideos()
@@ -161,9 +164,13 @@ struct SupportFlowDemoView: View {
                     await refreshMyProfile()
                 }
             } else if newValue == 0 {
+                syncHomeFeedPlayer()
                 Task {
                     await refreshFeedProjectsFromAPI()
                 }
+            } else {
+                homeFeedPlayer?.pause()
+                homeFeedPlayer = nil
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .lifecastAuthSessionUpdated)) { _ in
@@ -196,6 +203,9 @@ struct SupportFlowDemoView: View {
                 ZStack(alignment: .bottomTrailing) {
                     if let project = currentProject {
                         feedCard(project: project)
+                            .id(project.id)
+                            .transition(homeFeedMotionDirection.transition)
+                            .animation(.interactiveSpring(response: 0.32, dampingFraction: 0.88), value: currentFeedIndex)
                             .highPriorityGesture(
                                 DragGesture(minimumDistance: 24)
                                     .onEnded { value in
@@ -279,14 +289,6 @@ struct SupportFlowDemoView: View {
         Group {
             if let player = homeFeedPlayer {
                 VideoPlayer(player: player)
-                    .onAppear {
-                        if !showFeedProjectPanel {
-                            player.play()
-                        } else {
-                            player.pause()
-                        }
-                    }
-                    .onDisappear { player.pause() }
             } else if let thumbnail = project.thumbnailURL, let thumbnailURL = URL(string: thumbnail) {
                 AsyncImage(url: thumbnailURL) { phase in
                     switch phase {
@@ -835,8 +837,10 @@ struct SupportFlowDemoView: View {
 
     private func nextFeed() {
         guard currentFeedIndex < feedProjects.count - 1 else { return }
+        homeFeedMotionDirection = .next
+        homeFeedPlayer?.pause()
         closeFeedProjectPanel()
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) {
+        withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.88)) {
             currentFeedIndex += 1
         }
         syncHomeFeedPlayer()
@@ -844,8 +848,10 @@ struct SupportFlowDemoView: View {
 
     private func previousFeed() {
         guard currentFeedIndex > 0 else { return }
+        homeFeedMotionDirection = .previous
+        homeFeedPlayer?.pause()
         closeFeedProjectPanel()
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) {
+        withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.88)) {
             currentFeedIndex -= 1
         }
         syncHomeFeedPlayer()
@@ -912,6 +918,12 @@ struct SupportFlowDemoView: View {
     }
 
     private func syncHomeFeedPlayer() {
+        guard selectedTab == 0 else {
+            homeFeedPlayer?.pause()
+            homeFeedPlayer = nil
+            return
+        }
+
         guard !feedProjects.isEmpty else {
             homeFeedPlayer?.pause()
             homeFeedPlayer = nil

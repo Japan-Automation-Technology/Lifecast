@@ -138,6 +138,7 @@ struct CreatorPostedFeedView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var feedVideos: [MyVideo]
     @State private var currentIndex: Int
+    @State private var postedFeedMotionDirection: VerticalFeedMotionDirection = .next
     @State private var player: AVPlayer?
     @State private var showFeedProjectPanel = false
     @State private var feedProjectDetail: MyProjectResult?
@@ -176,6 +177,9 @@ struct CreatorPostedFeedView: View {
                     .foregroundStyle(.white)
             } else {
                 feedPage(video: feedVideos[currentIndex], project: currentProject)
+                    .id(feedVideos[currentIndex].video_id)
+                    .transition(postedFeedMotionDirection.transition)
+                    .animation(.interactiveSpring(response: 0.32, dampingFraction: 0.88), value: currentIndex)
                     .accessibilityIdentifier("posted-feed-view")
                     .highPriorityGesture(
                         DragGesture(minimumDistance: 24)
@@ -301,13 +305,6 @@ struct CreatorPostedFeedView: View {
             if let currentPlayer = player {
                 VideoPlayer(player: currentPlayer)
                     .ignoresSafeArea()
-                    .onAppear {
-                        if showFeedProjectPanel {
-                            currentPlayer.pause()
-                        } else {
-                            currentPlayer.play()
-                        }
-                    }
             } else {
                 Rectangle()
                     .fill(Color.gray.opacity(0.3))
@@ -546,18 +543,24 @@ struct CreatorPostedFeedView: View {
 
     private func showOlder() {
         guard currentIndex < feedVideos.count - 1 else { return }
+        postedFeedMotionDirection = .next
+        player?.pause()
         closePostedFeedProjectPanel()
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+        withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.88)) {
             currentIndex += 1
         }
+        syncPlayerForCurrentIndex()
     }
 
     private func showNewer() {
         guard currentIndex > 0 else { return }
+        postedFeedMotionDirection = .previous
+        player?.pause()
         closePostedFeedProjectPanel()
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+        withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.88)) {
             currentIndex -= 1
         }
+        syncPlayerForCurrentIndex()
     }
 
     private func handlePostedFeedDragEnded(_ value: DragGesture.Value, project: FeedProjectSummary) {

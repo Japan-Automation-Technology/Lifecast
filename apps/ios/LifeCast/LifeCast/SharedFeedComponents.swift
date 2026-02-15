@@ -8,6 +8,20 @@ enum FeedSwipeAction {
     case none
 }
 
+enum VerticalFeedMotionDirection {
+    case next
+    case previous
+
+    var transition: AnyTransition {
+        switch self {
+        case .next:
+            return .asymmetric(insertion: .move(edge: .bottom), removal: .move(edge: .top))
+        case .previous:
+            return .asymmetric(insertion: .move(edge: .top), removal: .move(edge: .bottom))
+        }
+    }
+}
+
 func resolveFeedSwipeAction(
     dx: CGFloat,
     dy: CGFloat,
