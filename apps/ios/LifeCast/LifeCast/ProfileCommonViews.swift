@@ -53,3 +53,96 @@ struct ProfileTabIconStrip: View {
         .buttonStyle(.plain)
     }
 }
+
+struct ProfileOverviewSection<ActionContent: View>: View {
+    let avatarURL: String?
+    let displayName: String
+    let bioText: String
+    let followingCount: Int
+    let followersCount: Int
+    let supportCount: Int
+    let onTapFollowing: () -> Void
+    let onTapFollowers: () -> Void
+    let onTapSupport: () -> Void
+    let actionContent: ActionContent
+
+    init(
+        avatarURL: String?,
+        displayName: String,
+        bioText: String,
+        followingCount: Int,
+        followersCount: Int,
+        supportCount: Int,
+        onTapFollowing: @escaping () -> Void,
+        onTapFollowers: @escaping () -> Void,
+        onTapSupport: @escaping () -> Void,
+        @ViewBuilder actionContent: () -> ActionContent
+    ) {
+        self.avatarURL = avatarURL
+        self.displayName = displayName
+        self.bioText = bioText
+        self.followingCount = followingCount
+        self.followersCount = followersCount
+        self.supportCount = supportCount
+        self.onTapFollowing = onTapFollowing
+        self.onTapFollowers = onTapFollowers
+        self.onTapSupport = onTapSupport
+        self.actionContent = actionContent()
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            profileAvatar(urlString: avatarURL, size: 90)
+
+            Text(displayName)
+                .font(.headline)
+
+            HStack(spacing: 28) {
+                profileStatButton(value: followingCount, label: "Following", action: onTapFollowing)
+                profileStatButton(value: followersCount, label: "Followers", action: onTapFollowers)
+                profileStatButton(value: supportCount, label: "Support", action: onTapSupport)
+            }
+
+            actionContent
+
+            Text(bioText)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+        }
+    }
+
+    private func profileStatButton(value: Int, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Text(value.formatted())
+                    .font(.headline.weight(.semibold))
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func profileAvatar(urlString: String?, size: CGFloat) -> some View {
+        if let urlString, let url = URL(string: urlString) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                default:
+                    Circle().fill(Color.gray.opacity(0.3))
+                }
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        } else {
+            Circle()
+                .fill(Color.gray.opacity(0.3))
+                .frame(width: size, height: size)
+        }
+    }
+}

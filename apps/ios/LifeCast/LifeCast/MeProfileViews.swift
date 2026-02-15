@@ -35,15 +35,26 @@ struct MeTabView: View {
                 if isAuthenticated {
                     ScrollView {
                         VStack(spacing: 16) {
-                            VStack(spacing: 8) {
-                                profileAvatar(urlString: myProfile?.avatar_url, size: 90)
-                                Text(currentDisplayName)
-                                    .font(.headline)
-                                HStack(spacing: 28) {
-                                    profileStatButton(value: myProfileStats?.following_count ?? 0, label: "Following", tab: .following)
-                                    profileStatButton(value: myProfileStats?.followers_count ?? 0, label: "Followers", tab: .followers)
-                                    profileStatButton(value: myProfileStats?.supported_project_count ?? 0, label: "Support", tab: .support)
+                            ProfileOverviewSection(
+                                avatarURL: myProfile?.avatar_url,
+                                displayName: currentDisplayName,
+                                bioText: (myProfile?.bio?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (myProfile?.bio ?? "") : "Tap to add bio",
+                                followingCount: myProfileStats?.following_count ?? 0,
+                                followersCount: myProfileStats?.followers_count ?? 0,
+                                supportCount: myProfileStats?.supported_project_count ?? 0,
+                                onTapFollowing: {
+                                    selectedNetworkTab = .following
+                                    showNetwork = true
+                                },
+                                onTapFollowers: {
+                                    selectedNetworkTab = .followers
+                                    showNetwork = true
+                                },
+                                onTapSupport: {
+                                    selectedNetworkTab = .support
+                                    showNetwork = true
                                 }
+                            ) {
                                 Button("Edit Profile") {
                                     showEditProfile = true
                                 }
@@ -57,11 +68,6 @@ struct MeTabView: View {
                                 )
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
                                 .buttonStyle(.plain)
-                                Text((myProfile?.bio?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (myProfile?.bio ?? "") : "Tap to add bio")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 24)
                             }
                             .padding(.top, 6)
 
@@ -188,48 +194,6 @@ struct MeTabView: View {
         .background(Color.white)
     }
 
-    private func profileStatButton(value: Int, label: String, tab: CreatorNetworkTab) -> some View {
-        Button {
-            selectedNetworkTab = tab
-            showNetwork = true
-        } label: {
-            VStack(spacing: 2) {
-                Text(value.formatted())
-                    .font(.headline.weight(.semibold))
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func shortCount(_ value: Int) -> String {
-        if value >= 1000 {
-            return String(format: "%.1fK", Double(value) / 1000.0)
-        }
-        return "\(value)"
-    }
-
-    @ViewBuilder
-    private func profileAvatar(urlString: String?, size: CGFloat) -> some View {
-        if let urlString, let url = URL(string: urlString) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                default:
-                    Circle().fill(Color.gray.opacity(0.3))
-                }
-            }
-            .frame(width: size, height: size)
-            .clipShape(Circle())
-        } else {
-            Circle()
-                .fill(Color.gray.opacity(0.3))
-                .frame(width: size, height: size)
-        }
-    }
 }
 
 struct DevUserSwitcherSheet: View {

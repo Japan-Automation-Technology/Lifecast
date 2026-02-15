@@ -90,6 +90,7 @@ struct CreatorPublicPageView: View {
     let creatorId: UUID
     let onSupportTap: (MyProjectResult) -> Void
 
+    @Environment(\.dismiss) private var dismiss
     @State private var page: CreatorPublicPageResult?
     @State private var loading = false
     @State private var errorText = ""
@@ -104,41 +105,49 @@ struct CreatorPublicPageView: View {
             VStack(spacing: 16) {
                 if let page {
                     VStack(spacing: 8) {
-                        profileAvatar(urlString: page.profile.avatar_url, size: 90)
-                        Text(creatorDisplayName(profile: page.profile))
-                            .font(.headline)
-                        HStack(spacing: 28) {
-                            profileStatButton(value: page.profile_stats.following_count, label: "Following", tab: .following)
-                            profileStatButton(value: page.profile_stats.followers_count, label: "Followers", tab: .followers)
-                            profileStatButton(value: page.profile_stats.supported_project_count, label: "Support", tab: .support)
-                        }
-                        HStack(spacing: 10) {
-                            Button(page.viewer_relationship.is_following ? "Following" : "Follow") {
-                                Task {
-                                    await toggleFollow()
+                        ProfileOverviewSection(
+                            avatarURL: page.profile.avatar_url,
+                            displayName: creatorDisplayName(profile: page.profile),
+                            bioText: creatorBioText(profile: page.profile),
+                            followingCount: page.profile_stats.following_count,
+                            followersCount: page.profile_stats.followers_count,
+                            supportCount: page.profile_stats.supported_project_count,
+                            onTapFollowing: {
+                                selectedNetworkTab = .following
+                                showNetwork = true
+                            },
+                            onTapFollowers: {
+                                selectedNetworkTab = .followers
+                                showNetwork = true
+                            },
+                            onTapSupport: {
+                                selectedNetworkTab = .support
+                                showNetwork = true
+                            }
+                        ) {
+                            HStack(spacing: 10) {
+                                Button(page.viewer_relationship.is_following ? "Following" : "Follow") {
+                                    Task {
+                                        await toggleFollow()
+                                    }
+                                }
+                                .frame(width: 132)
+                                .buttonStyle(.borderedProminent)
+                                .buttonBorderShape(.roundedRectangle(radius: 8))
+                                .tint(page.viewer_relationship.is_following ? .gray : .blue)
+                                if page.viewer_relationship.is_supported {
+                                    Label("Supported", systemImage: "checkmark.seal.fill")
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(Color.green.opacity(0.12))
+                                        .foregroundStyle(.green)
+                                        .clipShape(Capsule())
                                 }
                             }
-                            .frame(width: 132)
-                            .buttonStyle(.borderedProminent)
-                            .buttonBorderShape(.roundedRectangle(radius: 8))
-                            .tint(page.viewer_relationship.is_following ? .gray : .blue)
-                            if page.viewer_relationship.is_supported {
-                                Label("Supported", systemImage: "checkmark.seal.fill")
-                                    .font(.caption.weight(.semibold))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(Color.green.opacity(0.12))
-                                    .foregroundStyle(.green)
-                                    .clipShape(Capsule())
-                                }
                         }
-                        Text(creatorBioText(profile: page.profile))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
                     }
-                    .padding(.top, 2)
+                    .padding(.top, 6)
 
                     ProfileTabIconStrip(selectedIndex: $selectedIndex)
                     .padding(.horizontal, 16)
@@ -188,33 +197,41 @@ struct CreatorPublicPageView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                if let page {
-                    Text("@\(page.profile.username)")
-                        .font(.headline)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
+        .toolbar(.hidden, for: .navigationBar)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            creatorPinnedHeader
         }
     }
 
-    private func profileStatButton(value: Int, label: String, tab: CreatorNetworkTab) -> some View {
-        Button {
-            selectedNetworkTab = tab
-            showNetwork = true
-        } label: {
-            VStack(spacing: 2) {
-                Text(value.formatted())
-                    .font(.headline.weight(.semibold))
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    private var creatorPinnedHeader: some View {
+        ZStack {
+            Text(page.map { "@\($0.profile.username)" } ?? "")
+                .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .padding(.horizontal, 56)
+
+            HStack {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+
+                Spacer()
+                Color.clear.frame(width: 28, height: 28)
             }
         }
-        .buttonStyle(.plain)
+        .frame(height: 36)
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .padding(.bottom, 2)
+        .background(Color.white)
     }
 
     private func creatorDisplayName(profile: CreatorPublicProfile) -> String {
@@ -225,26 +242,6 @@ struct CreatorPublicPageView: View {
     private func creatorBioText(profile: CreatorPublicProfile) -> String {
         let bio = (profile.bio ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return bio.isEmpty ? "No bio yet" : bio
-    }
-
-    @ViewBuilder
-    private func profileAvatar(urlString: String?, size: CGFloat) -> some View {
-        if let urlString, let url = URL(string: urlString) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                default:
-                    Circle().fill(Color.gray.opacity(0.3))
-                }
-            }
-            .frame(width: size, height: size)
-            .clipShape(Circle())
-        } else {
-            Circle()
-                .fill(Color.gray.opacity(0.3))
-                .frame(width: size, height: size)
-        }
     }
 
     private func creatorProjectSection(page: CreatorPublicPageResult) -> some View {
