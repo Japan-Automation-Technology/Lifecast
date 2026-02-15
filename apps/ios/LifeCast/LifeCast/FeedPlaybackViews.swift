@@ -220,9 +220,9 @@ struct CreatorPostedFeedView: View {
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             postedFeedCommentBar
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .sheet(isPresented: $showComments) {
             commentsSheet
@@ -729,9 +729,8 @@ struct CreatorPostedFeedView: View {
     }
 
     private var postedFeedCommentBar: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             Color.black
-                .frame(height: appBottomBarHeight)
             HStack {
                 Text("コメントする...")
                     .font(.body)
@@ -739,11 +738,11 @@ struct CreatorPostedFeedView: View {
                 Spacer()
             }
             .padding(.horizontal, 16)
-            .frame(height: 36)
+            .frame(height: 34)
             .background(Color.white.opacity(0.12))
             .clipShape(Capsule())
             .padding(.horizontal, 14)
-            .padding(.bottom, 8)
         }
+        .frame(height: appBottomBarHeight)
     }
 }

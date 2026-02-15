@@ -126,7 +126,6 @@ struct SupportFlowDemoView: View {
             .tag(3)
         }
         .toolbar(.hidden, for: .tabBar)
-        .ignoresSafeArea(.container, edges: .bottom)
         .background(Color.black.ignoresSafeArea())
         .overlay(alignment: .bottom) {
             appBottomBar
@@ -243,10 +242,14 @@ struct SupportFlowDemoView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea(edges: [.top, .bottom])
+            .ignoresSafeArea(edges: .top)
             .overlay(alignment: .top) {
                 homeFeedHeader
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear
+                .frame(height: appBottomBarHeight)
         }
     }
 
