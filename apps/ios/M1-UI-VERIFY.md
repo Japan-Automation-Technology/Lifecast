@@ -5,6 +5,10 @@
 - Video worker running for upload completion:
   - `pnpm -C /Users/takeshi/Desktop/lifecast dev:backend:worker:video-processing`
 - At least one sample project/plan exists in backend seed
+- Appium script policy:
+  - Use `node /Users/takeshi/Desktop/lifecast/scripts/appium/ios-upload-profile-screens.mjs` and `node /Users/takeshi/Desktop/lifecast/scripts/appium/ios-posted-feed-navigation.mjs` for UI checks.
+  - Do not use `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:appium` for routine UI verification.
+  - `smoke:ios:create-upload` is only for explicit Create-tab upload-start validation.
 
 ## 1) Code-level sanity check
 Run:

@@ -30,8 +30,10 @@ For any task that changes mobile UI behavior, navigation, or user-visible state:
    - `xcrun simctl list devices` includes the capability `appium:udid`.
 2. Launch simulator and app.
 3. Execute target user flow end-to-end (the changed path) via script when available.
-   - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:appium`
-   - `node /Users/takeshi/Desktop/lifecast/scripts/appium/ios-upload-reset-screens.mjs`
+   - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:upload-profile`
+   - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:posted-feed`
+   - For explicit Create-tab upload-start checks only:
+     - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:create-upload`
 4. Verify at least 3 key assertions from spec.
 5. Capture screenshot(s) of final/critical states.
 6. Record outcome in task summary.
@@ -51,8 +53,11 @@ Evidence format (example):
   - `LIFECAST_CAPABILITIES_CONFIG`
   - `~/.codex/config.toml` `[mcp_servers.appium-mcp]`
 - Fallback/portable Appium client command (no MCP tool wiring required):
-  - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:appium`
-  - script: `/Users/takeshi/Desktop/lifecast/scripts/appium/ios-smoke.mjs`
+  - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:upload-profile`
+  - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:posted-feed`
+  - explicit create-upload-only script:
+    - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:create-upload`
+    - script: `/Users/takeshi/Desktop/lifecast/scripts/appium/ios-smoke.mjs`
   - requires Appium server up at `http://127.0.0.1:4723`:
     - `appium server -p 4723` (or equivalent)
 

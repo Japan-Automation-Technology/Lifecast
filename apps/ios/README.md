@@ -49,3 +49,11 @@ Auth setup (Email/Password + Google + Apple via Supabase):
 
 Local typecheck command used:
 - `xcrun swiftc -typecheck LifeCast/LifeCast/LifeCastAPIClient.swift LifeCast/LifeCast/SupportFlowDemoView.swift`
+
+Appium smoke command policy:
+- Use for profile/feed UI checks:
+  - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:upload-profile`
+  - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:posted-feed`
+- Do not use `smoke:ios:appium` for normal UI verification.
+- If and only if you intentionally validate the Create tab upload-start flow, run:
+  - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:create-upload`

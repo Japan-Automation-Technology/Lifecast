@@ -40,6 +40,12 @@ async function pause(ms) {
 }
 
 async function main() {
+  if (process.env.LIFECAST_ALLOW_CREATE_UPLOAD_SMOKE !== '1') {
+    throw new Error(
+      'Deprecated flow: ios-smoke.mjs intentionally disabled by default. Use smoke:ios:upload-profile or smoke:ios:posted-feed for UI checks. If you must run create-upload smoke, set LIFECAST_ALLOW_CREATE_UPLOAD_SMOKE=1.'
+    );
+  }
+
   await fs.mkdir(path.dirname(SCREENSHOT_PATH), { recursive: true });
 
   const capsRaw = await fs.readFile(CAPS_PATH, 'utf8');

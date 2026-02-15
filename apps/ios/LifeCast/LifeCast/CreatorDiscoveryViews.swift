@@ -398,11 +398,13 @@ struct CreatorPublicPageView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
 
-                Button(page.viewer_relationship.is_supported ? "Supported" : "Support this project") {
-                    if page.viewer_relationship.is_supported { return }
-                    onSupportTap(project)
+                if viewerContextResolved && isViewingSelfProfile == false {
+                    Button(page.viewer_relationship.is_supported ? "Supported" : "Support this project") {
+                        if page.viewer_relationship.is_supported { return }
+                        onSupportTap(project)
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.borderedProminent)
             } else {
                 Text("No active project")
                     .font(.subheadline)
@@ -469,7 +471,7 @@ struct CreatorPublicPageView: View {
                 initialVideoId: video.video_id,
                 client: client,
                 projectContext: makeCreatorFeedProject(page),
-                isCurrentUserVideo: false,
+                isCurrentUserVideo: isViewingSelfProfile == true,
                 onVideoDeleted: {}
             )
         }
