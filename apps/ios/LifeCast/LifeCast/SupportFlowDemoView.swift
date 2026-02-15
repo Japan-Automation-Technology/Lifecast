@@ -66,13 +66,13 @@ struct SupportFlowDemoView: View {
                 .tabItem { Label("Home", systemImage: "house") }
                 .tag(0)
 
-            DiscoverSearchView(client: client) { project in
+            DiscoverSearchView(client: client, onSupportTap: { project in
                 supportEntryPoint = .feed
                 supportTargetProject = project
                 selectedPlan = nil
                 supportStep = .planSelect
                 showSupportFlow = true
-            }
+            })
                 .tabItem { Label("Discover", systemImage: "magnifyingglass") }
                 .tag(1)
 

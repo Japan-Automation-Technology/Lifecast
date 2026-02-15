@@ -99,6 +99,18 @@ struct CreatorPublicPageView: View {
     @State private var thumbnailCacheBust = UUID().uuidString
     @State private var showNetwork = false
     @State private var selectedNetworkTab: CreatorNetworkTab = .following
+    @State private var isViewingSelfProfile: Bool? = nil
+    @State private var viewerContextResolved = false
+
+    init(
+        client: LifeCastAPIClient,
+        creatorId: UUID,
+        onSupportTap: @escaping (MyProjectResult) -> Void
+    ) {
+        self.client = client
+        self.creatorId = creatorId
+        self.onSupportTap = onSupportTap
+    }
 
     var body: some View {
         ScrollView {
@@ -125,24 +137,31 @@ struct CreatorPublicPageView: View {
                                 showNetwork = true
                             }
                         ) {
-                            HStack(spacing: 10) {
-                                Button(page.viewer_relationship.is_following ? "Following" : "Follow") {
-                                    Task {
-                                        await toggleFollow()
+                            if viewerContextResolved && isViewingSelfProfile == false {
+                                HStack(spacing: 10) {
+                                    Button(page.viewer_relationship.is_following ? "Following" : "Follow") {
+                                        Task {
+                                            await toggleFollow()
+                                        }
                                     }
-                                }
-                                .frame(width: 132)
-                                .buttonStyle(.borderedProminent)
-                                .buttonBorderShape(.roundedRectangle(radius: 8))
-                                .tint(page.viewer_relationship.is_following ? .gray : .blue)
-                                if page.viewer_relationship.is_supported {
-                                    Label("Supported", systemImage: "checkmark.seal.fill")
-                                        .font(.caption.weight(.semibold))
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 6)
-                                        .background(Color.green.opacity(0.12))
-                                        .foregroundStyle(.green)
-                                        .clipShape(Capsule())
+                                    .frame(width: 132)
+                                    .buttonStyle(.borderedProminent)
+                                    .buttonBorderShape(.roundedRectangle(radius: 8))
+                                    .tint(page.viewer_relationship.is_following ? .gray : .blue)
+
+                                    Button(page.viewer_relationship.is_supported ? "Supported" : "Support") {
+                                        guard !page.viewer_relationship.is_supported else { return }
+                                        guard let project = page.project else {
+                                            errorText = "No active project to support"
+                                            return
+                                        }
+                                        onSupportTap(project)
+                                    }
+                                    .frame(width: 132)
+                                    .buttonStyle(.borderedProminent)
+                                    .buttonBorderShape(.roundedRectangle(radius: 8))
+                                    .tint(.green)
+                                    .disabled(!page.viewer_relationship.is_supported && page.project == nil)
                                 }
                             }
                         }
@@ -173,7 +192,12 @@ struct CreatorPublicPageView: View {
                 }
             }
         }
-        .task {
+        .task(id: creatorId) {
+            await MainActor.run {
+                isViewingSelfProfile = nil
+                viewerContextResolved = false
+            }
+            await refreshViewerContext()
             await load()
         }
         .onReceive(NotificationCenter.default.publisher(for: .lifecastRelationshipChanged)) { notification in
@@ -521,6 +545,22 @@ struct CreatorPublicPageView: View {
         let seconds = date.timeIntervalSinceNow
         if seconds <= 0 { return 0 }
         return Int(ceil(seconds / 86_400))
+    }
+
+    private func refreshViewerContext() async {
+        do {
+            let session = try await client.getAuthMe()
+            let isSelf = session.profile?.creator_user_id == creatorId
+            await MainActor.run {
+                isViewingSelfProfile = isSelf
+                viewerContextResolved = true
+            }
+        } catch {
+            await MainActor.run {
+                isViewingSelfProfile = false
+                viewerContextResolved = true
+            }
+        }
     }
 
     private func load() async {
