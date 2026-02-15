@@ -229,18 +229,10 @@ struct SupportFlowDemoView: View {
 
     private func feedCard(project: FeedProjectSummary) -> some View {
         ZStack(alignment: .bottom) {
-            GeometryReader { geo in
-                let panelWidth = geo.size.width
-                ZStack(alignment: .leading) {
-                    feedVideoLayer(project: project)
-                        .offset(x: showFeedProjectPanel ? -panelWidth : 0)
-                        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: showFeedProjectPanel)
-
-                    feedProjectPanel(project: project, width: panelWidth)
-                        .offset(x: geo.size.width - (showFeedProjectPanel ? panelWidth : 0))
-                        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: showFeedProjectPanel)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 20))
+            SlidingFeedPanelLayer(isPanelOpen: showFeedProjectPanel, cornerRadius: 20) {
+                feedVideoLayer(project: project)
+            } panelLayer: { width in
+                feedProjectPanel(project: project, width: width)
             }
 
             LinearGradient(
@@ -275,7 +267,7 @@ struct SupportFlowDemoView: View {
                     rightRail(project: project)
                 }
 
-                panelPageIndicator
+                FeedPageIndicatorDots(currentIndex: showFeedProjectPanel ? 1 : 0, totalCount: 2)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
             .padding(.horizontal, 16)
@@ -464,17 +456,6 @@ struct SupportFlowDemoView: View {
 
         }
         .frame(maxWidth: 280)
-    }
-
-    private var panelPageIndicator: some View {
-        let panelCount = max(feedProjects.count, 1)
-        return HStack(spacing: 5) {
-            ForEach(0..<panelCount, id: \.self) { idx in
-                Circle()
-                    .fill(idx == currentFeedIndex ? Color.white : Color.white.opacity(0.28))
-                    .frame(width: 6, height: 6)
-            }
-        }
     }
 
     private var commentsSheet: some View {
@@ -969,37 +950,25 @@ struct SupportFlowDemoView: View {
     private func handleHomeFeedDragEnded(_ value: DragGesture.Value, project: FeedProjectSummary) {
         let dx = value.translation.width
         let dy = value.translation.height
+        let action = resolveFeedSwipeAction(
+            dx: dx,
+            dy: dy,
+            isPanelOpen: showFeedProjectPanel,
+            canMoveNext: currentFeedIndex < feedProjects.count - 1,
+            canMovePrevious: currentFeedIndex > 0
+        )
 
-        if showFeedProjectPanel && abs(dy) > 36 {
-            if dy < 0 {
-                if currentFeedIndex < feedProjects.count - 1 {
-                    nextFeed()
-                } else {
-                    closeFeedProjectPanel()
-                }
-            } else {
-                if currentFeedIndex > 0 {
-                    previousFeed()
-                } else {
-                    closeFeedProjectPanel()
-                }
-            }
-            return
-        }
-
-        if abs(dx) > abs(dy) {
-            if dx < -50 {
-                openFeedProjectPanel(for: project)
-            } else if dx > 50 {
-                closeFeedProjectPanel()
-            }
-            return
-        }
-
-        if dy < -50 {
+        switch action {
+        case .openPanel:
+            openFeedProjectPanel(for: project)
+        case .closePanel:
+            closeFeedProjectPanel()
+        case .nextItem:
             nextFeed()
-        } else if dy > 50 {
+        case .previousItem:
             previousFeed()
+        case .none:
+            break
         }
     }
 

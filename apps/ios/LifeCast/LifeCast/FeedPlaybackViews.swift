@@ -139,6 +139,10 @@ struct CreatorPostedFeedView: View {
     @State private var feedVideos: [MyVideo]
     @State private var currentIndex: Int
     @State private var player: AVPlayer?
+    @State private var showFeedProjectPanel = false
+    @State private var feedProjectDetail: MyProjectResult?
+    @State private var feedProjectDetailLoading = false
+    @State private var feedProjectDetailError = ""
     @State private var showComments = false
     @State private var showShare = false
     @State private var showActions = false
@@ -173,14 +177,10 @@ struct CreatorPostedFeedView: View {
             } else {
                 feedPage(video: feedVideos[currentIndex], project: currentProject)
                     .accessibilityIdentifier("posted-feed-view")
-                    .gesture(
+                    .highPriorityGesture(
                         DragGesture(minimumDistance: 24)
                             .onEnded { value in
-                                if value.translation.height < -50 {
-                                    showOlder()
-                                } else if value.translation.height > 50 {
-                                    showNewer()
-                                }
+                                handlePostedFeedDragEnded(value, project: currentProject)
                             }
                     )
             }
@@ -258,13 +258,10 @@ struct CreatorPostedFeedView: View {
 
     private func feedPage(video: MyVideo, project: FeedProjectSummary) -> some View {
         ZStack(alignment: .bottom) {
-            if let currentPlayer = player {
-                VideoPlayer(player: currentPlayer)
-                    .ignoresSafeArea()
-            } else {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.3))
-                    .ignoresSafeArea()
+            SlidingFeedPanelLayer(isPanelOpen: showFeedProjectPanel, cornerRadius: 0) {
+                feedVideoLayer
+            } panelLayer: { width in
+                feedProjectPanel(project: project, width: width)
             }
 
             LinearGradient(
@@ -286,6 +283,8 @@ struct CreatorPostedFeedView: View {
                         .lineLimit(2)
 
                     fundingMeta(project: project)
+                    FeedPageIndicatorDots(currentIndex: showFeedProjectPanel ? 1 : 0, totalCount: 2)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
 
                 Spacer(minLength: 12)
@@ -297,15 +296,99 @@ struct CreatorPostedFeedView: View {
         }
     }
 
+    private var feedVideoLayer: some View {
+        Group {
+            if let currentPlayer = player {
+                VideoPlayer(player: currentPlayer)
+                    .ignoresSafeArea()
+                    .onAppear {
+                        if showFeedProjectPanel {
+                            currentPlayer.pause()
+                        } else {
+                            currentPlayer.play()
+                        }
+                    }
+            } else {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .ignoresSafeArea()
+            }
+        }
+    }
+
+    private func feedProjectPanel(project: FeedProjectSummary, width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Project")
+                .font(.headline)
+                .foregroundStyle(.white)
+
+            if feedProjectDetailLoading {
+                ProgressView("Loading project...")
+                    .tint(.white)
+                    .foregroundStyle(.white.opacity(0.85))
+            } else if let detail = feedProjectDetail {
+                Text(detail.title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                if let subtitle = detail.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+                Text("Goal: \(formatJPY(detail.goal_amount_minor))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+                Text("Funded: \(formatJPY(detail.funded_amount_minor)) / \(formatJPY(detail.goal_amount_minor))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+                Text("Supporters: \(detail.supporter_count)")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+                Text("Deadline: \(formatDeliveryDate(from: detail.deadline_at))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+                if let description = detail.description, !description.isEmpty {
+                    Text(description)
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+            } else {
+                Text(project.caption)
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.9))
+                Text("Goal: \(formatJPY(project.goalAmountMinor))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+                Text("Funded: \(formatJPY(project.fundedAmountMinor))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+
+            if !feedProjectDetailError.isEmpty {
+                Text(feedProjectDetailError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 18)
+        .frame(width: width, alignment: .leading)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.black.opacity(0.86))
+    }
+
     private func rightRail(project: FeedProjectSummary) -> some View {
         VStack(spacing: 16) {
-            Text(project.isSupportedByCurrentUser ? "Supported" : "Support")
-                .font(.caption.bold())
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(project.isSupportedByCurrentUser ? Color.green.opacity(0.9) : Color.pink.opacity(0.9))
-                .foregroundStyle(.white)
-                .clipShape(Capsule())
+            if !isCurrentUserVideo {
+                Text(project.isSupportedByCurrentUser ? "Supported" : "Support")
+                    .font(.caption.bold())
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(project.isSupportedByCurrentUser ? Color.green.opacity(0.9) : Color.pink.opacity(0.9))
+                    .foregroundStyle(.white)
+                    .clipShape(Capsule())
+            }
 
             metricView(icon: "heart.fill", value: project.likes)
             Button {
@@ -440,14 +523,30 @@ struct CreatorPostedFeedView: View {
             player = nil
             return
         }
+        if let existing = player,
+           let existingAsset = existing.currentItem?.asset as? AVURLAsset,
+           existingAsset.url == url {
+            if showFeedProjectPanel {
+                existing.pause()
+            } else {
+                existing.play()
+            }
+            return
+        }
+
         let newPlayer = AVPlayer(url: url)
-        newPlayer.play()
         player?.pause()
         player = newPlayer
+        if showFeedProjectPanel {
+            newPlayer.pause()
+        } else {
+            newPlayer.play()
+        }
     }
 
     private func showOlder() {
         guard currentIndex < feedVideos.count - 1 else { return }
+        closePostedFeedProjectPanel()
         withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
             currentIndex += 1
         }
@@ -455,8 +554,74 @@ struct CreatorPostedFeedView: View {
 
     private func showNewer() {
         guard currentIndex > 0 else { return }
+        closePostedFeedProjectPanel()
         withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
             currentIndex -= 1
+        }
+    }
+
+    private func handlePostedFeedDragEnded(_ value: DragGesture.Value, project: FeedProjectSummary) {
+        let dx = value.translation.width
+        let dy = value.translation.height
+        let action = resolveFeedSwipeAction(
+            dx: dx,
+            dy: dy,
+            isPanelOpen: showFeedProjectPanel,
+            canMoveNext: currentIndex < feedVideos.count - 1,
+            canMovePrevious: currentIndex > 0
+        )
+
+        switch action {
+        case .openPanel:
+            openPostedFeedProjectPanel(for: project)
+        case .closePanel:
+            closePostedFeedProjectPanel()
+        case .nextItem:
+            showOlder()
+        case .previousItem:
+            showNewer()
+        case .none:
+            break
+        }
+    }
+
+    private func openPostedFeedProjectPanel(for project: FeedProjectSummary) {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+            showFeedProjectPanel = true
+        }
+        player?.pause()
+        Task {
+            await loadPostedFeedProjectDetail(for: project)
+        }
+    }
+
+    private func closePostedFeedProjectPanel() {
+        guard showFeedProjectPanel else { return }
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
+            showFeedProjectPanel = false
+        }
+        syncPlayerForCurrentIndex()
+    }
+
+    private func loadPostedFeedProjectDetail(for project: FeedProjectSummary) async {
+        await MainActor.run {
+            feedProjectDetailLoading = true
+            feedProjectDetailError = ""
+        }
+        defer {
+            Task { @MainActor in
+                feedProjectDetailLoading = false
+            }
+        }
+        do {
+            let page = try await client.getCreatorPage(creatorUserId: project.creatorId)
+            await MainActor.run {
+                feedProjectDetail = page.project
+            }
+        } catch {
+            await MainActor.run {
+                feedProjectDetailError = error.localizedDescription
+            }
         }
     }
 
@@ -492,5 +657,16 @@ struct CreatorPostedFeedView: View {
             return String(format: "%.1fK", Double(value) / 1000.0)
         }
         return "\(value)"
+    }
+
+    private func formatDeliveryDate(from iso8601: String) -> String {
+        let parser = ISO8601DateFormatter()
+        if let date = parser.date(from: iso8601) {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+            return formatter.string(from: date)
+        }
+        return iso8601
     }
 }
