@@ -10,6 +10,7 @@ struct SupportFlowDemoView: View {
     @State private var selectedTab = 0
     @State private var feedMode: FeedMode = .forYou
     @State private var currentFeedIndex = 0
+    @State private var homeFeedPlayer: AVPlayer? = nil
     @State private var showComments = false
     @State private var showShare = false
     @State private var selectedCreatorRoute: CreatorRoute? = nil
@@ -170,6 +171,9 @@ struct SupportFlowDemoView: View {
                 await refreshLiveSupportProject()
             }
         }
+        .onChange(of: currentFeedIndex) { _, _ in
+            syncHomeFeedPlayer()
+        }
     }
 
     private var homeTab: some View {
@@ -237,8 +241,48 @@ struct SupportFlowDemoView: View {
 
     private func feedCard(project: FeedProjectSummary) -> some View {
         ZStack(alignment: .bottom) {
+            Group {
+                if let player = homeFeedPlayer {
+                    VideoPlayer(player: player)
+                        .onAppear { player.play() }
+                        .onDisappear { player.pause() }
+                } else if let thumbnail = project.thumbnailURL, let thumbnailURL = URL(string: thumbnail) {
+                    AsyncImage(url: thumbnailURL) { phase in
+                        switch phase {
+                        case .empty:
+                            LinearGradient(
+                                colors: [Color.blue.opacity(0.35), Color.black.opacity(0.6), Color.pink.opacity(0.3)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        case .failure:
+                            LinearGradient(
+                                colors: [Color.blue.opacity(0.35), Color.black.opacity(0.6), Color.pink.opacity(0.3)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        @unknown default:
+                            LinearGradient(
+                                colors: [Color.blue.opacity(0.35), Color.black.opacity(0.6), Color.pink.opacity(0.3)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        }
+                    }
+                } else {
+                    LinearGradient(
+                        colors: [Color.blue.opacity(0.35), Color.black.opacity(0.6), Color.pink.opacity(0.3)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+
             LinearGradient(
-                colors: [Color.blue.opacity(0.35), Color.black.opacity(0.6), Color.pink.opacity(0.3)],
+                colors: [Color.black.opacity(0.0), Color.black.opacity(0.55)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -572,6 +616,9 @@ struct SupportFlowDemoView: View {
                             creatorId: existing.creatorId,
                             username: existing.username,
                             caption: existing.caption,
+                            videoId: existing.videoId,
+                            playbackURL: existing.playbackURL,
+                            thumbnailURL: existing.thumbnailURL,
                             minPlanPriceMinor: updatedProject.minimum_plan?.price_minor ?? existing.minPlanPriceMinor,
                             goalAmountMinor: updatedProject.goal_amount_minor,
                             fundedAmountMinor: updatedProject.funded_amount_minor,
@@ -720,6 +767,7 @@ struct SupportFlowDemoView: View {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) {
             currentFeedIndex += 1
         }
+        syncHomeFeedPlayer()
     }
 
     private func previousFeed() {
@@ -727,6 +775,7 @@ struct SupportFlowDemoView: View {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) {
             currentFeedIndex -= 1
         }
+        syncHomeFeedPlayer()
     }
 
     private func presentSupportFlow(for project: FeedProjectSummary) async {
@@ -765,6 +814,9 @@ struct SupportFlowDemoView: View {
                 creatorId: $0.creator_user_id,
                 username: $0.username,
                 caption: $0.caption,
+                videoId: $0.video_id,
+                playbackURL: $0.playback_url,
+                thumbnailURL: $0.thumbnail_url,
                 minPlanPriceMinor: $0.min_plan_price_minor,
                 goalAmountMinor: $0.goal_amount_minor,
                 fundedAmountMinor: $0.funded_amount_minor,
@@ -777,7 +829,36 @@ struct SupportFlowDemoView: View {
         await MainActor.run {
             feedProjects = updated
             currentFeedIndex = min(currentFeedIndex, max(0, updated.count - 1))
+            syncHomeFeedPlayer()
         }
+    }
+
+    private func syncHomeFeedPlayer() {
+        guard !feedProjects.isEmpty else {
+            homeFeedPlayer?.pause()
+            homeFeedPlayer = nil
+            return
+        }
+
+        let project = feedProjects[max(0, min(currentFeedIndex, feedProjects.count - 1))]
+        guard let playbackURL = project.playbackURL, let url = URL(string: playbackURL) else {
+            homeFeedPlayer?.pause()
+            homeFeedPlayer = nil
+            return
+        }
+
+        if let existing = homeFeedPlayer,
+           let existingAsset = existing.currentItem?.asset as? AVURLAsset,
+           existingAsset.url == url {
+            existing.play()
+            return
+        }
+
+        homeFeedPlayer?.pause()
+        let player = AVPlayer(url: url)
+        player.actionAtItemEnd = .none
+        homeFeedPlayer = player
+        player.play()
     }
 
     private func formatJPY(_ amountMinor: Int) -> String {

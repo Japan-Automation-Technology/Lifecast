@@ -39,57 +39,54 @@ struct PostedVideosListView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 16)
-                Spacer()
             } else {
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 4) {
-                        ForEach(Array(newestFirstVideos.enumerated()), id: \.element.video_id) { index, video in
-                            Button {
-                                selectedVideo = video
-                            } label: {
-                                ZStack(alignment: .bottomLeading) {
-                                    if let thumbnail = video.thumbnail_url, let thumbnailURL = thumbnailURL(base: thumbnail) {
-                                        AsyncImage(url: thumbnailURL) { image in
-                                            image
-                                                .resizable()
-                                                .scaledToFill()
-                                        } placeholder: {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 4) {
+                    ForEach(Array(newestFirstVideos.enumerated()), id: \.element.video_id) { index, video in
+                        Button {
+                            selectedVideo = video
+                        } label: {
+                            ZStack(alignment: .bottomLeading) {
+                                if let thumbnail = video.thumbnail_url, let thumbnailURL = thumbnailURL(base: thumbnail) {
+                                    AsyncImage(url: thumbnailURL) { image in
+                                        image
+                                            .resizable()
+                                            .scaledToFill()
+                                    } placeholder: {
+                                        LinearGradient(
+                                            colors: [Color.blue.opacity(0.5), Color.pink.opacity(0.6)],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    }
+                                } else {
+                                    Rectangle()
+                                        .fill(
                                             LinearGradient(
                                                 colors: [Color.blue.opacity(0.5), Color.pink.opacity(0.6)],
                                                 startPoint: .top,
                                                 endPoint: .bottom
                                             )
-                                        }
-                                    } else {
-                                        Rectangle()
-                                            .fill(
-                                                LinearGradient(
-                                                    colors: [Color.blue.opacity(0.5), Color.pink.opacity(0.6)],
-                                                    startPoint: .top,
-                                                    endPoint: .bottom
-                                                )
-                                            )
-                                    }
-                                    Image(systemName: "play.circle.fill")
-                                        .font(.system(size: 28))
-                                        .foregroundStyle(.white.opacity(0.9))
-                                    LinearGradient(
-                                        colors: [Color.black.opacity(0.0), Color.black.opacity(0.55)],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
+                                        )
                                 }
-                                .frame(maxWidth: .infinity)
-                                .aspectRatio(9.0 / 16.0, contentMode: .fit)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                Image(systemName: "play.circle.fill")
+                                    .font(.system(size: 28))
+                                    .foregroundStyle(.white.opacity(0.9))
+                                LinearGradient(
+                                    colors: [Color.black.opacity(0.0), Color.black.opacity(0.55)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("posted-grid-video-\(index)")
-                            .accessibilityLabel("Open posted \(index)")
+                            .frame(maxWidth: .infinity)
+                            .aspectRatio(9.0 / 16.0, contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("posted-grid-video-\(index)")
+                        .accessibilityLabel("Open posted \(index)")
                     }
-                    .padding(.horizontal, 16)
                 }
+                .padding(.horizontal, 16)
             }
         }
         .fullScreenCover(item: $selectedVideo) { video in
@@ -102,6 +99,9 @@ struct PostedVideosListView: View {
                     creatorId: UUID(),
                     username: "lifecast_maker",
                     caption: "Prototype update",
+                    videoId: nil,
+                    playbackURL: nil,
+                    thumbnailURL: nil,
                     minPlanPriceMinor: 1000,
                     goalAmountMinor: 1_000_000,
                     fundedAmountMinor: 0,

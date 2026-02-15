@@ -162,11 +162,13 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
 
     const client = await dbPool.connect();
     try {
+      const publicBaseUrl = (process.env.LIFECAST_PUBLIC_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
       const result = await client.query<{
         project_id: string;
         creator_user_id: string;
         username: string;
         caption: string | null;
+        video_id: string | null;
         min_plan_price_minor: string | number;
         goal_amount_minor: string | number;
         funded_amount_minor: string | number;
@@ -180,7 +182,12 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
           p.id as project_id,
           p.creator_user_id,
           coalesce(cp.username, u.username, 'user_' || left(p.creator_user_id::text, 8)) as username,
-          nullif(coalesce(p.subtitle, p.description, ''), '') as caption,
+          coalesce(
+            nullif(concat_ws(' · ', p.title, nullif(p.subtitle, '')), ''),
+            nullif(p.description, ''),
+            'Project update'
+          ) as caption,
+          latest_video.video_id,
           coalesce(min_plan.price_minor, 0) as min_plan_price_minor,
           p.goal_amount_minor,
           coalesce((
@@ -208,6 +215,15 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         inner join users u on u.id = p.creator_user_id
         left join creator_profiles cp on cp.creator_user_id = p.creator_user_id
         left join lateral (
+          select
+            va.video_id
+          from video_assets va
+          where va.creator_user_id = p.creator_user_id
+            and va.status = 'ready'
+          order by va.created_at desc
+          limit 1
+        ) latest_video on true
+        left join lateral (
           select price_minor
           from project_plans
           where project_id = p.id
@@ -215,12 +231,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
           limit 1
         ) min_plan on true
         where p.status in ('active', 'draft')
-          and exists (
-            select 1
-            from video_assets va
-            where va.creator_user_id = p.creator_user_id
-              and va.status = 'ready'
-          )
+          and latest_video.video_id is not null
           and ($1::uuid is null or p.creator_user_id <> $1::uuid)
         order by p.created_at desc
         limit $2
@@ -235,6 +246,9 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             creator_user_id: row.creator_user_id,
             username: row.username,
             caption: row.caption ?? "Project update",
+            video_id: row.video_id,
+            playback_url: row.video_id ? `${publicBaseUrl}/v1/videos/${row.video_id}/playback` : null,
+            thumbnail_url: row.video_id ? `${publicBaseUrl}/v1/videos/${row.video_id}/thumbnail` : null,
             min_plan_price_minor: Number(row.min_plan_price_minor),
             goal_amount_minor: Number(row.goal_amount_minor),
             funded_amount_minor: Number(row.funded_amount_minor),

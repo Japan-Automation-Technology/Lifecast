@@ -125,6 +125,9 @@ struct FeedProjectRow: Decodable, Identifiable {
     let creator_user_id: UUID
     let username: String
     let caption: String
+    let video_id: UUID?
+    let playback_url: String?
+    let thumbnail_url: String?
     let min_plan_price_minor: Int
     let goal_amount_minor: Int
     let funded_amount_minor: Int

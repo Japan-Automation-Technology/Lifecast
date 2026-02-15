@@ -104,21 +104,9 @@ struct CreatorPublicPageView: View {
             VStack(spacing: 16) {
                 if let page {
                     VStack(spacing: 8) {
-                        Circle()
-                            .fill(Color.gray.opacity(0.3))
-                            .frame(width: 90, height: 90)
-                        Text("@\(page.profile.username)")
+                        profileAvatar(urlString: page.profile.avatar_url, size: 90)
+                        Text(creatorDisplayName(profile: page.profile))
                             .font(.headline)
-                        if let displayName = page.profile.display_name, !displayName.isEmpty {
-                            Text(displayName)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    if let bio = page.profile.bio, !bio.isEmpty {
-                        Text(bio)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                         HStack(spacing: 28) {
                             profileStatButton(value: page.profile_stats.following_count, label: "Following", tab: .following)
                             profileStatButton(value: page.profile_stats.followers_count, label: "Followers", tab: .followers)
@@ -130,7 +118,9 @@ struct CreatorPublicPageView: View {
                                     await toggleFollow()
                                 }
                             }
+                            .frame(width: 132)
                             .buttonStyle(.borderedProminent)
+                            .buttonBorderShape(.roundedRectangle(radius: 8))
                             .tint(page.viewer_relationship.is_following ? .gray : .blue)
                             if page.viewer_relationship.is_supported {
                                 Label("Supported", systemImage: "checkmark.seal.fill")
@@ -140,10 +130,15 @@ struct CreatorPublicPageView: View {
                                     .background(Color.green.opacity(0.12))
                                     .foregroundStyle(.green)
                                     .clipShape(Capsule())
-                            }
+                                }
                         }
+                        Text(creatorBioText(profile: page.profile))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
                     }
-                    .padding(.top, 8)
+                    .padding(.top, 2)
 
                     ProfileTabIconStrip(selectedIndex: $selectedIndex)
                     .padding(.horizontal, 16)
@@ -193,6 +188,17 @@ struct CreatorPublicPageView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                if let page {
+                    Text("@\(page.profile.username)")
+                        .font(.headline)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+        }
     }
 
     private func profileStatButton(value: Int, label: String, tab: CreatorNetworkTab) -> some View {
@@ -209,6 +215,36 @@ struct CreatorPublicPageView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private func creatorDisplayName(profile: CreatorPublicProfile) -> String {
+        let name = (profile.display_name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? profile.username : name
+    }
+
+    private func creatorBioText(profile: CreatorPublicProfile) -> String {
+        let bio = (profile.bio ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return bio.isEmpty ? "No bio yet" : bio
+    }
+
+    @ViewBuilder
+    private func profileAvatar(urlString: String?, size: CGFloat) -> some View {
+        if let urlString, let url = URL(string: urlString) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                default:
+                    Circle().fill(Color.gray.opacity(0.3))
+                }
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        } else {
+            Circle()
+                .fill(Color.gray.opacity(0.3))
+                .frame(width: size, height: size)
+        }
     }
 
     private func creatorProjectSection(page: CreatorPublicPageResult) -> some View {
@@ -440,6 +476,7 @@ struct CreatorPublicPageView: View {
     }
 
     private func makeCreatorFeedProject(_ page: CreatorPublicPageResult) -> FeedProjectSummary {
+        let latestVideo = page.videos.sorted { $0.created_at > $1.created_at }.first
         if let project = page.project {
             let minPlanPrice = project.minimum_plan?.price_minor ?? project.plans?.first?.price_minor ?? 1000
             let remainingDays = max(0, daysUntil(iso: project.deadline_at))
@@ -450,6 +487,9 @@ struct CreatorPublicPageView: View {
                 creatorId: project.creator_user_id,
                 username: page.profile.username,
                 caption: caption,
+                videoId: latestVideo?.video_id,
+                playbackURL: latestVideo?.playback_url,
+                thumbnailURL: latestVideo?.thumbnail_url,
                 minPlanPriceMinor: minPlanPrice,
                 goalAmountMinor: max(project.goal_amount_minor, 1),
                 fundedAmountMinor: max(project.funded_amount_minor, 0),
@@ -465,6 +505,9 @@ struct CreatorPublicPageView: View {
             creatorId: page.profile.creator_user_id,
             username: page.profile.username,
             caption: page.profile.bio ?? "Creator update",
+            videoId: latestVideo?.video_id,
+            playbackURL: latestVideo?.playback_url,
+            thumbnailURL: latestVideo?.thumbnail_url,
             minPlanPriceMinor: 1000,
             goalAmountMinor: 1,
             fundedAmountMinor: 0,

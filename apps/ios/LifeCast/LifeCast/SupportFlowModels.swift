@@ -38,6 +38,9 @@ struct FeedProjectSummary: Identifiable {
     let creatorId: UUID
     let username: String
     let caption: String
+    let videoId: UUID?
+    let playbackURL: String?
+    let thumbnailURL: String?
     let minPlanPriceMinor: Int
     let goalAmountMinor: Int
     let fundedAmountMinor: Int
@@ -91,6 +94,9 @@ let sampleProjects: [FeedProjectSummary] = [
         creatorId: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
         username: "tak_game_lab",
         caption: "Building our handheld game prototype. Today: thermal and battery test.",
+        videoId: nil,
+        playbackURL: nil,
+        thumbnailURL: nil,
         minPlanPriceMinor: 1000,
         goalAmountMinor: 1_000_000,
         fundedAmountMinor: 1_120_000,
@@ -104,6 +110,9 @@ let sampleProjects: [FeedProjectSummary] = [
         creatorId: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!,
         username: "boardcraft_studio",
         caption: "Week 3: tuning tactile switches with community feedback.",
+        videoId: nil,
+        playbackURL: nil,
+        thumbnailURL: nil,
         minPlanPriceMinor: 1200,
         goalAmountMinor: 800_000,
         fundedAmountMinor: 460_000,
@@ -117,6 +126,9 @@ let sampleProjects: [FeedProjectSummary] = [
         creatorId: UUID(uuidString: "00000000-0000-0000-0000-000000000006")!,
         username: "mini_console_lab",
         caption: "Prototype shell test print. Need your vote on materials.",
+        videoId: nil,
+        playbackURL: nil,
+        thumbnailURL: nil,
         minPlanPriceMinor: 1500,
         goalAmountMinor: 1_500_000,
         fundedAmountMinor: 320_000,

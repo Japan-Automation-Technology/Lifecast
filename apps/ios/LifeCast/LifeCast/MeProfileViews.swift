@@ -33,67 +33,67 @@ struct MeTabView: View {
         NavigationStack {
             Group {
                 if isAuthenticated {
-                    VStack(spacing: 16) {
-                        meHeader
-                        VStack(spacing: 8) {
-                            profileAvatar(urlString: myProfile?.avatar_url, size: 90)
-                            Text(currentDisplayName)
-                                .font(.headline)
-                            HStack(spacing: 28) {
-                                profileStatButton(value: myProfileStats?.following_count ?? 0, label: "Following", tab: .following)
-                                profileStatButton(value: myProfileStats?.followers_count ?? 0, label: "Followers", tab: .followers)
-                                profileStatButton(value: myProfileStats?.supported_project_count ?? 0, label: "Support", tab: .support)
-                            }
-                            Button("Edit Profile") {
-                                showEditProfile = true
-                            }
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .frame(width: 146, height: 40)
-                            .background(Color.white)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .stroke(Color.gray.opacity(0.35), lineWidth: 1)
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                            .buttonStyle(.plain)
-                            Text((myProfile?.bio?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (myProfile?.bio ?? "") : "Tap to add bio")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 24)
-                        }
-                        .padding(.top, -8)
-
-                        ProfileTabIconStrip(selectedIndex: $selectedIndex)
-                            .padding(.horizontal, 16)
-                        .onChange(of: selectedIndex) { _, newValue in
-                            if newValue == 1 {
-                                onRefreshVideos()
-                            }
-                        }
-
-                        Group {
-                            if selectedIndex == 0 {
-                                ProjectPageView(
-                                    client: client,
-                                    onProjectChanged: onProjectChanged
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            VStack(spacing: 8) {
+                                profileAvatar(urlString: myProfile?.avatar_url, size: 90)
+                                Text(currentDisplayName)
+                                    .font(.headline)
+                                HStack(spacing: 28) {
+                                    profileStatButton(value: myProfileStats?.following_count ?? 0, label: "Following", tab: .following)
+                                    profileStatButton(value: myProfileStats?.followers_count ?? 0, label: "Followers", tab: .followers)
+                                    profileStatButton(value: myProfileStats?.supported_project_count ?? 0, label: "Support", tab: .support)
+                                }
+                                Button("Edit Profile") {
+                                    showEditProfile = true
+                                }
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .frame(width: 146, height: 40)
+                                .background(Color.white)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .stroke(Color.gray.opacity(0.35), lineWidth: 1)
                                 )
-                            } else if selectedIndex == 1 {
-                                PostedVideosListView(
-                                    videos: myVideos,
-                                    errorText: myVideosError,
-                                    onRefreshVideos: onRefreshVideos
-                                )
-                            } else {
-                                VideoGridPlaceholder(title: "Liked videos")
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                                .buttonStyle(.plain)
+                                Text((myProfile?.bio?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (myProfile?.bio ?? "") : "Tap to add bio")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 24)
                             }
+                            .padding(.top, 6)
+
+                            ProfileTabIconStrip(selectedIndex: $selectedIndex)
+                                .padding(.horizontal, 16)
+                                .onChange(of: selectedIndex) { _, newValue in
+                                    if newValue == 1 {
+                                        onRefreshVideos()
+                                    }
+                                }
+
+                            Group {
+                                if selectedIndex == 0 {
+                                    ProjectPageView(
+                                        client: client,
+                                        onProjectChanged: onProjectChanged
+                                    )
+                                } else if selectedIndex == 1 {
+                                    PostedVideosListView(
+                                        videos: myVideos,
+                                        errorText: myVideosError,
+                                        onRefreshVideos: onRefreshVideos
+                                    )
+                                } else {
+                                    VideoGridPlaceholder(title: "Liked videos")
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(maxHeight: .infinity)
                     }
                 } else {
                     VStack(spacing: 14) {
-                        meHeader
                         Spacer()
                         Image(systemName: "person.crop.circle.badge.exclamationmark")
                             .font(.system(size: 46))
@@ -153,33 +153,39 @@ struct MeTabView: View {
                 )
             }
             .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                mePinnedHeader
+            }
         }
     }
 
-    private var meHeader: some View {
+    private var mePinnedHeader: some View {
         ZStack {
             Text("@\(currentUsername)")
                 .font(.headline)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .padding(.horizontal, 56)
+
             HStack {
                 Spacer()
                 Button {
                     showUserSwitcher = true
                 } label: {
                     Image(systemName: "line.3.horizontal")
-                        .font(.title3.weight(.semibold))
+                        .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(.primary)
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
+                .padding(.top, 4)
             }
-            .padding(.trailing, 2)
         }
-        .frame(height: 30)
+        .frame(height: 36)
         .padding(.horizontal, 16)
-        .padding(.top, 8)
+        .padding(.top, 4)
+        .padding(.bottom, 2)
+        .background(Color.white)
     }
 
     private func profileStatButton(value: Int, label: String, tab: CreatorNetworkTab) -> some View {
@@ -599,93 +605,91 @@ struct ProjectPageView: View {
     @State private var projectCreateStatusText = ""
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if let myProject {
-                    Text("Project page")
-                        .font(.headline)
-                    projectDetailsView(project: myProject)
-                    if myProject.status == "stopped" {
-                        Text("Ended project. Refund policy: full refund.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if myProject.status == "active" || myProject.status == "draft" {
-                        if myProject.support_count_total == 0 {
-                            Button("Delete Project", role: .destructive) {
-                                Task {
-                                    await deleteProject(projectId: myProject.id)
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                        } else {
-                            Button("End Project", role: .destructive) {
-                                showEndConfirm = true
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                    if myProject.status == "stopped" || myProject.status == "failed" || myProject.status == "succeeded" {
-                        Divider().padding(.vertical, 4)
-                        createProjectSection(buttonTitle: "Create New Project")
-                    }
-                } else {
-                    createProjectSection(buttonTitle: "Create Project")
+        VStack(alignment: .leading, spacing: 12) {
+            if let myProject {
+                Text("Project page")
+                    .font(.headline)
+                projectDetailsView(project: myProject)
+                if myProject.status == "stopped" {
+                    Text("Ended project. Refund policy: full refund.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
-                if !projectHistory.isEmpty {
-                    Divider().padding(.top, 8)
-                    Text("Past projects")
-                        .font(.subheadline.weight(.semibold))
-                    ForEach(projectHistory, id: \.id) { project in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(project.title)
-                                    .font(.subheadline.weight(.semibold))
-                                Spacer()
-                                Text(project.status.uppercased())
-                                    .font(.caption2.bold())
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.secondary.opacity(0.15))
-                                    .clipShape(Capsule())
+                if myProject.status == "active" || myProject.status == "draft" {
+                    if myProject.support_count_total == 0 {
+                        Button("Delete Project", role: .destructive) {
+                            Task {
+                                await deleteProject(projectId: myProject.id)
                             }
-                            Text("Goal: \(project.goal_amount_minor) \(project.currency)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if let category = project.category, !category.isEmpty {
-                                Text("Category: \(category)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Text("Created: \(project.created_at)")
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        Button("End Project", role: .destructive) {
+                            showEndConfirm = true
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                if myProject.status == "stopped" || myProject.status == "failed" || myProject.status == "succeeded" {
+                    Divider().padding(.vertical, 4)
+                    createProjectSection(buttonTitle: "Create New Project")
+                }
+            } else {
+                createProjectSection(buttonTitle: "Create Project")
+            }
+
+            if !projectHistory.isEmpty {
+                Divider().padding(.top, 8)
+                Text("Past projects")
+                    .font(.subheadline.weight(.semibold))
+                ForEach(projectHistory, id: \.id) { project in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(project.title)
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text(project.status.uppercased())
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.secondary.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+                        Text("Goal: \(project.goal_amount_minor) \(project.currency)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let category = project.category, !category.isEmpty {
+                            Text("Category: \(category)")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
-                        .padding(10)
-                        .background(Color.secondary.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                }
-
-                if !projectErrorText.isEmpty {
-                    Text(projectErrorText)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-
-                if projectCreateInFlight {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ProgressView()
-                        Text(projectCreateStatusText.isEmpty ? "Creating project..." : projectCreateStatusText)
-                            .font(.caption)
+                        Text("Created: \(project.created_at)")
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
+                    .padding(10)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
             }
-            .padding(16)
+
+            if !projectErrorText.isEmpty {
+                Text(projectErrorText)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            if projectCreateInFlight {
+                VStack(alignment: .leading, spacing: 8) {
+                    ProgressView()
+                    Text(projectCreateStatusText.isEmpty ? "Creating project..." : projectCreateStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
+        .padding(16)
         .task {
             await loadMyProjects()
         }
