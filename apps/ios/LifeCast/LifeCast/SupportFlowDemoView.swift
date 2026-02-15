@@ -250,28 +250,33 @@ struct SupportFlowDemoView: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 20))
 
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Button("@\(project.username)") {
-                        if project.creatorId == myProfile?.creator_user_id {
-                            selectedTab = 3
-                        } else {
-                            selectedCreatorRoute = CreatorRoute(id: project.creatorId)
+            VStack(spacing: 8) {
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Button("@\(project.username)") {
+                            if project.creatorId == myProfile?.creator_user_id {
+                                selectedTab = 3
+                            } else {
+                                selectedCreatorRoute = CreatorRoute(id: project.creatorId)
+                            }
                         }
+                        .font(.headline)
+                        .foregroundStyle(.white)
+
+                        Text(project.caption)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.9))
+
+                        fundingMeta(project: project)
                     }
-                    .font(.headline)
-                    .foregroundStyle(.white)
 
-                    Text(project.caption)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.9))
+                    Spacer(minLength: 12)
 
-                    fundingMeta(project: project)
+                    rightRail(project: project)
                 }
 
-                Spacer(minLength: 12)
-
-                rightRail(project: project)
+                panelPageIndicator
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
@@ -456,8 +461,20 @@ struct SupportFlowDemoView: View {
             Text("\(percent)% (\(formatJPY(project.fundedAmountMinor)) / \(formatJPY(project.goalAmountMinor)))")
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.85))
+
         }
         .frame(maxWidth: 280)
+    }
+
+    private var panelPageIndicator: some View {
+        let panelCount = max(feedProjects.count, 1)
+        return HStack(spacing: 5) {
+            ForEach(0..<panelCount, id: \.self) { idx in
+                Circle()
+                    .fill(idx == currentFeedIndex ? Color.white : Color.white.opacity(0.28))
+                    .frame(width: 6, height: 6)
+            }
+        }
     }
 
     private var commentsSheet: some View {
