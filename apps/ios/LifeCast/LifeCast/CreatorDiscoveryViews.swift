@@ -23,6 +23,7 @@ struct DiscoverSearchView: View {
     @State private var searchHistory: [DiscoverSearchHistoryEntry] = []
     @State private var liveSearchTask: Task<Void, Never>?
     @State private var destination: DiscoverCreatorDestination?
+    @FocusState private var isSearchFieldFocused: Bool
 
     private static let historyKey = "discover.search.history.v1"
     private let historyLimit = 10
@@ -33,6 +34,7 @@ struct DiscoverSearchView: View {
                 HStack {
                     TextField("Search creators", text: $query)
                         .textFieldStyle(.roundedBorder)
+                        .focused($isSearchFieldFocused)
                         .submitLabel(.search)
                         .onSubmit {
                             Task { await search() }
@@ -93,6 +95,12 @@ struct DiscoverSearchView: View {
             }
             .task {
                 loadSearchHistory()
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if isSearchFieldFocused {
+                    isSearchFieldFocused = false
+                }
             }
             .onChange(of: query) { _, newValue in
                 scheduleLiveSearch(for: newValue)
