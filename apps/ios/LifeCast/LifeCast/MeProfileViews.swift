@@ -47,7 +47,21 @@ struct MeTabView: View {
                             Button("Edit Profile") {
                                 showEditProfile = true
                             }
-                                .buttonStyle(.bordered)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 146, height: 40)
+                            .background(Color.white)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(Color.gray.opacity(0.35), lineWidth: 1)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .buttonStyle(.plain)
+                            Text((myProfile?.bio?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (myProfile?.bio ?? "") : "Tap to add bio")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 24)
                         }
                         .padding(.top, -8)
 
@@ -531,6 +545,12 @@ struct EditProfileView: View {
 
             let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedBio = bio.trimmingCharacters(in: .whitespacesAndNewlines)
+            if normalizedDisplayName.count > 30 {
+                throw NSError(domain: "LifeCastProfile", code: 400, userInfo: [NSLocalizedDescriptionKey: "Display name must be 30 characters or less"])
+            }
+            if normalizedBio.count > 160 {
+                throw NSError(domain: "LifeCastProfile", code: 400, userInfo: [NSLocalizedDescriptionKey: "Bio must be 160 characters or less"])
+            }
 
             _ = try await client.updateMyProfile(
                 displayName: normalizedDisplayName.isEmpty ? nil : normalizedDisplayName,

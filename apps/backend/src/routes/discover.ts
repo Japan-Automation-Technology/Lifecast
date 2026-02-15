@@ -31,8 +31,8 @@ const profileImageUploadBody = z.object({
 
 const updateMyProfileBody = z
   .object({
-    display_name: z.string().max(80).optional(),
-    bio: z.string().max(500).optional(),
+    display_name: z.string().max(30).optional(),
+    bio: z.string().max(160).optional(),
     avatar_url: z.string().url().max(2048).optional().nullable(),
   })
   .refine((value) => value.display_name !== undefined || value.bio !== undefined || value.avatar_url !== undefined, {
@@ -965,11 +965,14 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
 
     const displayName =
       body.data.display_name === undefined ? undefined : body.data.display_name.trim() === "" ? null : body.data.display_name.trim();
-    if (displayName !== undefined && displayName !== null && displayName.length > 80) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "display_name must be <= 80 chars"));
+    const bio = body.data.bio === undefined ? undefined : body.data.bio.trim() === "" ? null : body.data.bio.trim();
+    if (displayName !== undefined && displayName !== null && displayName.length > 30) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "display_name must be <= 30 chars"));
+    }
+    if (bio !== undefined && bio !== null && bio.length > 160) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "bio must be <= 160 chars"));
     }
 
-    const bio = body.data.bio === undefined ? undefined : body.data.bio.trim() === "" ? null : body.data.bio.trim();
     const avatarUrl = body.data.avatar_url === undefined ? undefined : body.data.avatar_url;
 
     const client = await dbPool.connect();
