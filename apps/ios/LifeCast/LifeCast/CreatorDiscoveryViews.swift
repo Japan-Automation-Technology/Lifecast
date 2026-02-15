@@ -17,6 +17,7 @@ struct DiscoverSearchView: View {
     @State private var errorText = ""
     @State private var hasSearched = false
     @State private var searchHistory: [DiscoverSearchHistoryEntry] = []
+    @State private var liveSearchTask: Task<Void, Never>?
 
     private static let historyKey = "discover.search.history.v1"
     private let historyLimit = 10
@@ -37,6 +38,18 @@ struct DiscoverSearchView: View {
                     .buttonStyle(.borderedProminent)
                 }
                 .padding(.horizontal, 16)
+
+                if !searchHistory.isEmpty {
+                    HStack {
+                        Spacer()
+                        Button("Clear History") {
+                            clearSearchHistory()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 16)
+                }
 
                 if loading {
                     ProgressView("Searching...")
@@ -68,6 +81,12 @@ struct DiscoverSearchView: View {
             .navigationTitle("Discover")
             .task {
                 loadSearchHistory()
+            }
+            .onChange(of: query) { _, newValue in
+                scheduleLiveSearch(for: newValue)
+            }
+            .onDisappear {
+                liveSearchTask?.cancel()
             }
         }
     }
@@ -122,15 +141,13 @@ struct DiscoverSearchView: View {
                             Image(systemName: "clock")
                                 .foregroundStyle(.secondary)
 
-                            NavigationLink {
-                                CreatorPublicPageView(
-                                    client: client,
-                                    creatorId: entry.creatorId,
-                                    onSupportTap: onSupportTap
-                                )
+                            Button {
+                                query = entry.username
+                                Task { await search() }
                             } label: {
                                 Text("@\(entry.username)")
                                     .foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .buttonStyle(.plain)
 
@@ -172,18 +189,43 @@ struct DiscoverSearchView: View {
     }
 
     private func search() async {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await performSearch(query: trimmed, explicit: true)
+    }
+
+    private func scheduleLiveSearch(for rawQuery: String) {
+        liveSearchTask?.cancel()
+        let trimmed = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            rows = []
+            errorText = ""
+            hasSearched = false
+            return
+        }
+
+        liveSearchTask = Task {
+            try? await Task.sleep(nanoseconds: 280_000_000)
+            guard !Task.isCancelled else { return }
+            await performSearch(query: trimmed, explicit: false)
+        }
+    }
+
+    private func performSearch(query requestQuery: String, explicit: Bool) async {
         loading = true
-        hasSearched = true
+        if explicit { hasSearched = true }
         errorText = ""
         defer { loading = false }
         do {
-            let result = try await client.discoverCreators(query: query.trimmingCharacters(in: .whitespacesAndNewlines))
+            let result = try await client.discoverCreators(query: requestQuery)
             await MainActor.run {
+                if requestQuery != query.trimmingCharacters(in: .whitespacesAndNewlines) { return }
                 rows = result
                 errorText = ""
             }
         } catch {
             await MainActor.run {
+                if requestQuery != query.trimmingCharacters(in: .whitespacesAndNewlines) { return }
                 rows = []
                 errorText = error.localizedDescription
             }
