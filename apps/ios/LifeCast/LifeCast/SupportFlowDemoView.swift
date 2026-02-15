@@ -131,16 +131,15 @@ struct SupportFlowDemoView: View {
             supportFlowSheet
         }
         .sheet(isPresented: $showAuthSheet) {
-            DevUserSwitcherSheet(
-                client: client,
-                onSwitched: {
-                    Task {
-                        await refreshMyProfile()
-                        await refreshMyVideos()
-                        await refreshAuthState()
-                    }
+            AuthEntrySheet(client: client) {
+                showAuthSheet = false
+                Task {
+                    await refreshAuthState()
+                    await refreshMyProfile()
+                    await refreshMyVideos()
+                    await refreshLiveSupportProject()
                 }
-            )
+            }
         }
         .task {
             await refreshAuthState()
@@ -879,5 +878,148 @@ struct SupportFlowDemoView: View {
         out.locale = Locale(identifier: "en_US_POSIX")
         out.dateFormat = "yyyy-MM"
         return out.string(from: date)
+    }
+}
+
+private struct AuthEntrySheet: View {
+    let client: LifeCastAPIClient
+    let onAuthenticated: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+
+    @State private var email = ""
+    @State private var password = ""
+    @State private var username = ""
+    @State private var displayName = ""
+    @State private var isSignUp = false
+    @State private var isLoading = false
+    @State private var errorText = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Account") {
+                    TextField("Email", text: $email)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
+                    SecureField("Password", text: $password)
+                    if isSignUp {
+                        TextField("Username (optional)", text: $username)
+                            .textInputAutocapitalization(.never)
+                        TextField("Display name (optional)", text: $displayName)
+                    }
+                }
+
+                Section("Sign in options") {
+                    Button(isSignUp ? "Create account" : "Sign in with Email") {
+                        Task { await submitEmailAuth() }
+                    }
+                    .disabled(isLoading || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
+
+                    Button("Continue with Google") {
+                        Task { await continueOAuth(provider: "google") }
+                    }
+                    .disabled(isLoading)
+
+                    Button("Continue with Apple") {
+                        Task { await continueOAuth(provider: "apple") }
+                    }
+                    .disabled(isLoading)
+                }
+
+                Section {
+                    Button(isSignUp ? "Already have an account? Sign in" : "Need an account? Sign up") {
+                        isSignUp.toggle()
+                        errorText = ""
+                    }
+                    .font(.footnote)
+                }
+
+                if !errorText.isEmpty {
+                    Section {
+                        Text(errorText)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle(isSignUp ? "Sign Up" : "Sign In")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                }
+            }
+            .overlay {
+                if isLoading {
+                    ProgressView()
+                        .padding(20)
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+    }
+
+    private func submitEmailAuth() async {
+        await MainActor.run {
+            isLoading = true
+            errorText = ""
+        }
+        defer {
+            Task { @MainActor in
+                isLoading = false
+            }
+        }
+
+        do {
+            let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+            if isSignUp {
+                let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                _ = try await client.signUpWithEmail(
+                    email: normalizedEmail,
+                    password: password,
+                    username: normalizedUsername.isEmpty ? nil : normalizedUsername,
+                    displayName: normalizedDisplayName.isEmpty ? nil : normalizedDisplayName
+                )
+            } else {
+                _ = try await client.signInWithEmail(email: normalizedEmail, password: password)
+            }
+            await MainActor.run {
+                onAuthenticated()
+                dismiss()
+            }
+        } catch {
+            await MainActor.run {
+                errorText = error.localizedDescription
+            }
+        }
+    }
+
+    private func continueOAuth(provider: String) async {
+        await MainActor.run {
+            isLoading = true
+            errorText = ""
+        }
+        defer {
+            Task { @MainActor in
+                isLoading = false
+            }
+        }
+
+        do {
+            let url = try await client.oauthURL(provider: provider)
+            await MainActor.run {
+                openURL(url)
+            }
+        } catch {
+            await MainActor.run {
+                errorText = error.localizedDescription
+            }
+        }
     }
 }

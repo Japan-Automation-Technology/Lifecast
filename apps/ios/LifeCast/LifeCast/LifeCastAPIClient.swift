@@ -167,6 +167,30 @@ struct CreatorNetworkResult: Decodable {
     let rows: [CreatorNetworkRow]
 }
 
+struct SupportedProjectRow: Decodable, Identifiable {
+    let support_id: UUID
+    let project_id: UUID
+    let supported_at: String
+    let amount_minor: Int
+    let currency: String
+    let project_title: String
+    let project_subtitle: String?
+    let project_image_url: String?
+    let project_goal_amount_minor: Int
+    let project_funded_amount_minor: Int
+    let project_currency: String
+    let project_supporter_count: Int
+    let creator_user_id: UUID
+    let creator_username: String
+    let creator_display_name: String?
+
+    var id: UUID { support_id }
+}
+
+struct SupportedProjectsResult: Decodable {
+    let rows: [SupportedProjectRow]
+}
+
 struct CreatorPublicProfile: Decodable {
     let creator_user_id: UUID
     let username: String
@@ -725,6 +749,64 @@ final class LifeCastAPIClient {
         }
         let envelope = try JSONDecoder().decode(APIEnvelope<CreatorNetworkResult>.self, from: data)
         return envelope.result
+    }
+
+    func getCreatorSupportedProjects(creatorUserId: UUID, limit: Int = 30) async throws -> [SupportedProjectRow] {
+        guard var components = URLComponents(
+            url: baseURL.appendingPathComponent("v1/creators/\(creatorUserId.uuidString)/supported-projects"),
+            resolvingAgainstBaseURL: false
+        ) else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid supported-projects URL"])
+        }
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))")
+        ]
+        guard let url = components.url else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid supported-projects URL"])
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        applyAuthHeaders(&request)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let payloadText = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "LifeCastAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: payloadText])
+        }
+        let envelope = try JSONDecoder().decode(APIEnvelope<SupportedProjectsResult>.self, from: data)
+        return envelope.result.rows
+    }
+
+    func getMySupportedProjects(limit: Int = 30) async throws -> [SupportedProjectRow] {
+        guard var components = URLComponents(
+            url: baseURL.appendingPathComponent("v1/me/supported-projects"),
+            resolvingAgainstBaseURL: false
+        ) else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid my supported-projects URL"])
+        }
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))")
+        ]
+        guard let url = components.url else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid my supported-projects URL"])
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        applyAuthHeaders(&request)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let payloadText = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "LifeCastAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: payloadText])
+        }
+        let envelope = try JSONDecoder().decode(APIEnvelope<SupportedProjectsResult>.self, from: data)
+        return envelope.result.rows
     }
 
     func getMyProfile() async throws -> MyProfileResult {

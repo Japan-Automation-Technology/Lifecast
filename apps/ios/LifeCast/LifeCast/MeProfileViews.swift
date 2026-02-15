@@ -19,6 +19,9 @@ struct MeTabView: View {
     @State private var selectedNetworkTab: CreatorNetworkTab = .following
     @State private var showUserSwitcher = false
     @State private var showEditProfile = false
+    @State private var supportedProjects: [SupportedProjectRow] = []
+    @State private var supportedProjectsLoading = false
+    @State private var supportedProjectsError = ""
     
     private var currentUsername: String {
         myProfile?.username ?? "lifecast_maker"
@@ -76,6 +79,8 @@ struct MeTabView: View {
                                 .onChange(of: selectedIndex) { _, newValue in
                                     if newValue == 1 {
                                         onRefreshVideos()
+                                    } else if newValue == 2 {
+                                        Task { await loadMySupportedProjects() }
                                     }
                                 }
 
@@ -92,7 +97,15 @@ struct MeTabView: View {
                                         onRefreshVideos: onRefreshVideos
                                     )
                                 } else {
-                                    VideoGridPlaceholder(title: "Liked videos")
+                                    SupportedProjectsListView(
+                                        rows: supportedProjects,
+                                        isLoading: supportedProjectsLoading,
+                                        errorText: supportedProjectsError,
+                                        emptyText: "No supported projects yet",
+                                        onRefresh: {
+                                            Task { await loadMySupportedProjects() }
+                                        }
+                                    )
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -123,6 +136,7 @@ struct MeTabView: View {
                 guard isAuthenticated else { return }
                 onRefreshProfile()
                 onRefreshVideos()
+                await loadMySupportedProjects()
             }
             .navigationDestination(isPresented: $showNetwork) {
                 if let profile = myProfile {
@@ -146,6 +160,9 @@ struct MeTabView: View {
                         onRefreshProfile()
                         onRefreshVideos()
                         onProjectChanged()
+                    },
+                    onOpenAuth: {
+                        onOpenAuth()
                     }
                 )
             }
@@ -194,11 +211,41 @@ struct MeTabView: View {
         .background(Color.white)
     }
 
+    private func loadMySupportedProjects() async {
+        guard isAuthenticated else {
+            await MainActor.run {
+                supportedProjects = []
+                supportedProjectsError = ""
+                supportedProjectsLoading = false
+            }
+            return
+        }
+        await MainActor.run { supportedProjectsLoading = true }
+        defer {
+            Task { @MainActor in
+                supportedProjectsLoading = false
+            }
+        }
+        do {
+            let rows = try await client.getMySupportedProjects(limit: 50)
+            await MainActor.run {
+                supportedProjects = rows
+                supportedProjectsError = ""
+            }
+        } catch {
+            await MainActor.run {
+                supportedProjects = []
+                supportedProjectsError = error.localizedDescription
+            }
+        }
+    }
+
 }
 
 struct DevUserSwitcherSheet: View {
     let client: LifeCastAPIClient
     let onSwitched: () -> Void
+    let onOpenAuth: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var rows: [DevAuthUser] = []
@@ -244,6 +291,11 @@ struct DevUserSwitcherSheet: View {
                             Text("Not signed in")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                            Button("Sign In / Sign Up") {
+                                dismiss()
+                                onOpenAuth()
+                            }
+                            .buttonStyle(.borderedProminent)
                         }
                     }
 
@@ -370,6 +422,7 @@ struct DevUserSwitcherSheet: View {
             signedInUserEmail = ""
         }
     }
+
 }
 
 struct EditProfileView: View {

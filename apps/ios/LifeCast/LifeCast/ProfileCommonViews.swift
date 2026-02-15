@@ -31,7 +31,7 @@ struct ProfileTabIconStrip: View {
         HStack(spacing: 0) {
             iconButton(index: 0, systemName: "folder")
             iconButton(index: 1, systemName: "square.grid.3x3")
-            iconButton(index: 2, systemName: "heart")
+            iconButton(index: 2, systemName: "checkmark.seal")
         }
         .padding(4)
         .background(Color.secondary.opacity(0.12))
@@ -144,5 +144,98 @@ struct ProfileOverviewSection<ActionContent: View>: View {
                 .fill(Color.gray.opacity(0.3))
                 .frame(width: size, height: size)
         }
+    }
+}
+
+struct SupportedProjectsListView: View {
+    let rows: [SupportedProjectRow]
+    let isLoading: Bool
+    let errorText: String
+    let emptyText: String
+    let onRefresh: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Supported projects")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("Refresh") {
+                    onRefresh()
+                }
+                .font(.caption)
+            }
+            .padding(.horizontal, 16)
+
+            if isLoading {
+                ProgressView("Loading supports...")
+                    .font(.caption)
+                    .padding(.horizontal, 16)
+            } else if !errorText.isEmpty {
+                Text(errorText)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 16)
+            } else if rows.isEmpty {
+                Text(emptyText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+            } else {
+                LazyVStack(spacing: 10) {
+                    ForEach(rows) { row in
+                        supportedProjectCard(row: row)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+    }
+
+    private func supportedProjectCard(row: SupportedProjectRow) -> some View {
+        let goal = max(row.project_goal_amount_minor, 1)
+        let funded = max(row.project_funded_amount_minor, 0)
+        let progress = min(Double(funded) / Double(goal), 1.0)
+        let percent = Int((Double(funded) / Double(goal)) * 100.0)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(row.project_title)
+                .font(.subheadline.weight(.semibold))
+            if let subtitle = row.project_subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text("Supported at \(formatSupportDate(row.supported_at))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("You: \(row.amount_minor.formatted()) \(row.currency)")
+                    .font(.caption.weight(.semibold))
+            }
+
+            ProgressView(value: progress)
+                .tint(fundingProgressTint(Double(funded) / Double(goal)))
+            Text("\(percent)% funded (\(funded.formatted()) / \(goal.formatted()) \(row.project_currency))")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text("Supporters: \(row.project_supporter_count)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func formatSupportDate(_ iso: String) -> String {
+        let isoFormatter = ISO8601DateFormatter()
+        guard let date = isoFormatter.date(from: iso) else { return iso }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }

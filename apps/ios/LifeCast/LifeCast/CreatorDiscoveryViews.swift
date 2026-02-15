@@ -1,5 +1,12 @@
 import SwiftUI
 
+private struct DiscoverSearchHistoryEntry: Codable, Identifiable, Hashable {
+    let creatorId: UUID
+    let username: String
+
+    var id: UUID { creatorId }
+}
+
 struct DiscoverSearchView: View {
     let client: LifeCastAPIClient
     let onSupportTap: (MyProjectResult) -> Void
@@ -8,6 +15,11 @@ struct DiscoverSearchView: View {
     @State private var rows: [DiscoverCreatorRow] = []
     @State private var loading = false
     @State private var errorText = ""
+    @State private var hasSearched = false
+    @State private var searchHistory: [DiscoverSearchHistoryEntry] = []
+
+    private static let historyKey = "discover.search.history.v1"
+    private let historyLimit = 10
 
     var body: some View {
         NavigationStack {
@@ -15,6 +27,10 @@ struct DiscoverSearchView: View {
                 HStack {
                     TextField("Search creators", text: $query)
                         .textFieldStyle(.roundedBorder)
+                        .submitLabel(.search)
+                        .onSubmit {
+                            Task { await search() }
+                        }
                     Button("Search") {
                         Task { await search() }
                     }
@@ -34,44 +50,134 @@ struct DiscoverSearchView: View {
                         .padding(.horizontal, 16)
                 }
 
-                List(rows) { creator in
-                    NavigationLink {
-                        CreatorPublicPageView(
-                            client: client,
-                            creatorId: creator.creator_user_id,
-                            onSupportTap: onSupportTap
+                if rows.isEmpty {
+                    if hasSearched && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && errorText.isEmpty {
+                        ContentUnavailableView(
+                            "No creators found",
+                            systemImage: "magnifyingglass",
+                            description: Text("Try another keyword")
                         )
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("@\(creator.username)")
-                                .font(.headline)
-                            if let displayName = creator.display_name, !displayName.isEmpty {
-                                Text(displayName)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let projectTitle = creator.project_title, !projectTitle.isEmpty {
-                                Text(projectTitle)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+                        .padding(.horizontal, 16)
+                    } else {
+                        historySection
                     }
+                } else {
+                    resultsSection
                 }
-                .listStyle(.plain)
             }
             .navigationTitle("Discover")
             .task {
-                await search()
+                loadSearchHistory()
             }
         }
     }
 
+    private var resultsSection: some View {
+        List(rows) { creator in
+            NavigationLink {
+                CreatorPublicPageView(
+                    client: client,
+                    creatorId: creator.creator_user_id,
+                    onSupportTap: onSupportTap
+                )
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("@\(creator.username)")
+                        .font(.headline)
+                    if let displayName = creator.display_name, !displayName.isEmpty {
+                        Text(displayName)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let projectTitle = creator.project_title, !projectTitle.isEmpty {
+                        Text(projectTitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    rememberVisitedCreator(creator)
+                }
+            )
+        }
+        .listStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var historySection: some View {
+        if searchHistory.isEmpty {
+            ContentUnavailableView(
+                "No recent searches",
+                systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+                description: Text("Your recent creator searches will appear here")
+            )
+            .padding(.horizontal, 16)
+        } else {
+            List {
+                Section {
+                    ForEach(searchHistory) { entry in
+                        HStack(spacing: 10) {
+                            Image(systemName: "clock")
+                                .foregroundStyle(.secondary)
+
+                            NavigationLink {
+                                CreatorPublicPageView(
+                                    client: client,
+                                    creatorId: entry.creatorId,
+                                    onSupportTap: onSupportTap
+                                )
+                            } label: {
+                                Text("@\(entry.username)")
+                                    .foregroundStyle(.primary)
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                removeSearchHistoryEntry(entry)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Delete \(entry.username) from search history")
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Recent searches")
+                        Spacer()
+                        Button("Clear") {
+                            clearSearchHistory()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .listStyle(.plain)
+        }
+    }
+
+    private func loadSearchHistory() {
+        guard
+            let data = UserDefaults.standard.data(forKey: Self.historyKey),
+            let decoded = try? JSONDecoder().decode([DiscoverSearchHistoryEntry].self, from: data)
+        else {
+            searchHistory = []
+            return
+        }
+        searchHistory = decoded
+    }
+
     private func search() async {
         loading = true
+        hasSearched = true
+        errorText = ""
         defer { loading = false }
         do {
-            let result = try await client.discoverCreators(query: query)
+            let result = try await client.discoverCreators(query: query.trimmingCharacters(in: .whitespacesAndNewlines))
             await MainActor.run {
                 rows = result
                 errorText = ""
@@ -82,6 +188,31 @@ struct DiscoverSearchView: View {
                 errorText = error.localizedDescription
             }
         }
+    }
+
+    private func rememberVisitedCreator(_ creator: DiscoverCreatorRow) {
+        let entry = DiscoverSearchHistoryEntry(creatorId: creator.creator_user_id, username: creator.username)
+        var values = searchHistory.filter { $0.creatorId != entry.creatorId }
+        values.insert(entry, at: 0)
+        if values.count > historyLimit { values = Array(values.prefix(historyLimit)) }
+
+        searchHistory = values
+        persistSearchHistory(values)
+    }
+
+    private func removeSearchHistoryEntry(_ entry: DiscoverSearchHistoryEntry) {
+        searchHistory.removeAll { $0.creatorId == entry.creatorId }
+        persistSearchHistory(searchHistory)
+    }
+
+    private func persistSearchHistory(_ values: [DiscoverSearchHistoryEntry]) {
+        guard let data = try? JSONEncoder().encode(values) else { return }
+        UserDefaults.standard.set(data, forKey: Self.historyKey)
+    }
+
+    private func clearSearchHistory() {
+        searchHistory = []
+        UserDefaults.standard.removeObject(forKey: Self.historyKey)
     }
 }
 
@@ -101,6 +232,9 @@ struct CreatorPublicPageView: View {
     @State private var selectedNetworkTab: CreatorNetworkTab = .following
     @State private var isViewingSelfProfile: Bool? = nil
     @State private var viewerContextResolved = false
+    @State private var supportedProjects: [SupportedProjectRow] = []
+    @State private var supportedProjectsLoading = false
+    @State private var supportedProjectsError = ""
 
     init(
         client: LifeCastAPIClient,
@@ -177,7 +311,15 @@ struct CreatorPublicPageView: View {
                         } else if selectedIndex == 1 {
                             creatorPostsSection(page: page)
                         } else {
-                            VideoGridPlaceholder(title: "Liked videos")
+                            SupportedProjectsListView(
+                                rows: supportedProjects,
+                                isLoading: supportedProjectsLoading,
+                                errorText: supportedProjectsError,
+                                emptyText: "No supported projects yet",
+                                onRefresh: {
+                                    Task { await loadSupportedProjects() }
+                                }
+                            )
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -196,9 +338,17 @@ struct CreatorPublicPageView: View {
             await MainActor.run {
                 isViewingSelfProfile = nil
                 viewerContextResolved = false
+                supportedProjects = []
+                supportedProjectsError = ""
             }
             await refreshViewerContext()
             await load()
+            await loadSupportedProjects()
+        }
+        .onChange(of: selectedIndex) { _, newValue in
+            if newValue == 2 {
+                Task { await loadSupportedProjects() }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .lifecastRelationshipChanged)) { notification in
             guard let creatorUserId = notification.userInfo?["creatorUserId"] as? String else { return }
@@ -578,6 +728,27 @@ struct CreatorPublicPageView: View {
             await MainActor.run {
                 page = nil
                 errorText = error.localizedDescription
+            }
+        }
+    }
+
+    private func loadSupportedProjects() async {
+        await MainActor.run { supportedProjectsLoading = true }
+        defer {
+            Task { @MainActor in
+                supportedProjectsLoading = false
+            }
+        }
+        do {
+            let rows = try await client.getCreatorSupportedProjects(creatorUserId: creatorId, limit: 50)
+            await MainActor.run {
+                supportedProjects = rows
+                supportedProjectsError = ""
+            }
+        } catch {
+            await MainActor.run {
+                supportedProjects = []
+                supportedProjectsError = error.localizedDescription
             }
         }
     }

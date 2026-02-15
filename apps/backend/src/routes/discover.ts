@@ -23,6 +23,10 @@ const networkQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
+const supportedProjectsQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
 const profileImageUploadBody = z.object({
   file_name: z.string().max(255).optional(),
   content_type: z.string().max(100),
@@ -140,6 +144,82 @@ async function loadViewerRelationship(client: PoolClient, viewerUserId: string |
   );
   const isSupported = Boolean(supportResult.rows[0]?.is_supported);
   return { is_following: isFollowing, is_supported: isSupported };
+}
+
+async function loadSupportedProjects(client: PoolClient, supporterUserId: string, limit: number) {
+  const rows = await client.query<{
+    support_id: string;
+    project_id: string;
+    supported_at: string;
+    amount_minor: string | number;
+    currency: string;
+    project_title: string;
+    project_subtitle: string | null;
+    project_image_url: string | null;
+    project_goal_amount_minor: string | number;
+    project_funded_amount_minor: string | number;
+    project_currency: string;
+    project_supporter_count: string | number;
+    creator_user_id: string;
+    creator_username: string;
+    creator_display_name: string | null;
+  }>(
+    `
+      select
+        st.id as support_id,
+        st.project_id,
+        coalesce(st.succeeded_at, st.confirmed_at, st.created_at) as supported_at,
+        st.amount_minor,
+        st.currency,
+        p.title as project_title,
+        p.subtitle as project_subtitle,
+        p.cover_image_url as project_image_url,
+        p.goal_amount_minor as project_goal_amount_minor,
+        coalesce((
+          select sum(st_sum.amount_minor)
+          from support_transactions st_sum
+          where st_sum.project_id = p.id
+            and st_sum.status = 'succeeded'
+        ), 0) as project_funded_amount_minor,
+        p.currency as project_currency,
+        (
+          select count(*)
+          from support_transactions st2
+          where st2.project_id = p.id
+            and st2.status = 'succeeded'
+        ) as project_supporter_count,
+        p.creator_user_id,
+        coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as creator_username,
+        coalesce(cp.display_name, u.display_name) as creator_display_name
+      from support_transactions st
+      join projects p on p.id = st.project_id
+      join users u on u.id = p.creator_user_id
+      left join creator_profiles cp on cp.creator_user_id = u.id
+      where st.supporter_user_id = $1
+        and st.status = 'succeeded'
+      order by coalesce(st.succeeded_at, st.confirmed_at, st.created_at) desc
+      limit $2
+    `,
+    [supporterUserId, limit],
+  );
+
+  return rows.rows.map((row) => ({
+    support_id: row.support_id,
+    project_id: row.project_id,
+    supported_at: row.supported_at,
+    amount_minor: Number(row.amount_minor ?? 0),
+    currency: row.currency,
+    project_title: row.project_title,
+    project_subtitle: row.project_subtitle,
+    project_image_url: row.project_image_url,
+    project_goal_amount_minor: Number(row.project_goal_amount_minor ?? 0),
+    project_funded_amount_minor: Number(row.project_funded_amount_minor ?? 0),
+    project_currency: row.project_currency,
+    project_supporter_count: Number(row.project_supporter_count ?? 0),
+    creator_user_id: row.creator_user_id,
+    creator_username: row.creator_username,
+    creator_display_name: row.creator_display_name,
+  }));
 }
 
 export async function registerDiscoverRoutes(app: FastifyInstance) {
@@ -887,6 +967,57 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
           profile_stats: profileStats,
         }),
       );
+    } finally {
+      client.release();
+    }
+  });
+
+  app.get("/v1/creators/:creatorUserId/supported-projects", async (req, reply) => {
+    const viewerUserId = requireRequestUserId(req, reply);
+    if (!viewerUserId) return;
+
+    const parsed = supportedProjectsQuery.safeParse(req.query ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid supported-projects query"));
+    }
+    const limit = parsed.data.limit ?? 30;
+    const creatorUserIdResult = z.string().uuid().safeParse((req.params as { creatorUserId?: string }).creatorUserId);
+    if (!creatorUserIdResult.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "creatorUserId must be UUID"));
+    }
+    const creatorUserId = creatorUserIdResult.data;
+
+    if (!hasDb() || !dbPool) {
+      return reply.send(ok({ rows: [] }));
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const rows = await loadSupportedProjects(client, creatorUserId, limit);
+      return reply.send(ok({ rows }));
+    } finally {
+      client.release();
+    }
+  });
+
+  app.get("/v1/me/supported-projects", async (req, reply) => {
+    const profileUserId = requireRequestUserId(req, reply);
+    if (!profileUserId) return;
+
+    const parsed = supportedProjectsQuery.safeParse(req.query ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid supported-projects query"));
+    }
+    const limit = parsed.data.limit ?? 30;
+
+    if (!hasDb() || !dbPool) {
+      return reply.send(ok({ rows: [] }));
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const rows = await loadSupportedProjects(client, profileUserId, limit);
+      return reply.send(ok({ rows }));
     } finally {
       client.release();
     }
