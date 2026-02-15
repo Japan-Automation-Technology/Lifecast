@@ -1,5 +1,5 @@
 import SwiftUI
-import AVKit
+import AVFoundation
 import PhotosUI
 import UniformTypeIdentifiers
 import UIKit
@@ -10,8 +10,8 @@ struct SupportFlowDemoView: View {
     @State private var selectedTab = 0
     @State private var feedMode: FeedMode = .forYou
     @State private var currentFeedIndex = 0
-    @State private var homeFeedMotionDirection: VerticalFeedMotionDirection = .next
     @State private var homeFeedPlayer: AVPlayer? = nil
+    @State private var homeFeedPlayerCache: [URL: AVPlayer] = [:]
     @State private var showFeedProjectPanel = false
     @State private var feedProjectDetail: MyProjectResult?
     @State private var feedProjectDetailLoading = false
@@ -68,7 +68,7 @@ struct SupportFlowDemoView: View {
                         )
                     }
             }
-                .tabItem { Label("Home", systemImage: "house") }
+                .tabItem { Image(systemName: "house.fill") }
                 .tag(0)
 
             DiscoverSearchView(client: client, onSupportTap: { project in
@@ -78,7 +78,8 @@ struct SupportFlowDemoView: View {
                 supportStep = .planSelect
                 showSupportFlow = true
             })
-                .tabItem { Label("Discover", systemImage: "magnifyingglass") }
+                .safeAreaPadding(.bottom, appBottomBarHeight)
+                .tabItem { Image(systemName: "magnifyingglass") }
                 .tag(1)
 
             UploadCreateView(client: client, isAuthenticated: isAuthenticated, onUploadReady: {
@@ -90,7 +91,8 @@ struct SupportFlowDemoView: View {
             }, onOpenAuth: {
                 showAuthSheet = true
             })
-                .tabItem { Label("Create", systemImage: "plus.square") }
+                .safeAreaPadding(.bottom, appBottomBarHeight)
+                .tabItem { Image(systemName: "plus.square.fill") }
                 .tag(2)
 
             MeTabView(
@@ -119,8 +121,15 @@ struct SupportFlowDemoView: View {
                     showAuthSheet = true
                 }
             )
-            .tabItem { Label("Me", systemImage: "person") }
+            .safeAreaPadding(.bottom, appBottomBarHeight)
+            .tabItem { Image(systemName: "person.fill") }
             .tag(3)
+        }
+        .toolbar(.hidden, for: .tabBar)
+        .ignoresSafeArea(.container, edges: .bottom)
+        .background(Color.black.ignoresSafeArea())
+        .overlay(alignment: .bottom) {
+            appBottomBar
         }
         .sheet(isPresented: $showComments) {
             commentsSheet
@@ -171,6 +180,9 @@ struct SupportFlowDemoView: View {
             } else {
                 homeFeedPlayer?.pause()
                 homeFeedPlayer = nil
+                for player in homeFeedPlayerCache.values {
+                    player.pause()
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .lifecastAuthSessionUpdated)) { _ in
@@ -190,67 +202,85 @@ struct SupportFlowDemoView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                Picker("Feed", selection: $feedMode) {
-                    ForEach(FeedMode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
+            ZStack(alignment: .bottomTrailing) {
+                if !feedProjects.isEmpty {
+                    InteractiveVerticalFeedPager(
+                        items: feedProjects,
+                        currentIndex: $currentFeedIndex,
+                        verticalDragDisabled: showFeedProjectPanel,
+                        onWillMove: {
+                            homeFeedPlayer?.pause()
+                            closeFeedProjectPanel()
+                        },
+                        onDidMove: {
+                            syncHomeFeedPlayer()
+                        },
+                        onNonVerticalEnded: { value in
+                            guard let project = currentProject else { return }
+                            handleHomeFeedDragEnded(value, project: project)
+                        },
+                        content: { project, isActive in
+                            feedCard(project: project, useLivePlayer: isActive)
+                        }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.08))
+                        .overlay(
+                            VStack(spacing: 8) {
+                                Image(systemName: "video.slash")
+                                    .font(.system(size: 30))
+                                    .foregroundStyle(.white.opacity(0.7))
+                                Text("No feed videos yet")
+                                    .foregroundStyle(.white.opacity(0.9))
+                                Text("Ask creators to upload videos")
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.65))
+                            }
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
-
-                ZStack(alignment: .bottomTrailing) {
-                    if let project = currentProject {
-                        feedCard(project: project)
-                            .id(project.id)
-                            .transition(homeFeedMotionDirection.transition)
-                            .animation(.interactiveSpring(response: 0.32, dampingFraction: 0.88), value: currentFeedIndex)
-                            .highPriorityGesture(
-                                DragGesture(minimumDistance: 24)
-                                    .onEnded { value in
-                                        handleHomeFeedDragEnded(value, project: project)
-                                    }
-                            )
-                    } else {
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(Color.white.opacity(0.08))
-                            .overlay(
-                                VStack(spacing: 8) {
-                                    Image(systemName: "video.slash")
-                                        .font(.system(size: 30))
-                                        .foregroundStyle(.white.opacity(0.7))
-                                    Text("No feed videos yet")
-                                        .foregroundStyle(.white.opacity(0.9))
-                                    Text("Ask creators to upload videos")
-                                        .font(.caption)
-                                        .foregroundStyle(.white.opacity(0.65))
-                                }
-                            )
-                    }
-
-                }
-                .padding(.top, 8)
-                .padding(.horizontal, 8)
-                .padding(.bottom, 8)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea(edges: [.top, .bottom])
+            .overlay(alignment: .top) {
+                homeFeedHeader
             }
         }
     }
 
-    private func feedCard(project: FeedProjectSummary) -> some View {
+    private var homeFeedHeader: some View {
+        HStack(spacing: 24) {
+            Button("For You") {
+                feedMode = .forYou
+            }
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(feedMode == .forYou ? Color.white : Color.white.opacity(0.45))
+
+            Button("Following") {
+                feedMode = .following
+            }
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(feedMode == .following ? Color.white : Color.white.opacity(0.45))
+        }
+        .padding(.top, 10)
+    }
+
+    private func feedCard(project: FeedProjectSummary, useLivePlayer: Bool = true) -> some View {
         ZStack(alignment: .bottom) {
-            SlidingFeedPanelLayer(isPanelOpen: showFeedProjectPanel, cornerRadius: 20) {
-                feedVideoLayer(project: project)
+            SlidingFeedPanelLayer(isPanelOpen: showFeedProjectPanel, cornerRadius: 0) {
+                feedVideoLayer(project: project, useLivePlayer: useLivePlayer)
             } panelLayer: { width in
                 feedProjectPanel(project: project, width: width)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             LinearGradient(
                 colors: [Color.black.opacity(0.0), Color.black.opacity(0.55)],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .clipShape(RoundedRectangle(cornerRadius: 20))
 
             VStack(spacing: 8) {
                 HStack(alignment: .bottom) {
@@ -281,14 +311,40 @@ struct SupportFlowDemoView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 24)
+            .padding(.bottom, appBottomBarHeight + 20)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func feedVideoLayer(project: FeedProjectSummary) -> some View {
+    private var appBottomBar: some View {
+        HStack(spacing: 0) {
+            bottomTabButton(icon: "house.fill", tab: 0)
+            bottomTabButton(icon: "magnifyingglass", tab: 1)
+            bottomTabButton(icon: "plus.square.fill", tab: 2)
+            bottomTabButton(icon: "person.fill", tab: 3)
+        }
+        .frame(height: appBottomBarHeight)
+        .frame(maxWidth: .infinity)
+        .background(Color.black.opacity(0.98).ignoresSafeArea(edges: .bottom))
+    }
+
+    private func bottomTabButton(icon: String, tab: Int) -> some View {
+        Button {
+            selectedTab = tab
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(selectedTab == tab ? .white : .gray.opacity(0.85))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func feedVideoLayer(project: FeedProjectSummary, useLivePlayer: Bool) -> some View {
         Group {
-            if let player = homeFeedPlayer {
-                VideoPlayer(player: player)
+            if useLivePlayer, let player = homeFeedPlayer {
+                FillVideoPlayerView(player: player)
             } else if let thumbnail = project.thumbnailURL, let thumbnailURL = URL(string: thumbnail) {
                 AsyncImage(url: thumbnailURL) { phase in
                     switch phase {
@@ -322,6 +378,7 @@ struct SupportFlowDemoView: View {
                 )
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func feedProjectPanel(project: FeedProjectSummary, width: CGFloat) -> some View {
@@ -837,23 +894,17 @@ struct SupportFlowDemoView: View {
 
     private func nextFeed() {
         guard currentFeedIndex < feedProjects.count - 1 else { return }
-        homeFeedMotionDirection = .next
         homeFeedPlayer?.pause()
         closeFeedProjectPanel()
-        withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.88)) {
-            currentFeedIndex += 1
-        }
+        currentFeedIndex += 1
         syncHomeFeedPlayer()
     }
 
     private func previousFeed() {
         guard currentFeedIndex > 0 else { return }
-        homeFeedMotionDirection = .previous
         homeFeedPlayer?.pause()
         closeFeedProjectPanel()
-        withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.88)) {
-            currentFeedIndex -= 1
-        }
+        currentFeedIndex -= 1
         syncHomeFeedPlayer()
     }
 
@@ -887,27 +938,16 @@ struct SupportFlowDemoView: View {
 
     private func refreshFeedProjectsFromAPI() async {
         let rows = (try? await client.listFeedProjects(limit: 20)) ?? []
-        let updated = rows.map {
-            FeedProjectSummary(
-                id: $0.project_id,
-                creatorId: $0.creator_user_id,
-                username: $0.username,
-                caption: $0.caption,
-                videoId: $0.video_id,
-                playbackURL: $0.playback_url,
-                thumbnailURL: $0.thumbnail_url,
-                minPlanPriceMinor: $0.min_plan_price_minor,
-                goalAmountMinor: $0.goal_amount_minor,
-                fundedAmountMinor: $0.funded_amount_minor,
-                remainingDays: $0.remaining_days,
-                likes: $0.likes,
-                comments: $0.comments,
-                isSupportedByCurrentUser: $0.is_supported_by_current_user
-            )
-        }
+        let updated = await buildExpandedFeedProjects(from: rows)
         await MainActor.run {
+            let previousVideoId = feedProjects[safe: currentFeedIndex]?.videoId
             feedProjects = updated
-            currentFeedIndex = min(currentFeedIndex, max(0, updated.count - 1))
+            if let previousVideoId,
+               let retained = updated.firstIndex(where: { $0.videoId == previousVideoId }) {
+                currentFeedIndex = retained
+            } else {
+                currentFeedIndex = min(currentFeedIndex, max(0, updated.count - 1))
+            }
             if let selected = updated[safe: currentFeedIndex] {
                 feedProjectDetail = (feedProjectDetail?.id == selected.id) ? feedProjectDetail : nil
             } else {
@@ -917,16 +957,84 @@ struct SupportFlowDemoView: View {
         }
     }
 
+    private func buildExpandedFeedProjects(from rows: [FeedProjectRow]) async -> [FeedProjectSummary] {
+        var expanded: [FeedProjectSummary] = []
+        var seenVideoIds: Set<UUID> = []
+
+        for row in rows {
+            var appendedForCreator = false
+            if let page = try? await client.getCreatorPage(creatorUserId: row.creator_user_id) {
+                let playableVideos = page.videos
+                    .filter { $0.playback_url != nil }
+                    .sorted { $0.created_at > $1.created_at }
+
+                for video in playableVideos {
+                    if seenVideoIds.contains(video.video_id) { continue }
+                    seenVideoIds.insert(video.video_id)
+                    appendedForCreator = true
+                    expanded.append(
+                        FeedProjectSummary(
+                            id: row.project_id,
+                            creatorId: row.creator_user_id,
+                            username: row.username,
+                            caption: row.caption,
+                            videoId: video.video_id,
+                            playbackURL: video.playback_url,
+                            thumbnailURL: video.thumbnail_url ?? row.thumbnail_url,
+                            minPlanPriceMinor: row.min_plan_price_minor,
+                            goalAmountMinor: row.goal_amount_minor,
+                            fundedAmountMinor: row.funded_amount_minor,
+                            remainingDays: row.remaining_days,
+                            likes: row.likes,
+                            comments: row.comments,
+                            isSupportedByCurrentUser: row.is_supported_by_current_user
+                        )
+                    )
+                }
+            }
+
+            if !appendedForCreator {
+                expanded.append(
+                    FeedProjectSummary(
+                        id: row.project_id,
+                        creatorId: row.creator_user_id,
+                        username: row.username,
+                        caption: row.caption,
+                        videoId: row.video_id,
+                        playbackURL: row.playback_url,
+                        thumbnailURL: row.thumbnail_url,
+                        minPlanPriceMinor: row.min_plan_price_minor,
+                        goalAmountMinor: row.goal_amount_minor,
+                        fundedAmountMinor: row.funded_amount_minor,
+                        remainingDays: row.remaining_days,
+                        likes: row.likes,
+                        comments: row.comments,
+                        isSupportedByCurrentUser: row.is_supported_by_current_user
+                    )
+                )
+            }
+        }
+
+        return expanded
+    }
+
     private func syncHomeFeedPlayer() {
         guard selectedTab == 0 else {
             homeFeedPlayer?.pause()
             homeFeedPlayer = nil
+            for player in homeFeedPlayerCache.values {
+                player.pause()
+            }
             return
         }
 
         guard !feedProjects.isEmpty else {
             homeFeedPlayer?.pause()
             homeFeedPlayer = nil
+            for player in homeFeedPlayerCache.values {
+                player.pause()
+            }
+            homeFeedPlayerCache.removeAll()
             return
         }
 
@@ -937,25 +1045,48 @@ struct SupportFlowDemoView: View {
             return
         }
 
-        if let existing = homeFeedPlayer,
-           let existingAsset = existing.currentItem?.asset as? AVURLAsset,
-           existingAsset.url == url {
-            if showFeedProjectPanel {
-                existing.pause()
-            } else {
-                existing.play()
-            }
-            return
+        let player: AVPlayer
+        if let cached = homeFeedPlayerCache[url] {
+            player = cached
+        } else {
+            let created = AVPlayer(url: url)
+            created.actionAtItemEnd = .none
+            homeFeedPlayerCache[url] = created
+            player = created
         }
 
-        homeFeedPlayer?.pause()
-        let player = AVPlayer(url: url)
-        player.actionAtItemEnd = .none
-        homeFeedPlayer = player
+        if homeFeedPlayer !== player {
+            homeFeedPlayer?.pause()
+            homeFeedPlayer = player
+        }
+
         if showFeedProjectPanel {
             player.pause()
         } else {
             player.play()
+        }
+
+        warmHomeFeedPlayerCache(around: currentFeedIndex)
+    }
+
+    private func warmHomeFeedPlayerCache(around index: Int) {
+        var keep: Set<URL> = []
+        for neighbor in [index - 1, index, index + 1] {
+            guard neighbor >= 0, neighbor < feedProjects.count else { continue }
+            guard let playback = feedProjects[neighbor].playbackURL, let url = URL(string: playback) else { continue }
+            keep.insert(url)
+            if homeFeedPlayerCache[url] == nil {
+                let prepared = AVPlayer(url: url)
+                prepared.actionAtItemEnd = .none
+                prepared.pause()
+                homeFeedPlayerCache[url] = prepared
+            }
+        }
+
+        let stale = homeFeedPlayerCache.keys.filter { !keep.contains($0) }
+        for key in stale {
+            homeFeedPlayerCache[key]?.pause()
+            homeFeedPlayerCache.removeValue(forKey: key)
         }
     }
 

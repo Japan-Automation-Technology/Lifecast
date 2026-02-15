@@ -1,5 +1,5 @@
-import AVKit
 import SwiftUI
+import AVFoundation
 struct PostedVideosListView: View {
     let videos: [MyVideo]
     let errorText: String
@@ -138,8 +138,8 @@ struct CreatorPostedFeedView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var feedVideos: [MyVideo]
     @State private var currentIndex: Int
-    @State private var postedFeedMotionDirection: VerticalFeedMotionDirection = .next
     @State private var player: AVPlayer?
+    @State private var postedFeedPlayerCache: [URL: AVPlayer] = [:]
     @State private var showFeedProjectPanel = false
     @State private var feedProjectDetail: MyProjectResult?
     @State private var feedProjectDetailLoading = false
@@ -169,44 +169,60 @@ struct CreatorPostedFeedView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
+        ZStack {
             Color.black.ignoresSafeArea()
 
             if feedVideos.isEmpty {
                 Text("No videos")
                     .foregroundStyle(.white)
             } else {
-                feedPage(video: feedVideos[currentIndex], project: currentProject)
-                    .id(feedVideos[currentIndex].video_id)
-                    .transition(postedFeedMotionDirection.transition)
-                    .animation(.interactiveSpring(response: 0.32, dampingFraction: 0.88), value: currentIndex)
-                    .accessibilityIdentifier("posted-feed-view")
-                    .highPriorityGesture(
-                        DragGesture(minimumDistance: 24)
-                            .onEnded { value in
-                                handlePostedFeedDragEnded(value, project: currentProject)
-                            }
-                    )
+                InteractiveVerticalFeedPager(
+                    items: feedVideos,
+                    currentIndex: $currentIndex,
+                    verticalDragDisabled: showFeedProjectPanel,
+                    onWillMove: {
+                        player?.pause()
+                        closePostedFeedProjectPanel()
+                    },
+                    onDidMove: {
+                        syncPlayerForCurrentIndex()
+                    },
+                    onNonVerticalEnded: { value in
+                        handlePostedFeedDragEnded(value, project: currentProject)
+                    },
+                    content: { video, isActive in
+                        feedPage(video: video, project: currentProject, useLivePlayer: isActive)
+                    }
+                )
+                .accessibilityIdentifier("posted-feed-view")
             }
 
-            HStack {
-                Button {
-                    dismiss()
+            VStack {
+                HStack {
+                    Button {
+                        dismiss()
+                    }
+                    label: {
+                        Image(systemName: "chevron.left")
+                            .font(.headline.weight(.semibold))
+                            .padding(10)
+                            .background(Color.black.opacity(0.45))
+                            .foregroundStyle(.white)
+                            .clipShape(Circle())
+                    }
+                    .accessibilityIdentifier("posted-feed-back")
+
+                    Spacer()
                 }
-                label: {
-                    Image(systemName: "chevron.left")
-                        .font(.headline.weight(.semibold))
-                        .padding(10)
-                        .background(Color.black.opacity(0.45))
-                        .foregroundStyle(.white)
-                        .clipShape(Circle())
-                }
-                .accessibilityIdentifier("posted-feed-back")
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
 
                 Spacer()
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            postedFeedCommentBar
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .sheet(isPresented: $showComments) {
             commentsSheet
@@ -253,6 +269,9 @@ struct CreatorPostedFeedView: View {
         .onDisappear {
             player?.pause()
             player = nil
+            for prepared in postedFeedPlayerCache.values {
+                prepared.pause()
+            }
         }
     }
 
@@ -260,10 +279,10 @@ struct CreatorPostedFeedView: View {
         projectContext
     }
 
-    private func feedPage(video: MyVideo, project: FeedProjectSummary) -> some View {
+    private func feedPage(video: MyVideo, project: FeedProjectSummary, useLivePlayer: Bool) -> some View {
         ZStack(alignment: .bottom) {
             SlidingFeedPanelLayer(isPanelOpen: showFeedProjectPanel, cornerRadius: 0) {
-                feedVideoLayer
+                feedVideoLayer(video: video, useLivePlayer: useLivePlayer)
             } panelLayer: { width in
                 feedProjectPanel(project: project, width: width)
             }
@@ -273,7 +292,6 @@ struct CreatorPostedFeedView: View {
                 startPoint: .center,
                 endPoint: .bottom
             )
-            .ignoresSafeArea()
 
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 10) {
@@ -296,21 +314,37 @@ struct CreatorPostedFeedView: View {
                 rightRail(project: project)
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 28)
+            .padding(.bottom, appBottomBarHeight + 20)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var feedVideoLayer: some View {
+    private func feedVideoLayer(video: MyVideo, useLivePlayer: Bool) -> some View {
         Group {
-            if let currentPlayer = player {
-                VideoPlayer(player: currentPlayer)
-                    .ignoresSafeArea()
+            if useLivePlayer, let currentPlayer = player {
+                FillVideoPlayerView(player: currentPlayer)
+                    .ignoresSafeArea(edges: .top)
+            } else if let thumbnail = video.thumbnail_url, let thumbnailURL = URL(string: thumbnail) {
+                AsyncImage(url: thumbnailURL) { phase in
+                    switch phase {
+                    case .empty:
+                        Rectangle().fill(Color.gray.opacity(0.3))
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        Rectangle().fill(Color.gray.opacity(0.3))
+                    @unknown default:
+                        Rectangle().fill(Color.gray.opacity(0.3))
+                    }
+                }
+                .ignoresSafeArea(edges: .top)
             } else {
                 Rectangle()
                     .fill(Color.gray.opacity(0.3))
-                    .ignoresSafeArea()
+                    .ignoresSafeArea(edges: .top)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func feedProjectPanel(project: FeedProjectSummary, width: CGFloat) -> some View {
@@ -509,6 +543,10 @@ struct CreatorPostedFeedView: View {
         guard !feedVideos.isEmpty else {
             player?.pause()
             player = nil
+            for prepared in postedFeedPlayerCache.values {
+                prepared.pause()
+            }
+            postedFeedPlayerCache.removeAll()
             return
         }
         guard currentIndex >= 0 && currentIndex < feedVideos.count else {
@@ -520,47 +558,64 @@ struct CreatorPostedFeedView: View {
             player = nil
             return
         }
-        if let existing = player,
-           let existingAsset = existing.currentItem?.asset as? AVURLAsset,
-           existingAsset.url == url {
-            if showFeedProjectPanel {
-                existing.pause()
-            } else {
-                existing.play()
-            }
-            return
+
+        let targetPlayer: AVPlayer
+        if let cached = postedFeedPlayerCache[url] {
+            targetPlayer = cached
+        } else {
+            let created = AVPlayer(url: url)
+            postedFeedPlayerCache[url] = created
+            targetPlayer = created
         }
 
-        let newPlayer = AVPlayer(url: url)
-        player?.pause()
-        player = newPlayer
-        if showFeedProjectPanel {
-            newPlayer.pause()
-        } else {
-            newPlayer.play()
+        if player !== targetPlayer {
+            player?.pause()
+            player = targetPlayer
         }
+
+        if showFeedProjectPanel {
+            targetPlayer.pause()
+        } else {
+            targetPlayer.play()
+        }
+
+        warmPostedFeedPlayerCache(around: currentIndex)
     }
 
     private func showOlder() {
         guard currentIndex < feedVideos.count - 1 else { return }
-        postedFeedMotionDirection = .next
         player?.pause()
         closePostedFeedProjectPanel()
-        withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.88)) {
-            currentIndex += 1
-        }
+        currentIndex += 1
         syncPlayerForCurrentIndex()
     }
 
     private func showNewer() {
         guard currentIndex > 0 else { return }
-        postedFeedMotionDirection = .previous
         player?.pause()
         closePostedFeedProjectPanel()
-        withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.88)) {
-            currentIndex -= 1
-        }
+        currentIndex -= 1
         syncPlayerForCurrentIndex()
+    }
+
+    private func warmPostedFeedPlayerCache(around index: Int) {
+        var keep: Set<URL> = []
+        for neighbor in [index - 1, index, index + 1] {
+            guard neighbor >= 0, neighbor < feedVideos.count else { continue }
+            guard let playback = feedVideos[neighbor].playback_url, let url = URL(string: playback) else { continue }
+            keep.insert(url)
+            if postedFeedPlayerCache[url] == nil {
+                let prepared = AVPlayer(url: url)
+                prepared.pause()
+                postedFeedPlayerCache[url] = prepared
+            }
+        }
+
+        let stale = postedFeedPlayerCache.keys.filter { !keep.contains($0) }
+        for key in stale {
+            postedFeedPlayerCache[key]?.pause()
+            postedFeedPlayerCache.removeValue(forKey: key)
+        }
     }
 
     private func handlePostedFeedDragEnded(_ value: DragGesture.Value, project: FeedProjectSummary) {
@@ -671,5 +726,24 @@ struct CreatorPostedFeedView: View {
             return formatter.string(from: date)
         }
         return iso8601
+    }
+
+    private var postedFeedCommentBar: some View {
+        ZStack(alignment: .bottom) {
+            Color.black
+                .frame(height: appBottomBarHeight)
+            HStack {
+                Text("コメントする...")
+                    .font(.body)
+                    .foregroundStyle(.white.opacity(0.85))
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 36)
+            .background(Color.white.opacity(0.12))
+            .clipShape(Capsule())
+            .padding(.horizontal, 14)
+            .padding(.bottom, 8)
+        }
     }
 }

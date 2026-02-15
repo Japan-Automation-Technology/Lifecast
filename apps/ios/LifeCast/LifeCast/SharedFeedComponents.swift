@@ -1,4 +1,8 @@
 import SwiftUI
+import AVFoundation
+import UIKit
+
+let appBottomBarHeight: CGFloat = 50
 
 enum FeedSwipeAction {
     case openPanel
@@ -86,6 +90,145 @@ struct FeedPageIndicatorDots: View {
                     .frame(width: 6, height: 6)
             }
         }
+    }
+}
+
+struct InteractiveVerticalFeedPager<Item: Identifiable, ItemView: View>: View {
+    let items: [Item]
+    @Binding var currentIndex: Int
+    let verticalDragDisabled: Bool
+    let onWillMove: () -> Void
+    let onDidMove: () -> Void
+    let onNonVerticalEnded: (DragGesture.Value) -> Void
+    @ViewBuilder let content: (_ item: Item, _ isActive: Bool) -> ItemView
+
+    @State private var dragOffset: CGFloat = 0
+    @State private var dragDirection: Int = 0
+    @State private var containerHeight: CGFloat = 0
+
+    private var currentItem: Item? {
+        guard currentIndex >= 0, currentIndex < items.count else { return nil }
+        return items[currentIndex]
+    }
+
+    private var neighborItem: Item? {
+        guard dragDirection != 0 else { return nil }
+        let neighbor = currentIndex + (dragDirection < 0 ? 1 : -1)
+        guard neighbor >= 0, neighbor < items.count else { return nil }
+        return items[neighbor]
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                if let neighbor = neighborItem {
+                    content(neighbor, false)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .background(Color.black)
+                        .offset(y: dragDirection < 0
+                            ? geo.size.height + dragOffset
+                            : -geo.size.height + dragOffset
+                        )
+                }
+
+                if let current = currentItem {
+                    content(current, true)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .background(Color.black)
+                        .offset(y: dragOffset)
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .clipped()
+            .onAppear {
+                containerHeight = geo.size.height
+            }
+            .onChange(of: geo.size.height) { _, newValue in
+                containerHeight = newValue
+            }
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 8)
+                    .onChanged { value in
+                        handleDragChanged(value)
+                    }
+                    .onEnded { value in
+                        handleDragEnded(value)
+                    }
+            )
+        }
+    }
+
+    private func handleDragChanged(_ value: DragGesture.Value) {
+        guard !verticalDragDisabled else { return }
+
+        let dx = value.translation.width
+        let dy = value.translation.height
+        guard abs(dy) > abs(dx) else { return }
+
+        if dy < 0, currentIndex < items.count - 1 {
+            dragDirection = -1
+            dragOffset = max(dy, -containerHeight)
+        } else if dy > 0, currentIndex > 0 {
+            dragDirection = 1
+            dragOffset = min(dy, containerHeight)
+        }
+    }
+
+    private func handleDragEnded(_ value: DragGesture.Value) {
+        guard dragDirection != 0 else {
+            onNonVerticalEnded(value)
+            return
+        }
+
+        let direction = dragDirection
+        let threshold = min(140, max(70, containerHeight * 0.18))
+        let shouldAdvance = abs(dragOffset) > threshold
+
+        guard shouldAdvance else {
+            withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.9)) {
+                dragOffset = 0
+            }
+            dragDirection = 0
+            return
+        }
+
+        let targetOffset = direction < 0 ? -containerHeight : containerHeight
+        onWillMove()
+        withAnimation(.interactiveSpring(response: 0.2, dampingFraction: 0.92)) {
+            dragOffset = targetOffset
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+            currentIndex += (direction < 0 ? 1 : -1)
+            dragOffset = 0
+            dragDirection = 0
+            onDidMove()
+        }
+    }
+}
+
+struct FillVideoPlayerView: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerContainerView {
+        let view = PlayerContainerView()
+        view.playerLayer.videoGravity = .resizeAspectFill
+        view.playerLayer.player = player
+        return view
+    }
+
+    func updateUIView(_ uiView: PlayerContainerView, context: Context) {
+        if uiView.playerLayer.player !== player {
+            uiView.playerLayer.player = player
+        }
+    }
+}
+
+final class PlayerContainerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+
+    var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
     }
 }
 
