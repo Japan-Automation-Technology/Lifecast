@@ -18,31 +18,38 @@ struct MeTabView: View {
     @State private var showNetwork = false
     @State private var selectedNetworkTab: CreatorNetworkTab = .following
     @State private var showUserSwitcher = false
+    @State private var showEditProfile = false
+    
+    private var currentUsername: String {
+        myProfile?.username ?? "lifecast_maker"
+    }
+    
+    private var currentDisplayName: String {
+        let name = (myProfile?.display_name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? currentUsername : name
+    }
 
     var body: some View {
         NavigationStack {
             Group {
                 if isAuthenticated {
                     VStack(spacing: 16) {
+                        meHeader
                         VStack(spacing: 8) {
-                            Circle()
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(width: 90, height: 90)
-                            Text("@\(myProfile?.username ?? "lifecast_maker")")
+                            profileAvatar(urlString: myProfile?.avatar_url, size: 90)
+                            Text(currentDisplayName)
                                 .font(.headline)
-                            if let displayName = myProfile?.display_name, !displayName.isEmpty {
-                                Text(displayName)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
                             HStack(spacing: 28) {
                                 profileStatButton(value: myProfileStats?.following_count ?? 0, label: "Following", tab: .following)
                                 profileStatButton(value: myProfileStats?.followers_count ?? 0, label: "Followers", tab: .followers)
                                 profileStatButton(value: myProfileStats?.supported_project_count ?? 0, label: "Support", tab: .support)
                             }
-                            Button("Edit Profile") {}
+                            Button("Edit Profile") {
+                                showEditProfile = true
+                            }
                                 .buttonStyle(.bordered)
                         }
+                        .padding(.top, -8)
 
                         ProfileTabIconStrip(selectedIndex: $selectedIndex)
                             .padding(.horizontal, 16)
@@ -72,6 +79,7 @@ struct MeTabView: View {
                     }
                 } else {
                     VStack(spacing: 14) {
+                        meHeader
                         Spacer()
                         Image(systemName: "person.crop.circle.badge.exclamationmark")
                             .font(.system(size: 46))
@@ -111,15 +119,7 @@ struct MeTabView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("User") {
-                        showUserSwitcher = true
-                    }
-                    .font(.caption.weight(.semibold))
-                }
-            }
-            .sheet(isPresented: $showUserSwitcher) {
+            .navigationDestination(isPresented: $showUserSwitcher) {
                 DevUserSwitcherSheet(
                     client: client,
                     onSwitched: {
@@ -129,7 +129,43 @@ struct MeTabView: View {
                     }
                 )
             }
+            .sheet(isPresented: $showEditProfile) {
+                EditProfileView(
+                    client: client,
+                    profile: myProfile,
+                    onSaved: {
+                        onRefreshProfile()
+                    }
+                )
+            }
+            .toolbar(.hidden, for: .navigationBar)
         }
+    }
+
+    private var meHeader: some View {
+        ZStack {
+            Text("@\(currentUsername)")
+                .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .padding(.horizontal, 56)
+            HStack {
+                Spacer()
+                Button {
+                    showUserSwitcher = true
+                } label: {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.trailing, 2)
+        }
+        .frame(height: 30)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
     }
 
     private func profileStatButton(value: Int, label: String, tab: CreatorNetworkTab) -> some View {
@@ -155,6 +191,25 @@ struct MeTabView: View {
         return "\(value)"
     }
 
+    @ViewBuilder
+    private func profileAvatar(urlString: String?, size: CGFloat) -> some View {
+        if let urlString, let url = URL(string: urlString) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                default:
+                    Circle().fill(Color.gray.opacity(0.3))
+                }
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        } else {
+            Circle()
+                .fill(Color.gray.opacity(0.3))
+                .frame(width: size, height: size)
+        }
+    }
 }
 
 struct DevUserSwitcherSheet: View {
@@ -165,94 +220,80 @@ struct DevUserSwitcherSheet: View {
     @State private var rows: [DevAuthUser] = []
     @State private var loading = false
     @State private var errorText = ""
-    @State private var email = ""
-    @State private var password = ""
-    @State private var username = ""
-    @State private var displayName = ""
     @State private var signedInUserEmail = ""
-    @State private var signedInUserId = ""
     @State private var isSignedIn = false
 
     var body: some View {
         NavigationStack {
-            List {
-                if isSignedIn {
-                    Section("Session") {
-                        LabeledContent("User ID", value: signedInUserId)
-                            .font(.caption)
-                        if !signedInUserEmail.isEmpty {
-                            LabeledContent("Email", value: signedInUserEmail)
-                                .font(.caption)
-                        }
-                        Button("Sign Out", role: .destructive) {
-                            Task { await signOut() }
-                        }
+            VStack(spacing: 0) {
+                HStack {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.primary)
                     }
-                } else {
-                    Section("Email / Password") {
-                        TextField("Email", text: $email)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.emailAddress)
-                        SecureField("Password", text: $password)
-                        TextField("Username (Sign Up)", text: $username)
-                            .textInputAutocapitalization(.never)
-                        TextField("Display Name (Sign Up)", text: $displayName)
-
-                        HStack {
-                            Button("Sign In") {
-                                Task { await signInWithEmail() }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            Button("Sign Up") {
-                                Task { await signUpWithEmail() }
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-
-                    Section("OAuth") {
-                        Button("Continue with Google") {
-                            Task { await openOAuth(provider: "google") }
-                        }
-                        Button("Continue with Apple") {
-                            Task { await openOAuth(provider: "apple") }
-                        }
-                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                    Text("設定")
+                        .font(.headline)
+                    Spacer()
+                    Color.clear.frame(width: 18, height: 18)
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
 
-                Section("Dev User Switch") {
-                    ForEach(rows) { row in
-                        Button {
-                            Task {
-                                await switchUser(row.user_id)
+                List {
+                    Section("Account") {
+                        if isSignedIn {
+                            if !signedInUserEmail.isEmpty {
+                                Text(signedInUserEmail)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
                             }
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("@\(row.username)")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.primary)
-                                    if let displayName = row.display_name, !displayName.isEmpty {
-                                        Text(displayName)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Text(row.user_id.uuidString)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if row.is_creator {
-                                    Text("Creator")
-                                        .font(.caption2.bold())
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(Color.green.opacity(0.15))
-                                        .clipShape(Capsule())
-                                }
+                            Button("Sign Out", role: .destructive) {
+                                Task { await signOut() }
                             }
+                        } else {
+                            Text("Not signed in")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
+                    }
+
+                    Section("Dev User Switch") {
+                        ForEach(rows) { row in
+                            Button {
+                                Task {
+                                    await switchUser(row.user_id)
+                                }
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("@\(row.username)")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                        if let displayName = row.display_name, !displayName.isEmpty {
+                                            Text(displayName)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    if row.is_creator {
+                                        Text("Creator")
+                                            .font(.caption2.bold())
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.green.opacity(0.15))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
             }
@@ -266,12 +307,8 @@ struct DevUserSwitcherSheet: View {
                     ContentUnavailableView("No users", systemImage: "person.3")
                 }
             }
-            .navigationTitle("Switch User")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
-            }
+            .navigationTitle("設定")
+            .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .bottom) {
                 if !errorText.isEmpty {
                     Text(errorText)
@@ -306,56 +343,6 @@ struct DevUserSwitcherSheet: View {
         }
     }
 
-    private func signInWithEmail() async {
-        loading = true
-        defer { loading = false }
-        do {
-            _ = try await client.signInWithEmail(
-                email: email.trimmingCharacters(in: .whitespacesAndNewlines),
-                password: password
-            )
-            errorText = ""
-            await refreshSessionState()
-            onSwitched()
-            dismiss()
-        } catch {
-            errorText = error.localizedDescription
-        }
-    }
-
-    private func signUpWithEmail() async {
-        loading = true
-        defer { loading = false }
-        do {
-            _ = try await client.signUpWithEmail(
-                email: email.trimmingCharacters(in: .whitespacesAndNewlines),
-                password: password,
-                username: username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : username.trimmingCharacters(in: .whitespacesAndNewlines),
-                displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            )
-            errorText = ""
-            await refreshSessionState()
-            onSwitched()
-            dismiss()
-        } catch {
-            errorText = error.localizedDescription
-        }
-    }
-
-    private func openOAuth(provider: String) async {
-        loading = true
-        defer { loading = false }
-        do {
-            let url = try await client.oauthURL(provider: provider, redirectTo: "lifecast://auth/callback")
-            errorText = ""
-            await MainActor.run {
-                UIApplication.shared.open(url)
-            }
-        } catch {
-            errorText = error.localizedDescription
-        }
-    }
-
     private func switchUser(_ userId: UUID) async {
         loading = true
         defer { loading = false }
@@ -378,7 +365,6 @@ struct DevUserSwitcherSheet: View {
             errorText = ""
             isSignedIn = false
             signedInUserEmail = ""
-            signedInUserId = ""
             onSwitched()
         } catch {
             errorText = error.localizedDescription
@@ -389,18 +375,177 @@ struct DevUserSwitcherSheet: View {
         guard client.hasAuthSession else {
             isSignedIn = false
             signedInUserEmail = ""
-            signedInUserId = ""
             return
         }
         do {
             let session = try await client.getAuthMe()
             isSignedIn = true
-            signedInUserId = session.user_id.uuidString
             signedInUserEmail = session.profile?.display_name ?? ""
         } catch {
             isSignedIn = false
             signedInUserEmail = ""
-            signedInUserId = ""
+        }
+    }
+}
+
+struct EditProfileView: View {
+    let client: LifeCastAPIClient
+    let profile: CreatorPublicProfile?
+    let onSaved: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var displayName: String
+    @State private var bio: String
+    @State private var avatarURL: String?
+    @State private var avatarPickerItem: PhotosPickerItem?
+    @State private var avatarSelection: SelectedProjectImage?
+    @State private var saving = false
+    @State private var errorText = ""
+
+    init(client: LifeCastAPIClient, profile: CreatorPublicProfile?, onSaved: @escaping () -> Void) {
+        self.client = client
+        self.profile = profile
+        self.onSaved = onSaved
+        _displayName = State(initialValue: profile?.display_name ?? "")
+        _bio = State(initialValue: profile?.bio ?? "")
+        _avatarURL = State(initialValue: profile?.avatar_url)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Profile") {
+                    HStack {
+                        Spacer()
+                        avatarPreview
+                        Spacer()
+                    }
+                    PhotosPicker(selection: $avatarPickerItem, matching: .images, photoLibrary: .shared()) {
+                        Label(avatarSelection == nil ? "Select Profile Image" : "Change Profile Image", systemImage: "photo")
+                    }
+                    TextField("Display name", text: $displayName)
+                    TextField("Bio", text: $bio, axis: .vertical)
+                        .lineLimit(3...5)
+                }
+
+                if !errorText.isEmpty {
+                    Section {
+                        Text(errorText)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("Edit Profile")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(saving ? "Saving..." : "Save") {
+                        Task { await saveProfile() }
+                    }
+                    .disabled(saving)
+                }
+            }
+            .onChange(of: avatarPickerItem) { _, newValue in
+                Task { await loadAvatar(from: newValue) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var avatarPreview: some View {
+        if let avatarSelection, let uiImage = UIImage(data: avatarSelection.data) {
+            Image(uiImage: uiImage)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 96, height: 96)
+                .clipShape(Circle())
+        } else if let avatarURL, let url = URL(string: avatarURL) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                default:
+                    Circle().fill(Color.gray.opacity(0.3))
+                }
+            }
+            .frame(width: 96, height: 96)
+            .clipShape(Circle())
+        } else {
+            Circle()
+                .fill(Color.gray.opacity(0.3))
+                .frame(width: 96, height: 96)
+        }
+    }
+
+    private func loadAvatar(from pickerItem: PhotosPickerItem?) async {
+        guard let pickerItem else {
+            await MainActor.run {
+                avatarSelection = nil
+            }
+            return
+        }
+        do {
+            guard let data = try await pickerItem.loadTransferable(type: Data.self) else {
+                throw NSError(domain: "LifeCastProfile", code: -1, userInfo: [NSLocalizedDescriptionKey: "Could not read selected image"])
+            }
+            let fileName = pickerItem.itemIdentifier.map { "\($0).jpg" } ?? "profile-avatar.jpg"
+            let contentType = pickerItem.supportedContentTypes.first?.preferredMIMEType ?? UTType.jpeg.preferredMIMEType ?? "image/jpeg"
+            await MainActor.run {
+                avatarSelection = SelectedProjectImage(data: data, fileName: fileName, contentType: contentType)
+                errorText = ""
+            }
+        } catch {
+            await MainActor.run {
+                avatarSelection = nil
+                errorText = error.localizedDescription
+            }
+        }
+    }
+
+    private func saveProfile() async {
+        await MainActor.run {
+            saving = true
+            errorText = ""
+        }
+        defer {
+            Task { @MainActor in
+                saving = false
+            }
+        }
+
+        do {
+            var nextAvatarURL = avatarURL
+            if let avatarSelection {
+                nextAvatarURL = try await client.uploadProfileImage(
+                    data: avatarSelection.data,
+                    fileName: avatarSelection.fileName,
+                    contentType: avatarSelection.contentType
+                )
+            }
+
+            let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedBio = bio.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            _ = try await client.updateMyProfile(
+                displayName: normalizedDisplayName.isEmpty ? nil : normalizedDisplayName,
+                bio: normalizedBio.isEmpty ? nil : normalizedBio,
+                avatarURL: nextAvatarURL
+            )
+
+            await MainActor.run {
+                onSaved()
+                dismiss()
+            }
+        } catch {
+            await MainActor.run {
+                errorText = error.localizedDescription
+            }
         }
     }
 }

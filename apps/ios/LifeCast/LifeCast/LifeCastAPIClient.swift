@@ -245,6 +245,12 @@ struct UploadProjectImageResult: Decodable {
     let image_url: String
 }
 
+struct UpdateMyProfileRequest: Encodable {
+    let display_name: String?
+    let bio: String?
+    let avatar_url: String?
+}
+
 struct AuthMeResult: Decodable {
     let user_id: UUID
     let auth_source: String
@@ -917,6 +923,30 @@ final class LifeCastAPIClient {
             idempotencyKey: "ios-project-image-\(UUID().uuidString)"
         )
         return result.image_url
+    }
+
+    func uploadProfileImage(data: Data, fileName: String?, contentType: String) async throws -> String {
+        let body = UploadProjectImageRequest(
+            file_name: fileName,
+            content_type: contentType,
+            data_base64: data.base64EncodedString()
+        )
+        let result: UploadProjectImageResult = try await send(
+            path: "/v1/profiles/images",
+            method: "POST",
+            body: body,
+            idempotencyKey: "ios-profile-image-\(UUID().uuidString)"
+        )
+        return result.image_url
+    }
+
+    func updateMyProfile(displayName: String?, bio: String?, avatarURL: String?) async throws -> MyProfileResult {
+        try await send(
+            path: "/v1/me/profile",
+            method: "PATCH",
+            body: UpdateMyProfileRequest(display_name: displayName, bio: bio, avatar_url: avatarURL),
+            idempotencyKey: "ios-profile-update-\(UUID().uuidString)"
+        )
     }
 
     func deleteProject(projectId: UUID) async throws {

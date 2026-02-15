@@ -1,5 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type { PoolClient } from "pg";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { extname, resolve } from "node:path";
 import { z } from "zod";
 import { requireRequestUserId } from "../auth/requestContext.js";
 import { fail, ok } from "../response.js";
@@ -19,6 +22,24 @@ const networkQuery = z.object({
   tab: z.enum(["followers", "following", "support"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
+
+const profileImageUploadBody = z.object({
+  file_name: z.string().max(255).optional(),
+  content_type: z.string().max(100),
+  data_base64: z.string().min(1),
+});
+
+const updateMyProfileBody = z
+  .object({
+    display_name: z.string().max(80).optional(),
+    bio: z.string().max(500).optional(),
+    avatar_url: z.string().url().max(2048).optional().nullable(),
+  })
+  .refine((value) => value.display_name !== undefined || value.bio !== undefined || value.avatar_url !== undefined, {
+    message: "At least one field must be provided",
+  });
+
+const PROFILE_IMAGE_ROOT = resolve(process.cwd(), ".data/profile-images");
 
 async function loadProfileStats(client: PoolClient, creatorUserId: string, excludeCreatorUserId?: string) {
   let followersCount = 0;
@@ -852,6 +873,201 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
           profile_stats: profileStats,
         }),
       );
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post("/v1/profiles/images", async (req, reply) => {
+    const profileUserId = requireRequestUserId(req, reply);
+    if (!profileUserId) return;
+
+    const body = profileImageUploadBody.safeParse(req.body);
+    if (!body.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid image payload"));
+    }
+
+    const contentType = body.data.content_type.toLowerCase().trim();
+    if (!contentType.startsWith("image/")) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "content_type must be image/*"));
+    }
+
+    let data: Buffer;
+    try {
+      data = Buffer.from(body.data.data_base64, "base64");
+    } catch {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid base64 image data"));
+    }
+
+    if (data.length === 0 || data.length > 8 * 1024 * 1024) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Image size must be between 1 byte and 8MB"));
+    }
+
+    const ext = (() => {
+      if (contentType === "image/jpeg" || contentType === "image/jpg") return "jpg";
+      if (contentType === "image/png") return "png";
+      if (contentType === "image/webp") return "webp";
+      if (contentType === "image/heic") return "heic";
+      return "bin";
+    })();
+
+    const imageId = randomUUID();
+    const fileName = `${imageId}.${ext}`;
+    const filePath = resolve(PROFILE_IMAGE_ROOT, fileName);
+    await mkdir(PROFILE_IMAGE_ROOT, { recursive: true });
+    await writeFile(filePath, data);
+
+    const imageUrl = `${req.protocol}://${req.headers.host}/v1/profiles/images/${fileName}`;
+    return reply.send(ok({ image_url: imageUrl }));
+  });
+
+  app.get("/v1/profiles/images/:fileName", async (req, reply) => {
+    const fileName = (req.params as { fileName: string }).fileName;
+    const isValid = /^[0-9a-fA-F-]+\.(jpg|jpeg|png|webp|heic|bin)$/.test(fileName);
+    if (!isValid) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid file name"));
+    }
+
+    const filePath = resolve(PROFILE_IMAGE_ROOT, fileName);
+    let binary: Buffer;
+    try {
+      binary = await readFile(filePath);
+    } catch {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Image not found"));
+    }
+
+    const ext = extname(fileName).toLowerCase();
+    const responseType =
+      ext === ".jpg" || ext === ".jpeg"
+        ? "image/jpeg"
+        : ext === ".png"
+          ? "image/png"
+          : ext === ".webp"
+            ? "image/webp"
+            : ext === ".heic"
+              ? "image/heic"
+              : "application/octet-stream";
+    reply.type(responseType);
+    return reply.send(binary);
+  });
+
+  app.patch("/v1/me/profile", async (req, reply) => {
+    const profileUserId = requireRequestUserId(req, reply);
+    if (!profileUserId) return;
+
+    const body = updateMyProfileBody.safeParse(req.body);
+    if (!body.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid profile payload"));
+    }
+    if (!hasDb() || !dbPool) {
+      return reply.code(503).send(fail("SERVICE_UNAVAILABLE", "Database is not configured"));
+    }
+
+    const displayName =
+      body.data.display_name === undefined ? undefined : body.data.display_name.trim() === "" ? null : body.data.display_name.trim();
+    if (displayName !== undefined && displayName !== null && displayName.length > 80) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "display_name must be <= 80 chars"));
+    }
+
+    const bio = body.data.bio === undefined ? undefined : body.data.bio.trim() === "" ? null : body.data.bio.trim();
+    const avatarUrl = body.data.avatar_url === undefined ? undefined : body.data.avatar_url;
+
+    const client = await dbPool.connect();
+    try {
+      await client.query("begin");
+
+      const current = await client.query<{
+        display_name: string | null;
+        bio: string | null;
+        avatar_url: string | null;
+      }>(
+        `
+        select display_name, bio, avatar_url
+        from users
+        where id = $1
+        limit 1
+      `,
+        [profileUserId],
+      );
+      if (current.rows.length === 0) {
+        await client.query("rollback");
+        return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "User not found"));
+      }
+
+      const nextDisplayName = displayName === undefined ? current.rows[0].display_name : displayName;
+      const nextBio = bio === undefined ? current.rows[0].bio : bio;
+      const nextAvatarUrl = avatarUrl === undefined ? current.rows[0].avatar_url : avatarUrl;
+
+      await client.query(
+        `
+        update users
+        set
+          display_name = $2,
+          bio = $3,
+          avatar_url = $4,
+          updated_at = now()
+        where id = $1
+      `,
+        [profileUserId, nextDisplayName, nextBio, nextAvatarUrl],
+      );
+
+      await client.query(
+        `
+        insert into creator_profiles (creator_user_id, username, display_name, bio, avatar_url, created_at, updated_at)
+        select
+          u.id,
+          coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)),
+          $2,
+          $3,
+          $4,
+          now(),
+          now()
+        from users u
+        left join creator_profiles cp on cp.creator_user_id = u.id
+        where u.id = $1
+        on conflict (creator_user_id)
+        do update set
+          display_name = excluded.display_name,
+          bio = excluded.bio,
+          avatar_url = excluded.avatar_url,
+          updated_at = now()
+      `,
+        [profileUserId, nextDisplayName, nextBio, nextAvatarUrl],
+      );
+
+      const profileResult = await client.query<{
+        creator_user_id: string;
+        username: string;
+        display_name: string | null;
+        bio: string | null;
+        avatar_url: string | null;
+      }>(
+        `
+        select
+          u.id as creator_user_id,
+          coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
+          coalesce(cp.display_name, u.display_name) as display_name,
+          coalesce(cp.bio, u.bio) as bio,
+          coalesce(cp.avatar_url, u.avatar_url) as avatar_url
+        from users u
+        left join creator_profiles cp on cp.creator_user_id = u.id
+        where u.id = $1
+        limit 1
+      `,
+        [profileUserId],
+      );
+      const profileStats = await loadProfileStats(client, profileUserId, profileUserId);
+      await client.query("commit");
+
+      return reply.send(
+        ok({
+          profile: profileResult.rows[0],
+          profile_stats: profileStats,
+        }),
+      );
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
     } finally {
       client.release();
     }
