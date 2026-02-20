@@ -177,11 +177,13 @@ struct SupportFlowDemoView: View {
             }
         }
         .task {
-            await refreshAuthState()
-            await refreshMyVideos()
-            await refreshLiveSupportProject()
-            await refreshMyProfile()
-            await refreshFeedProjectsFromAPI()
+            async let feedTask: Void = refreshFeedProjectsFromAPI()
+            async let authTask: Void = refreshAuthState()
+            async let videosTask: Void = refreshMyVideos()
+            async let supportTask: Void = refreshLiveSupportProject()
+            async let profileTask: Void = refreshMyProfile()
+            await feedTask
+            _ = await (authTask, videosTask, supportTask, profileTask)
         }
         .onChange(of: selectedTab) { _, newValue in
             if newValue == 3 {
@@ -1162,20 +1164,59 @@ struct SupportFlowDemoView: View {
             rows = baseRows.filter { followingCreatorIds.contains($0.creator_user_id) }
         }
 
+        let quick = buildFastFeedProjects(from: rows)
+        await MainActor.run {
+            let previousVideoId = feedProjects[safe: currentFeedIndex]?.videoId
+            feedProjects = quick
+            if let previousVideoId,
+               let retained = quick.firstIndex(where: { $0.videoId == previousVideoId }) {
+                currentFeedIndex = retained
+            } else {
+                currentFeedIndex = min(currentFeedIndex, max(0, quick.count - 1))
+            }
+            syncHomeFeedPlayer()
+        }
+
         let updated = await buildExpandedFeedProjects(from: rows)
         await MainActor.run {
             let previousVideoId = feedProjects[safe: currentFeedIndex]?.videoId
-            feedProjects = updated
+            if !updated.isEmpty || quick.isEmpty {
+                feedProjects = updated
+            }
             if let previousVideoId,
-               let retained = updated.firstIndex(where: { $0.videoId == previousVideoId }) {
+               let retained = feedProjects.firstIndex(where: { $0.videoId == previousVideoId }) {
                 currentFeedIndex = retained
             } else {
-                currentFeedIndex = min(currentFeedIndex, max(0, updated.count - 1))
+                currentFeedIndex = min(currentFeedIndex, max(0, feedProjects.count - 1))
             }
             syncHomeFeedPlayer()
         }
         await prefetchFeedProjectDetails(around: currentFeedIndex)
         await refreshCurrentVideoEngagement()
+    }
+
+    private func buildFastFeedProjects(from rows: [FeedProjectRow]) -> [FeedProjectSummary] {
+        rows.compactMap { row in
+            guard row.playback_url != nil else { return nil }
+            return FeedProjectSummary(
+                id: row.project_id,
+                creatorId: row.creator_user_id,
+                username: row.username,
+                creatorAvatarURL: row.creator_avatar_url,
+                caption: row.caption,
+                videoId: row.video_id,
+                playbackURL: row.playback_url,
+                thumbnailURL: row.thumbnail_url,
+                minPlanPriceMinor: row.min_plan_price_minor,
+                goalAmountMinor: row.goal_amount_minor,
+                fundedAmountMinor: row.funded_amount_minor,
+                remainingDays: row.remaining_days,
+                likes: row.likes,
+                comments: row.comments,
+                isLikedByCurrentUser: row.is_liked_by_current_user,
+                isSupportedByCurrentUser: row.is_supported_by_current_user
+            )
+        }
     }
 
     private func fetchFollowingCreatorIds() async -> Set<UUID> {
