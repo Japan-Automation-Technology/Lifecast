@@ -134,6 +134,7 @@ struct FeedProjectRow: Decodable, Identifiable {
     let remaining_days: Int
     let likes: Int
     let comments: Int
+    let is_liked_by_current_user: Bool
     let is_supported_by_current_user: Bool
 
     var id: UUID { project_id }
@@ -141,6 +142,37 @@ struct FeedProjectRow: Decodable, Identifiable {
 
 struct FeedProjectsResult: Decodable {
     let rows: [FeedProjectRow]
+}
+
+struct VideoEngagementResult: Decodable {
+    let likes: Int
+    let comments: Int
+    let is_liked_by_current_user: Bool
+}
+
+struct VideoCommentRow: Decodable, Identifiable {
+    let comment_id: UUID
+    let user_id: UUID
+    let username: String
+    let display_name: String?
+    let body: String
+    let created_at: String
+    let likes: Int
+    let is_supporter: Bool
+
+    var id: UUID { comment_id }
+}
+
+struct VideoCommentsResult: Decodable {
+    let rows: [VideoCommentRow]
+}
+
+struct CreateVideoCommentRequest: Encodable {
+    let body: String
+}
+
+struct CreateVideoCommentResult: Decodable {
+    let comment: VideoCommentRow
 }
 
 enum CreatorNetworkTab: String, CaseIterable {
@@ -680,6 +712,73 @@ final class LifeCastAPIClient {
 
         let envelope = try JSONDecoder().decode(APIEnvelope<FeedProjectsResult>.self, from: data)
         return envelope.result.rows
+    }
+
+    func getVideoEngagement(videoId: UUID) async throws -> VideoEngagementResult {
+        try await send(
+            path: "/v1/videos/\(videoId.uuidString)/engagement",
+            method: "GET",
+            body: Optional<String>.none,
+            idempotencyKey: nil
+        )
+    }
+
+    func likeVideo(videoId: UUID) async throws -> VideoEngagementResult {
+        try await send(
+            path: "/v1/videos/\(videoId.uuidString)/like",
+            method: "PUT",
+            body: Optional<String>.none,
+            idempotencyKey: "ios-like-video-\(videoId.uuidString)"
+        )
+    }
+
+    func unlikeVideo(videoId: UUID) async throws -> VideoEngagementResult {
+        try await send(
+            path: "/v1/videos/\(videoId.uuidString)/like",
+            method: "DELETE",
+            body: Optional<String>.none,
+            idempotencyKey: "ios-unlike-video-\(videoId.uuidString)"
+        )
+    }
+
+    func listVideoComments(videoId: UUID, limit: Int = 50) async throws -> [VideoCommentRow] {
+        guard var components = URLComponents(
+            url: baseURL.appendingPathComponent("v1/videos/\(videoId.uuidString)/comments"),
+            resolvingAgainstBaseURL: false
+        ) else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid comments URL"])
+        }
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))")
+        ]
+        guard let url = components.url else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid comments URL"])
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        applyAuthHeaders(&request)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let payloadText = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "LifeCastAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: payloadText])
+        }
+
+        let envelope = try JSONDecoder().decode(APIEnvelope<VideoCommentsResult>.self, from: data)
+        return envelope.result.rows
+    }
+
+    func createVideoComment(videoId: UUID, body: String) async throws -> VideoCommentRow {
+        let result: CreateVideoCommentResult = try await send(
+            path: "/v1/videos/\(videoId.uuidString)/comments",
+            method: "POST",
+            body: CreateVideoCommentRequest(body: body),
+            idempotencyKey: "ios-comment-video-\(videoId.uuidString)-\(UUID().uuidString)"
+        )
+        return result.comment
     }
 
     func getCreatorPage(creatorUserId: UUID) async throws -> CreatorPublicPageResult {

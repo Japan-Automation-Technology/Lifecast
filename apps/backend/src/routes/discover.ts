@@ -27,6 +27,14 @@ const supportedProjectsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
+const videoCommentsQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+const createVideoCommentBody = z.object({
+  body: z.string().trim().min(1).max(400),
+});
+
 const profileImageUploadBody = z.object({
   file_name: z.string().max(255).optional(),
   content_type: z.string().max(100),
@@ -222,6 +230,44 @@ async function loadSupportedProjects(client: PoolClient, supporterUserId: string
   }));
 }
 
+async function loadVideoEngagement(client: PoolClient, videoId: string, viewerUserId: string | null) {
+  const result = await client.query<{
+    likes: string | number;
+    comments: string | number;
+    is_liked_by_current_user: boolean;
+  }>(
+    `
+      select
+        coalesce((
+          select count(*)
+          from video_likes vl
+          where vl.video_id = $1
+        ), 0) as likes,
+        coalesce((
+          select count(*)
+          from video_comments vc
+          where vc.video_id = $1
+        ), 0) as comments,
+        case
+          when $2::uuid is null then false
+          else exists(
+            select 1
+            from video_likes vl
+            where vl.video_id = $1
+              and vl.user_id = $2::uuid
+          )
+        end as is_liked_by_current_user
+    `,
+    [videoId, viewerUserId],
+  );
+
+  return {
+    likes: Number(result.rows[0]?.likes ?? 0),
+    comments: Number(result.rows[0]?.comments ?? 0),
+    is_liked_by_current_user: Boolean(result.rows[0]?.is_liked_by_current_user),
+  };
+}
+
 export async function registerDiscoverRoutes(app: FastifyInstance) {
   app.get("/v1/feed/projects", async (req, reply) => {
     const parsed = feedQuery.safeParse(req.query ?? {});
@@ -255,6 +301,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         remaining_days: string | number;
         likes: string | number;
         comments: string | number;
+        is_liked_by_current_user: boolean;
         is_supported_by_current_user: boolean;
       }>(
         `
@@ -279,8 +326,25 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             0,
             ceil(extract(epoch from (p.deadline_at - now())) / 86400.0)
           )::int as remaining_days,
-          0::int as likes,
-          0::int as comments,
+          coalesce((
+            select count(*)
+            from video_likes vl
+            where vl.video_id = latest_video.video_id
+          ), 0) as likes,
+          coalesce((
+            select count(*)
+            from video_comments vc
+            where vc.video_id = latest_video.video_id
+          ), 0) as comments,
+          case
+            when $1::uuid is null then false
+            else exists(
+              select 1
+              from video_likes vl
+              where vl.video_id = latest_video.video_id
+                and vl.user_id = $1::uuid
+            )
+          end as is_liked_by_current_user,
           case
             when $1::uuid is null then false
             else exists(
@@ -335,10 +399,275 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             remaining_days: Number(row.remaining_days),
             likes: Number(row.likes),
             comments: Number(row.comments),
+            is_liked_by_current_user: row.is_liked_by_current_user,
             is_supported_by_current_user: row.is_supported_by_current_user,
           })),
         }),
       );
+    } finally {
+      client.release();
+    }
+  });
+
+  app.get("/v1/videos/:videoId/engagement", async (req, reply) => {
+    const videoId = (req.params as { videoId: string }).videoId;
+    if (!z.string().uuid().safeParse(videoId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid video id"));
+    }
+    if (!hasDb() || !dbPool) {
+      return reply.send(ok({ likes: 0, comments: 0, is_liked_by_current_user: false }));
+    }
+
+    const viewerUserId = req.lifecastAuth.userId;
+    const client = await dbPool.connect();
+    try {
+      const exists = await client.query<{ video_id: string }>(
+        `
+        select video_id
+        from video_assets
+        where video_id = $1
+        limit 1
+      `,
+        [videoId],
+      );
+      if (exists.rows.length === 0) {
+        return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Video not found"));
+      }
+      const metrics = await loadVideoEngagement(client, videoId, viewerUserId);
+      return reply.send(ok(metrics));
+    } finally {
+      client.release();
+    }
+  });
+
+  app.put("/v1/videos/:videoId/like", async (req, reply) => {
+    const viewerUserId = requireRequestUserId(req, reply);
+    if (!viewerUserId) return;
+    const videoId = (req.params as { videoId: string }).videoId;
+    if (!z.string().uuid().safeParse(videoId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid video id"));
+    }
+    if (!hasDb() || !dbPool) {
+      return reply.send(ok({ likes: 0, comments: 0, is_liked_by_current_user: true }));
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const exists = await client.query<{ video_id: string }>(
+        `
+        select video_id
+        from video_assets
+        where video_id = $1
+        limit 1
+      `,
+        [videoId],
+      );
+      if (exists.rows.length === 0) {
+        return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Video not found"));
+      }
+      await client.query(
+        `
+        insert into video_likes (video_id, user_id, created_at)
+        values ($1, $2, now())
+        on conflict do nothing
+      `,
+        [videoId, viewerUserId],
+      );
+      const metrics = await loadVideoEngagement(client, videoId, viewerUserId);
+      return reply.send(ok(metrics));
+    } finally {
+      client.release();
+    }
+  });
+
+  app.delete("/v1/videos/:videoId/like", async (req, reply) => {
+    const viewerUserId = requireRequestUserId(req, reply);
+    if (!viewerUserId) return;
+    const videoId = (req.params as { videoId: string }).videoId;
+    if (!z.string().uuid().safeParse(videoId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid video id"));
+    }
+    if (!hasDb() || !dbPool) {
+      return reply.send(ok({ likes: 0, comments: 0, is_liked_by_current_user: false }));
+    }
+
+    const client = await dbPool.connect();
+    try {
+      await client.query(
+        `
+        delete from video_likes
+        where video_id = $1
+          and user_id = $2
+      `,
+        [videoId, viewerUserId],
+      );
+      const metrics = await loadVideoEngagement(client, videoId, viewerUserId);
+      return reply.send(ok(metrics));
+    } finally {
+      client.release();
+    }
+  });
+
+  app.get("/v1/videos/:videoId/comments", async (req, reply) => {
+    const videoId = (req.params as { videoId: string }).videoId;
+    if (!z.string().uuid().safeParse(videoId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid video id"));
+    }
+    const parsed = videoCommentsQuery.safeParse(req.query ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid comments query"));
+    }
+    const limit = parsed.data.limit ?? 50;
+    if (!hasDb() || !dbPool) {
+      return reply.send(ok({ rows: [] }));
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const rows = await client.query<{
+        comment_id: string;
+        user_id: string;
+        username: string;
+        display_name: string | null;
+        body: string;
+        created_at: string;
+        is_supporter: boolean;
+      }>(
+        `
+        select
+          vc.id as comment_id,
+          vc.user_id,
+          coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
+          coalesce(cp.display_name, u.display_name) as display_name,
+          vc.body,
+          vc.created_at,
+          exists(
+            select 1
+            from video_assets va
+            join support_transactions st on st.supporter_user_id = vc.user_id
+            join projects p on p.id = st.project_id
+            where va.video_id = vc.video_id
+              and p.creator_user_id = va.creator_user_id
+              and st.status = 'succeeded'
+          ) as is_supporter
+        from video_comments vc
+        join users u on u.id = vc.user_id
+        left join creator_profiles cp on cp.creator_user_id = vc.user_id
+        where vc.video_id = $1
+        order by vc.created_at desc
+        limit $2
+      `,
+        [videoId, limit],
+      );
+      return reply.send(
+        ok({
+          rows: rows.rows.map((row) => ({
+            comment_id: row.comment_id,
+            user_id: row.user_id,
+            username: row.username,
+            display_name: row.display_name,
+            body: row.body,
+            created_at: row.created_at,
+            likes: 0,
+            is_supporter: row.is_supporter,
+          })),
+        }),
+      );
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post("/v1/videos/:videoId/comments", async (req, reply) => {
+    const viewerUserId = requireRequestUserId(req, reply);
+    if (!viewerUserId) return;
+    const videoId = (req.params as { videoId: string }).videoId;
+    if (!z.string().uuid().safeParse(videoId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid video id"));
+    }
+    const body = createVideoCommentBody.safeParse(req.body ?? {});
+    if (!body.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid comment payload"));
+    }
+    if (!hasDb() || !dbPool) {
+      return reply.send(
+        ok({
+          comment: {
+            comment_id: randomUUID(),
+            user_id: viewerUserId,
+            username: "you",
+            display_name: null,
+            body: body.data.body,
+            created_at: new Date().toISOString(),
+            likes: 0,
+            is_supporter: false,
+          },
+        }),
+      );
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const inserted = await client.query<{
+        comment_id: string;
+        user_id: string;
+        username: string;
+        display_name: string | null;
+        body: string;
+        created_at: string;
+        is_supporter: boolean;
+      }>(
+        `
+        with inserted as (
+          insert into video_comments (video_id, user_id, body, created_at)
+          values ($1, $2, $3, now())
+          returning id, video_id, user_id, body, created_at
+        )
+        select
+          i.id as comment_id,
+          i.user_id,
+          coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
+          coalesce(cp.display_name, u.display_name) as display_name,
+          i.body,
+          i.created_at,
+          exists(
+            select 1
+            from video_assets va
+            join support_transactions st on st.supporter_user_id = i.user_id
+            join projects p on p.id = st.project_id
+            where va.video_id = i.video_id
+              and p.creator_user_id = va.creator_user_id
+              and st.status = 'succeeded'
+          ) as is_supporter
+        from inserted i
+        join users u on u.id = i.user_id
+        left join creator_profiles cp on cp.creator_user_id = i.user_id
+      `,
+        [videoId, viewerUserId, body.data.body],
+      );
+      if (inserted.rows.length === 0) {
+        return reply.code(500).send(fail("INTERNAL_ERROR", "Failed to create comment"));
+      }
+      return reply.send(
+        ok({
+          comment: {
+            comment_id: inserted.rows[0].comment_id,
+            user_id: inserted.rows[0].user_id,
+            username: inserted.rows[0].username,
+            display_name: inserted.rows[0].display_name,
+            body: inserted.rows[0].body,
+            created_at: inserted.rows[0].created_at,
+            likes: 0,
+            is_supporter: inserted.rows[0].is_supporter,
+          },
+        }),
+      );
+    } catch (error) {
+      const pgError = error as { code?: string };
+      if (pgError.code === "23503") {
+        return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Video not found"));
+      }
+      throw error;
     } finally {
       client.release();
     }

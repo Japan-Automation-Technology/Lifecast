@@ -47,6 +47,7 @@ struct FeedProjectSummary: Identifiable {
     let remainingDays: Int
     let likes: Int
     let comments: Int
+    let isLikedByCurrentUser: Bool
     let isSupportedByCurrentUser: Bool
 }
 
@@ -103,6 +104,7 @@ let sampleProjects: [FeedProjectSummary] = [
         remainingDays: 12,
         likes: 4520,
         comments: 173,
+        isLikedByCurrentUser: false,
         isSupportedByCurrentUser: false
     ),
     FeedProjectSummary(
@@ -119,6 +121,7 @@ let sampleProjects: [FeedProjectSummary] = [
         remainingDays: 9,
         likes: 3210,
         comments: 108,
+        isLikedByCurrentUser: false,
         isSupportedByCurrentUser: false
     ),
     FeedProjectSummary(
@@ -135,6 +138,7 @@ let sampleProjects: [FeedProjectSummary] = [
         remainingDays: 18,
         likes: 2890,
         comments: 94,
+        isLikedByCurrentUser: false,
         isSupportedByCurrentUser: false
     )
 ]

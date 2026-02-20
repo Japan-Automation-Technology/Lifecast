@@ -724,6 +724,7 @@ struct CreatorPublicPageView: View {
                 remainingDays: remainingDays,
                 likes: 4500,
                 comments: 173,
+                isLikedByCurrentUser: false,
                 isSupportedByCurrentUser: page.viewer_relationship.is_supported
             )
         }
@@ -742,6 +743,7 @@ struct CreatorPublicPageView: View {
             remainingDays: 0,
             likes: 4500,
             comments: 173,
+            isLikedByCurrentUser: false,
             isSupportedByCurrentUser: page.viewer_relationship.is_supported
         )
     }

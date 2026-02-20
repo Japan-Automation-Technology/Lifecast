@@ -97,6 +97,7 @@ struct InteractiveVerticalFeedPager<Item: Identifiable, ItemView: View>: View {
     let items: [Item]
     @Binding var currentIndex: Int
     let verticalDragDisabled: Bool
+    let horizontalActionExclusionBottomInset: CGFloat
     let onWillMove: () -> Void
     let onDidMove: () -> Void
     let onNonVerticalEnded: (DragGesture.Value) -> Void
@@ -176,6 +177,13 @@ struct InteractiveVerticalFeedPager<Item: Identifiable, ItemView: View>: View {
 
     private func handleDragEnded(_ value: DragGesture.Value) {
         guard dragDirection != 0 else {
+            let startedInBottomExclusionZone =
+                horizontalActionExclusionBottomInset > 0 &&
+                value.startLocation.y >= (containerHeight - horizontalActionExclusionBottomInset)
+            let isHorizontal = abs(value.translation.width) > abs(value.translation.height)
+            if startedInBottomExclusionZone && isHorizontal {
+                return
+            }
             onNonVerticalEnded(value)
             return
         }
@@ -204,6 +212,52 @@ struct InteractiveVerticalFeedPager<Item: Identifiable, ItemView: View>: View {
             dragDirection = 0
             onDidMove()
         }
+    }
+}
+
+struct FeedPlaybackScrubber: View {
+    let progress: Double
+    let onScrubBegan: () -> Void
+    let onScrubChanged: (Double) -> Void
+    let onScrubEnded: (Double) -> Void
+
+    private func clamped(_ value: Double) -> Double {
+        min(max(value, 0), 1)
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let ratio = clamped(progress)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.35))
+                    .frame(height: 1)
+
+                Capsule()
+                    .fill(Color.white)
+                    .frame(width: geo.size.width * ratio, height: 1)
+
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 7, height: 7)
+                    .offset(x: max(0, geo.size.width * ratio - 3.5))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let next = clamped(value.location.x / max(geo.size.width, 1))
+                        onScrubBegan()
+                        onScrubChanged(next)
+                    }
+                    .onEnded { value in
+                        let next = clamped(value.location.x / max(geo.size.width, 1))
+                        onScrubEnded(next)
+                    }
+            )
+        }
+        .frame(height: 10)
     }
 }
 

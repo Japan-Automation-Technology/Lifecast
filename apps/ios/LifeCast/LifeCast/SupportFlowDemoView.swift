@@ -12,6 +12,11 @@ struct SupportFlowDemoView: View {
     @State private var currentFeedIndex = 0
     @State private var homeFeedPlayer: AVPlayer? = nil
     @State private var homeFeedPlayerCache: [URL: AVPlayer] = [:]
+    @State private var homeFeedPlayerObserver: Any?
+    @State private var homeFeedObservedPlayer: AVPlayer?
+    @State private var homeFeedPlaybackProgress: Double = 0
+    @State private var isHomeFeedScrubbing = false
+    @State private var isHomeFeedEdgeBoosting = false
     @State private var showFeedProjectPanel = false
     @State private var feedProjectDetail: MyProjectResult?
     @State private var feedProjectDetailLoading = false
@@ -35,6 +40,11 @@ struct SupportFlowDemoView: View {
     @State private var myVideosError = ""
     @State private var isAuthenticated = false
     @State private var showAuthSheet = false
+    @State private var commentsByVideoId: [UUID: [FeedComment]] = [:]
+    @State private var commentsLoading = false
+    @State private var commentsError = ""
+    @State private var pendingCommentBody = ""
+    @State private var commentsSubmitting = false
 
     @State private var errorText = ""
 
@@ -163,6 +173,7 @@ struct SupportFlowDemoView: View {
         }
         .onChange(of: selectedTab) { _, newValue in
             if newValue == 3 {
+                setHomeFeedEdgeBoosting(false)
                 homeFeedPlayer?.pause()
                 homeFeedPlayer = nil
                 Task {
@@ -177,6 +188,7 @@ struct SupportFlowDemoView: View {
                     await refreshFeedProjectsFromAPI()
                 }
             } else {
+                setHomeFeedEdgeBoosting(false)
                 homeFeedPlayer?.pause()
                 homeFeedPlayer = nil
                 for player in homeFeedPlayerCache.values {
@@ -194,6 +206,17 @@ struct SupportFlowDemoView: View {
         }
         .onChange(of: currentFeedIndex) { _, _ in
             syncHomeFeedPlayer()
+            Task {
+                await refreshCurrentVideoEngagement()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { note in
+            guard let endedItem = note.object as? AVPlayerItem else { return }
+            guard let current = homeFeedPlayer, current.currentItem === endedItem else { return }
+            current.seek(to: .zero)
+            if selectedTab == 0 && !showFeedProjectPanel {
+                current.play()
+            }
         }
     }
 
@@ -207,6 +230,7 @@ struct SupportFlowDemoView: View {
                         items: feedProjects,
                         currentIndex: $currentFeedIndex,
                         verticalDragDisabled: showFeedProjectPanel,
+                        horizontalActionExclusionBottomInset: 28,
                         onWillMove: {
                             homeFeedPlayer?.pause()
                             closeFeedProjectPanel()
@@ -285,6 +309,35 @@ struct SupportFlowDemoView: View {
                 endPoint: .bottom
             )
 
+            if useLivePlayer {
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        Color.clear
+                            .frame(width: min(72, max(52, geo.size.width * 0.14)))
+                            .contentShape(Rectangle())
+                            .onLongPressGesture(minimumDuration: 0.12, maximumDistance: 48, pressing: { pressing in
+                                setHomeFeedEdgeBoosting(pressing)
+                            }, perform: {})
+
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                toggleHomeFeedPlayback()
+                            }
+
+                        Color.clear
+                            .frame(width: min(72, max(52, geo.size.width * 0.14)))
+                            .contentShape(Rectangle())
+                            .onLongPressGesture(minimumDuration: 0.12, maximumDistance: 48, pressing: { pressing in
+                                setHomeFeedEdgeBoosting(pressing)
+                            }, perform: {})
+                    }
+                    .padding(.horizontal, 84)
+                    .padding(.top, 120)
+                    .padding(.bottom, appBottomBarHeight + 140)
+                }
+            }
+
             VStack(spacing: 8) {
                 HStack(alignment: .bottom) {
                     VStack(alignment: .leading, spacing: 10) {
@@ -314,7 +367,28 @@ struct SupportFlowDemoView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, appBottomBarHeight + 20)
+            .padding(.bottom, appBottomBarHeight - 14)
+            .offset(y: 22)
+
+            if useLivePlayer {
+                FeedPlaybackScrubber(
+                    progress: homeFeedPlaybackProgress,
+                    onScrubBegan: {
+                        isHomeFeedScrubbing = true
+                    },
+                    onScrubChanged: { progress in
+                        homeFeedPlaybackProgress = progress
+                        seekHomeFeedPlayer(toProgress: progress)
+                    },
+                    onScrubEnded: { progress in
+                        homeFeedPlaybackProgress = progress
+                        seekHomeFeedPlayer(toProgress: progress)
+                        isHomeFeedScrubbing = false
+                    }
+                )
+                .padding(.horizontal, 0)
+                .padding(.bottom, -3)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -450,22 +524,37 @@ struct SupportFlowDemoView: View {
 
     private func rightRail(project: FeedProjectSummary) -> some View {
         VStack(spacing: 16) {
-            Button(project.isSupportedByCurrentUser ? "Supported" : "Support") {
+            Button {
                 if project.isSupportedByCurrentUser { return }
                 Task {
                     await presentSupportFlow(for: project)
                 }
+            } label: {
+                Image(systemName: project.isSupportedByCurrentUser ? "checkmark" : "suit.heart.fill")
+                    .font(.system(size: 14, weight: .bold))
+                    .frame(width: 40, height: 40)
+                    .background(project.isSupportedByCurrentUser ? Color.green.opacity(0.9) : Color.pink.opacity(0.9))
+                    .foregroundStyle(.white)
+                    .clipShape(Circle())
             }
-            .font(.caption.bold())
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(project.isSupportedByCurrentUser ? Color.green.opacity(0.9) : Color.pink.opacity(0.9))
-            .foregroundStyle(.white)
-            .clipShape(Capsule())
+            .accessibilityLabel(project.isSupportedByCurrentUser ? "Supported" : "Support")
 
-            metricButton(icon: "heart.fill", value: project.likes)
+            metricButton(
+                icon: project.isLikedByCurrentUser ? "heart.fill" : "heart",
+                value: project.likes,
+                isActive: project.isLikedByCurrentUser
+            ) {
+                Task {
+                    await toggleLike(for: project)
+                }
+            }
             Button {
                 showComments = true
+                pendingCommentBody = ""
+                commentsError = ""
+                Task {
+                    await loadCommentsForCurrentVideo()
+                }
             } label: {
                 metricView(icon: "text.bubble.fill", value: project.comments)
             }
@@ -478,10 +567,11 @@ struct SupportFlowDemoView: View {
         .foregroundStyle(.white)
     }
 
-    private func metricButton(icon: String, value: Int) -> some View {
-        Button {} label: {
+    private func metricButton(icon: String, value: Int, isActive: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             metricView(icon: icon, value: value)
         }
+        .foregroundStyle(isActive ? Color.pink : Color.white)
     }
 
     private func metricView(icon: String, value: Int, labelOverride: String? = nil) -> some View {
@@ -522,31 +612,45 @@ struct SupportFlowDemoView: View {
 
     private var commentsSheet: some View {
         NavigationStack {
-            List(sortedComments) { comment in
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Text("@\(comment.username)")
-                                .font(.subheadline.weight(.semibold))
-                            if comment.isSupporter {
-                                Text("SUPPORTER")
-                                    .font(.caption2.bold())
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.pink.opacity(0.15))
-                                    .clipShape(Capsule())
+            VStack(spacing: 0) {
+                if commentsLoading && sortedComments.isEmpty {
+                    ProgressView("Loading comments...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(sortedComments) { comment in
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Text("@\(comment.username)")
+                                        .font(.subheadline.weight(.semibold))
+                                    if comment.isSupporter {
+                                        Text("SUPPORTER")
+                                            .font(.caption2.bold())
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.pink.opacity(0.15))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                                Text(comment.body)
+                                    .font(.body)
                             }
+                            Spacer()
+                            VStack(spacing: 4) {
+                                Image(systemName: "heart")
+                                Text("\(comment.likes)")
+                                    .font(.caption)
+                            }
+                            .foregroundStyle(.secondary)
                         }
-                        Text(comment.body)
-                            .font(.body)
                     }
-                    Spacer()
-                    VStack(spacing: 4) {
-                        Image(systemName: "heart")
-                        Text("\(comment.likes)")
-                            .font(.caption)
-                    }
-                    .foregroundStyle(.secondary)
+                }
+                if !commentsError.isEmpty {
+                    Text(commentsError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 4)
                 }
             }
             .navigationTitle("Comments")
@@ -559,9 +663,14 @@ struct SupportFlowDemoView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 HStack {
-                    TextField("Add comment...", text: .constant(""))
+                    TextField("Add comment...", text: $pendingCommentBody)
                         .textFieldStyle(.roundedBorder)
-                    Button("Send") {}
+                    Button("Send") {
+                        Task {
+                            await submitCommentForCurrentVideo()
+                        }
+                    }
+                    .disabled(commentsSubmitting || pendingCommentBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding(12)
                 .background(.ultraThinMaterial)
@@ -758,6 +867,7 @@ struct SupportFlowDemoView: View {
                             remainingDays: existing.remainingDays,
                             likes: existing.likes,
                             comments: existing.comments,
+                            isLikedByCurrentUser: existing.isLikedByCurrentUser,
                             isSupportedByCurrentUser: refreshedPage.viewer_relationship.is_supported
                         )
                     }
@@ -884,7 +994,7 @@ struct SupportFlowDemoView: View {
     }
 
     private var sortedComments: [FeedComment] {
-        sampleComments.sorted { lhs, rhs in
+        currentVideoComments.sorted { lhs, rhs in
             if lhs.isSupporter != rhs.isSupporter {
                 return lhs.isSupporter && !rhs.isSupporter
             }
@@ -893,6 +1003,11 @@ struct SupportFlowDemoView: View {
             }
             return lhs.createdAt > rhs.createdAt
         }
+    }
+
+    private var currentVideoComments: [FeedComment] {
+        guard let videoId = currentProject?.videoId else { return [] }
+        return commentsByVideoId[videoId] ?? []
     }
 
     private func nextFeed() {
@@ -958,6 +1073,19 @@ struct SupportFlowDemoView: View {
             }
             syncHomeFeedPlayer()
         }
+        await refreshCurrentVideoEngagement()
+    }
+
+    private func refreshCurrentVideoEngagement() async {
+        guard let videoId = currentProject?.videoId else { return }
+        do {
+            let engagement = try await client.getVideoEngagement(videoId: videoId)
+            await MainActor.run {
+                applyVideoEngagement(videoId: videoId, engagement: engagement)
+            }
+        } catch {
+            // Keep previous numbers on transient failures.
+        }
     }
 
     private func buildExpandedFeedProjects(from rows: [FeedProjectRow]) async -> [FeedProjectSummary] {
@@ -990,6 +1118,7 @@ struct SupportFlowDemoView: View {
                             remainingDays: row.remaining_days,
                             likes: row.likes,
                             comments: row.comments,
+                            isLikedByCurrentUser: row.is_liked_by_current_user,
                             isSupportedByCurrentUser: row.is_supported_by_current_user
                         )
                     )
@@ -1012,6 +1141,7 @@ struct SupportFlowDemoView: View {
                         remainingDays: row.remaining_days,
                         likes: row.likes,
                         comments: row.comments,
+                        isLikedByCurrentUser: row.is_liked_by_current_user,
                         isSupportedByCurrentUser: row.is_supported_by_current_user
                     )
                 )
@@ -1021,10 +1151,152 @@ struct SupportFlowDemoView: View {
         return expanded
     }
 
+    private func toggleLike(for project: FeedProjectSummary) async {
+        guard let videoId = project.videoId else { return }
+        guard isAuthenticated else {
+            await MainActor.run {
+                showAuthSheet = true
+            }
+            return
+        }
+        let previous = VideoEngagementResult(
+            likes: project.likes,
+            comments: project.comments,
+            is_liked_by_current_user: project.isLikedByCurrentUser
+        )
+        let optimistic = VideoEngagementResult(
+            likes: max(0, previous.likes + (previous.is_liked_by_current_user ? -1 : 1)),
+            comments: previous.comments,
+            is_liked_by_current_user: !previous.is_liked_by_current_user
+        )
+        await MainActor.run {
+            applyVideoEngagement(videoId: videoId, engagement: optimistic)
+        }
+        do {
+            let engagement: VideoEngagementResult
+            if previous.is_liked_by_current_user {
+                engagement = try await client.unlikeVideo(videoId: videoId)
+            } else {
+                engagement = try await client.likeVideo(videoId: videoId)
+            }
+            await MainActor.run {
+                applyVideoEngagement(videoId: videoId, engagement: engagement)
+            }
+        } catch {
+            await MainActor.run {
+                applyVideoEngagement(videoId: videoId, engagement: previous)
+                errorText = "Failed to update like: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func loadCommentsForCurrentVideo() async {
+        guard let videoId = currentProject?.videoId else {
+            await MainActor.run {
+                commentsByVideoId = [:]
+            }
+            return
+        }
+        await MainActor.run {
+            commentsLoading = true
+            commentsError = ""
+        }
+        defer {
+            Task { @MainActor in
+                commentsLoading = false
+            }
+        }
+
+        do {
+            let rows = try await client.listVideoComments(videoId: videoId, limit: 80)
+            await MainActor.run {
+                commentsByVideoId[videoId] = rows.map(mapVideoCommentRow)
+            }
+            await refreshCurrentVideoEngagement()
+        } catch {
+            await MainActor.run {
+                commentsError = error.localizedDescription
+            }
+        }
+    }
+
+    private func submitCommentForCurrentVideo() async {
+        guard let videoId = currentProject?.videoId else { return }
+        guard isAuthenticated else {
+            await MainActor.run {
+                showAuthSheet = true
+            }
+            return
+        }
+        let content = pendingCommentBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { return }
+        await MainActor.run {
+            commentsSubmitting = true
+            commentsError = ""
+        }
+        defer {
+            Task { @MainActor in
+                commentsSubmitting = false
+            }
+        }
+
+        do {
+            let row = try await client.createVideoComment(videoId: videoId, body: content)
+            await MainActor.run {
+                var list = commentsByVideoId[videoId] ?? []
+                list.insert(mapVideoCommentRow(row), at: 0)
+                commentsByVideoId[videoId] = list
+                pendingCommentBody = ""
+            }
+            await refreshCurrentVideoEngagement()
+        } catch {
+            await MainActor.run {
+                commentsError = "Failed to send comment: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func applyVideoEngagement(videoId: UUID, engagement: VideoEngagementResult) {
+        feedProjects = feedProjects.map { item in
+            guard item.videoId == videoId else { return item }
+            return FeedProjectSummary(
+                id: item.id,
+                creatorId: item.creatorId,
+                username: item.username,
+                caption: item.caption,
+                videoId: item.videoId,
+                playbackURL: item.playbackURL,
+                thumbnailURL: item.thumbnailURL,
+                minPlanPriceMinor: item.minPlanPriceMinor,
+                goalAmountMinor: item.goalAmountMinor,
+                fundedAmountMinor: item.fundedAmountMinor,
+                remainingDays: item.remainingDays,
+                likes: engagement.likes,
+                comments: engagement.comments,
+                isLikedByCurrentUser: engagement.is_liked_by_current_user,
+                isSupportedByCurrentUser: item.isSupportedByCurrentUser
+            )
+        }
+    }
+
+    private func mapVideoCommentRow(_ row: VideoCommentRow) -> FeedComment {
+        let parsedDate = ISO8601DateFormatter().date(from: row.created_at) ?? .now
+        return FeedComment(
+            id: row.comment_id,
+            username: row.username,
+            body: row.body,
+            likes: row.likes,
+            createdAt: parsedDate,
+            isSupporter: row.is_supporter
+        )
+    }
+
     private func syncHomeFeedPlayer() {
         guard selectedTab == 0 else {
+            setHomeFeedEdgeBoosting(false)
             homeFeedPlayer?.pause()
             homeFeedPlayer = nil
+            detachHomeFeedPlayerObserver()
             for player in homeFeedPlayerCache.values {
                 player.pause()
             }
@@ -1032,8 +1304,11 @@ struct SupportFlowDemoView: View {
         }
 
         guard !feedProjects.isEmpty else {
+            setHomeFeedEdgeBoosting(false)
             homeFeedPlayer?.pause()
             homeFeedPlayer = nil
+            detachHomeFeedPlayerObserver()
+            homeFeedPlaybackProgress = 0
             for player in homeFeedPlayerCache.values {
                 player.pause()
             }
@@ -1043,8 +1318,11 @@ struct SupportFlowDemoView: View {
 
         let project = feedProjects[max(0, min(currentFeedIndex, feedProjects.count - 1))]
         guard let playbackURL = project.playbackURL, let url = URL(string: playbackURL) else {
+            setHomeFeedEdgeBoosting(false)
             homeFeedPlayer?.pause()
             homeFeedPlayer = nil
+            detachHomeFeedPlayerObserver()
+            homeFeedPlaybackProgress = 0
             return
         }
 
@@ -1061,6 +1339,7 @@ struct SupportFlowDemoView: View {
         if homeFeedPlayer !== player {
             homeFeedPlayer?.pause()
             homeFeedPlayer = player
+            attachHomeFeedPlayerObserver(to: player)
         }
 
         if showFeedProjectPanel {
@@ -1070,6 +1349,68 @@ struct SupportFlowDemoView: View {
         }
 
         warmHomeFeedPlayerCache(around: currentFeedIndex)
+    }
+
+    private func attachHomeFeedPlayerObserver(to player: AVPlayer) {
+        detachHomeFeedPlayerObserver()
+        homeFeedPlaybackProgress = 0
+        homeFeedObservedPlayer = player
+        homeFeedPlayerObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
+            queue: .main
+        ) { _ in
+            guard let currentItem = player.currentItem else {
+                if !isHomeFeedScrubbing {
+                    homeFeedPlaybackProgress = 0
+                }
+                return
+            }
+            let duration = currentItem.duration.seconds
+            guard duration.isFinite, duration > 0 else {
+                if !isHomeFeedScrubbing {
+                    homeFeedPlaybackProgress = 0
+                }
+                return
+            }
+            if !isHomeFeedScrubbing {
+                homeFeedPlaybackProgress = min(max(player.currentTime().seconds / duration, 0), 1)
+            }
+        }
+    }
+
+    private func detachHomeFeedPlayerObserver() {
+        guard let player = homeFeedObservedPlayer, let observer = homeFeedPlayerObserver else { return }
+        player.removeTimeObserver(observer)
+        homeFeedPlayerObserver = nil
+        homeFeedObservedPlayer = nil
+    }
+
+    private func seekHomeFeedPlayer(toProgress progress: Double) {
+        guard let player = homeFeedPlayer, let item = player.currentItem else { return }
+        let duration = item.duration.seconds
+        guard duration.isFinite, duration > 0 else { return }
+        let target = CMTime(seconds: duration * min(max(progress, 0), 1), preferredTimescale: 600)
+        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    private func toggleHomeFeedPlayback() {
+        guard let player = homeFeedPlayer else { return }
+        if player.timeControlStatus == .playing {
+            player.pause()
+        } else if !showFeedProjectPanel {
+            player.play()
+            if isHomeFeedEdgeBoosting {
+                player.rate = 2.0
+            }
+        }
+    }
+
+    private func setHomeFeedEdgeBoosting(_ boosting: Bool) {
+        guard boosting != isHomeFeedEdgeBoosting else { return }
+        isHomeFeedEdgeBoosting = boosting
+        guard let player = homeFeedPlayer else { return }
+        guard player.timeControlStatus == .playing else { return }
+        player.rate = boosting ? 2.0 : 1.0
     }
 
     private func warmHomeFeedPlayerCache(around index: Int) {
@@ -1268,6 +1609,10 @@ private struct AuthEntrySheet: View {
                         .background(Color(.systemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .lifecastAuthSessionUpdated)) { _ in
+                onAuthenticated()
+                dismiss()
             }
         }
     }

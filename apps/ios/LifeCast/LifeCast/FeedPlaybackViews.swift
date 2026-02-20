@@ -108,6 +108,7 @@ struct PostedVideosListView: View {
                     remainingDays: 12,
                     likes: 4500,
                     comments: 173,
+                    isLikedByCurrentUser: false,
                     isSupportedByCurrentUser: false
                 ),
                 isCurrentUserVideo: true,
@@ -140,6 +141,11 @@ struct CreatorPostedFeedView: View {
     @State private var currentIndex: Int
     @State private var player: AVPlayer?
     @State private var postedFeedPlayerCache: [URL: AVPlayer] = [:]
+    @State private var postedFeedPlayerObserver: Any?
+    @State private var postedFeedObservedPlayer: AVPlayer?
+    @State private var postedFeedPlaybackProgress: Double = 0
+    @State private var isPostedFeedScrubbing = false
+    @State private var isPostedFeedEdgeBoosting = false
     @State private var showFeedProjectPanel = false
     @State private var feedProjectDetail: MyProjectResult?
     @State private var feedProjectDetailLoading = false
@@ -148,6 +154,12 @@ struct CreatorPostedFeedView: View {
     @State private var showShare = false
     @State private var showActions = false
     @State private var deleteErrorText = ""
+    @State private var engagementByVideoId: [UUID: VideoEngagementResult] = [:]
+    @State private var commentsByVideoId: [UUID: [FeedComment]] = [:]
+    @State private var commentsLoading = false
+    @State private var commentsError = ""
+    @State private var pendingCommentBody = ""
+    @State private var commentsSubmitting = false
 
     init(
         videos: [MyVideo],
@@ -180,6 +192,7 @@ struct CreatorPostedFeedView: View {
                     items: feedVideos,
                     currentIndex: $currentIndex,
                     verticalDragDisabled: showFeedProjectPanel,
+                    horizontalActionExclusionBottomInset: 28,
                     onWillMove: {
                         player?.pause()
                         closePostedFeedProjectPanel()
@@ -262,12 +275,28 @@ struct CreatorPostedFeedView: View {
         }
         .onAppear {
             syncPlayerForCurrentIndex()
+            Task {
+                await refreshCurrentVideoEngagement()
+            }
         }
         .onChange(of: currentIndex) { _, _ in
             syncPlayerForCurrentIndex()
+            Task {
+                await refreshCurrentVideoEngagement()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { note in
+            guard let endedItem = note.object as? AVPlayerItem else { return }
+            guard let current = player, current.currentItem === endedItem else { return }
+            current.seek(to: .zero)
+            if !showFeedProjectPanel {
+                current.play()
+            }
         }
         .onDisappear {
+            setPostedFeedEdgeBoosting(false)
             player?.pause()
+            detachPostedFeedPlayerObserver()
             player = nil
             for prepared in postedFeedPlayerCache.values {
                 prepared.pause()
@@ -276,7 +305,30 @@ struct CreatorPostedFeedView: View {
     }
 
     private var currentProject: FeedProjectSummary {
-        projectContext
+        guard let videoId = currentVideoId else { return projectContext }
+        guard let engagement = engagementByVideoId[videoId] else { return projectContext }
+        return FeedProjectSummary(
+            id: projectContext.id,
+            creatorId: projectContext.creatorId,
+            username: projectContext.username,
+            caption: projectContext.caption,
+            videoId: videoId,
+            playbackURL: projectContext.playbackURL,
+            thumbnailURL: projectContext.thumbnailURL,
+            minPlanPriceMinor: projectContext.minPlanPriceMinor,
+            goalAmountMinor: projectContext.goalAmountMinor,
+            fundedAmountMinor: projectContext.fundedAmountMinor,
+            remainingDays: projectContext.remainingDays,
+            likes: engagement.likes,
+            comments: engagement.comments,
+            isLikedByCurrentUser: engagement.is_liked_by_current_user,
+            isSupportedByCurrentUser: projectContext.isSupportedByCurrentUser
+        )
+    }
+
+    private var currentVideoId: UUID? {
+        guard feedVideos.indices.contains(currentIndex) else { return nil }
+        return feedVideos[currentIndex].video_id
     }
 
     private func feedPage(video: MyVideo, project: FeedProjectSummary, useLivePlayer: Bool) -> some View {
@@ -292,6 +344,35 @@ struct CreatorPostedFeedView: View {
                 startPoint: .center,
                 endPoint: .bottom
             )
+
+            if useLivePlayer {
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        Color.clear
+                            .frame(width: min(72, max(52, geo.size.width * 0.14)))
+                            .contentShape(Rectangle())
+                            .onLongPressGesture(minimumDuration: 0.12, maximumDistance: 48, pressing: { pressing in
+                                setPostedFeedEdgeBoosting(pressing)
+                            }, perform: {})
+
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                togglePostedFeedPlayback()
+                            }
+
+                        Color.clear
+                            .frame(width: min(72, max(52, geo.size.width * 0.14)))
+                            .contentShape(Rectangle())
+                            .onLongPressGesture(minimumDuration: 0.12, maximumDistance: 48, pressing: { pressing in
+                                setPostedFeedEdgeBoosting(pressing)
+                            }, perform: {})
+                    }
+                    .padding(.horizontal, 84)
+                    .padding(.top, 120)
+                    .padding(.bottom, appBottomBarHeight + 140)
+                }
+            }
 
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 10) {
@@ -314,7 +395,28 @@ struct CreatorPostedFeedView: View {
                 rightRail(project: project)
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, appBottomBarHeight + 20)
+            .padding(.bottom, appBottomBarHeight - 14)
+            .offset(y: 22)
+
+            if useLivePlayer {
+                FeedPlaybackScrubber(
+                    progress: postedFeedPlaybackProgress,
+                    onScrubBegan: {
+                        isPostedFeedScrubbing = true
+                    },
+                    onScrubChanged: { progress in
+                        postedFeedPlaybackProgress = progress
+                        seekPostedFeedPlayer(toProgress: progress)
+                    },
+                    onScrubEnded: { progress in
+                        postedFeedPlaybackProgress = progress
+                        seekPostedFeedPlayer(toProgress: progress)
+                        isPostedFeedScrubbing = false
+                    }
+                )
+                .padding(.horizontal, 0)
+                .padding(.bottom, -3)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -412,18 +514,30 @@ struct CreatorPostedFeedView: View {
     private func rightRail(project: FeedProjectSummary) -> some View {
         VStack(spacing: 16) {
             if !isCurrentUserVideo {
-                Text(project.isSupportedByCurrentUser ? "Supported" : "Support")
-                    .font(.caption.bold())
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
+                Image(systemName: project.isSupportedByCurrentUser ? "checkmark" : "suit.heart.fill")
+                    .font(.system(size: 14, weight: .bold))
+                    .frame(width: 40, height: 40)
                     .background(project.isSupportedByCurrentUser ? Color.green.opacity(0.9) : Color.pink.opacity(0.9))
                     .foregroundStyle(.white)
-                    .clipShape(Capsule())
+                    .clipShape(Circle())
             }
 
-            metricView(icon: "heart.fill", value: project.likes)
+            metricButton(
+                icon: project.isLikedByCurrentUser ? "heart.fill" : "heart",
+                value: project.likes,
+                isActive: project.isLikedByCurrentUser
+            ) {
+                Task {
+                    await toggleLikeForCurrentVideo()
+                }
+            }
             Button {
                 showComments = true
+                pendingCommentBody = ""
+                commentsError = ""
+                Task {
+                    await loadCommentsForCurrentVideo()
+                }
             } label: {
                 metricView(icon: "text.bubble.fill", value: project.comments)
             }
@@ -441,6 +555,13 @@ struct CreatorPostedFeedView: View {
             .accessibilityIdentifier("video-actions")
         }
         .foregroundStyle(.white)
+    }
+
+    private func metricButton(icon: String, value: Int, isActive: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            metricView(icon: icon, value: value)
+        }
+        .foregroundStyle(isActive ? Color.pink : Color.white)
     }
 
     private func metricView(icon: String, value: Int, labelOverride: String? = nil) -> some View {
@@ -479,7 +600,7 @@ struct CreatorPostedFeedView: View {
     }
 
     private var sortedComments: [FeedComment] {
-        sampleComments.sorted { lhs, rhs in
+        currentVideoComments.sorted { lhs, rhs in
             if lhs.isSupporter != rhs.isSupporter {
                 return lhs.isSupporter && !rhs.isSupporter
             }
@@ -490,33 +611,52 @@ struct CreatorPostedFeedView: View {
         }
     }
 
+    private var currentVideoComments: [FeedComment] {
+        guard let videoId = currentVideoId else { return [] }
+        return commentsByVideoId[videoId] ?? []
+    }
+
     private var commentsSheet: some View {
         NavigationStack {
-            List(sortedComments) { comment in
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Text("@\(comment.username)")
-                                .font(.subheadline.weight(.semibold))
-                            if comment.isSupporter {
-                                Text("SUPPORTER")
-                                    .font(.caption2.bold())
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.pink.opacity(0.15))
-                                    .clipShape(Capsule())
+            VStack(spacing: 0) {
+                if commentsLoading && sortedComments.isEmpty {
+                    ProgressView("Loading comments...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(sortedComments) { comment in
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Text("@\(comment.username)")
+                                        .font(.subheadline.weight(.semibold))
+                                    if comment.isSupporter {
+                                        Text("SUPPORTER")
+                                            .font(.caption2.bold())
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.pink.opacity(0.15))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                                Text(comment.body)
+                                    .font(.body)
                             }
+                            Spacer()
+                            VStack(spacing: 4) {
+                                Image(systemName: "heart")
+                                Text("\(comment.likes)")
+                                    .font(.caption)
+                            }
+                            .foregroundStyle(.secondary)
                         }
-                        Text(comment.body)
-                            .font(.body)
                     }
-                    Spacer()
-                    VStack(spacing: 4) {
-                        Image(systemName: "heart")
-                        Text("\(comment.likes)")
-                            .font(.caption)
-                    }
-                    .foregroundStyle(.secondary)
+                }
+                if !commentsError.isEmpty {
+                    Text(commentsError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 4)
                 }
             }
             .navigationTitle("Comments")
@@ -529,9 +669,14 @@ struct CreatorPostedFeedView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 HStack {
-                    TextField("Add comment...", text: .constant(""))
+                    TextField("Add comment...", text: $pendingCommentBody)
                         .textFieldStyle(.roundedBorder)
-                    Button("Send") {}
+                    Button("Send") {
+                        Task {
+                            await submitCommentForCurrentVideo()
+                        }
+                    }
+                    .disabled(commentsSubmitting || pendingCommentBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding(12)
                 .background(.ultraThinMaterial)
@@ -541,8 +686,11 @@ struct CreatorPostedFeedView: View {
 
     private func syncPlayerForCurrentIndex() {
         guard !feedVideos.isEmpty else {
+            setPostedFeedEdgeBoosting(false)
             player?.pause()
+            detachPostedFeedPlayerObserver()
             player = nil
+            postedFeedPlaybackProgress = 0
             for prepared in postedFeedPlayerCache.values {
                 prepared.pause()
             }
@@ -554,8 +702,11 @@ struct CreatorPostedFeedView: View {
             return
         }
         guard let playbackUrl = feedVideos[currentIndex].playback_url, let url = URL(string: playbackUrl) else {
+            setPostedFeedEdgeBoosting(false)
             player?.pause()
+            detachPostedFeedPlayerObserver()
             player = nil
+            postedFeedPlaybackProgress = 0
             return
         }
 
@@ -564,6 +715,7 @@ struct CreatorPostedFeedView: View {
             targetPlayer = cached
         } else {
             let created = AVPlayer(url: url)
+            created.actionAtItemEnd = .none
             postedFeedPlayerCache[url] = created
             targetPlayer = created
         }
@@ -571,6 +723,7 @@ struct CreatorPostedFeedView: View {
         if player !== targetPlayer {
             player?.pause()
             player = targetPlayer
+            attachPostedFeedPlayerObserver(to: targetPlayer)
         }
 
         if showFeedProjectPanel {
@@ -580,6 +733,68 @@ struct CreatorPostedFeedView: View {
         }
 
         warmPostedFeedPlayerCache(around: currentIndex)
+    }
+
+    private func attachPostedFeedPlayerObserver(to targetPlayer: AVPlayer) {
+        detachPostedFeedPlayerObserver()
+        postedFeedPlaybackProgress = 0
+        postedFeedObservedPlayer = targetPlayer
+        postedFeedPlayerObserver = targetPlayer.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
+            queue: .main
+        ) { _ in
+            guard let currentItem = targetPlayer.currentItem else {
+                if !isPostedFeedScrubbing {
+                    postedFeedPlaybackProgress = 0
+                }
+                return
+            }
+            let duration = currentItem.duration.seconds
+            guard duration.isFinite, duration > 0 else {
+                if !isPostedFeedScrubbing {
+                    postedFeedPlaybackProgress = 0
+                }
+                return
+            }
+            if !isPostedFeedScrubbing {
+                postedFeedPlaybackProgress = min(max(targetPlayer.currentTime().seconds / duration, 0), 1)
+            }
+        }
+    }
+
+    private func detachPostedFeedPlayerObserver() {
+        guard let targetPlayer = postedFeedObservedPlayer, let observer = postedFeedPlayerObserver else { return }
+        targetPlayer.removeTimeObserver(observer)
+        postedFeedPlayerObserver = nil
+        postedFeedObservedPlayer = nil
+    }
+
+    private func seekPostedFeedPlayer(toProgress progress: Double) {
+        guard let targetPlayer = player, let item = targetPlayer.currentItem else { return }
+        let duration = item.duration.seconds
+        guard duration.isFinite, duration > 0 else { return }
+        let target = CMTime(seconds: duration * min(max(progress, 0), 1), preferredTimescale: 600)
+        targetPlayer.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    private func togglePostedFeedPlayback() {
+        guard let targetPlayer = player else { return }
+        if targetPlayer.timeControlStatus == .playing {
+            targetPlayer.pause()
+        } else if !showFeedProjectPanel {
+            targetPlayer.play()
+            if isPostedFeedEdgeBoosting {
+                targetPlayer.rate = 2.0
+            }
+        }
+    }
+
+    private func setPostedFeedEdgeBoosting(_ boosting: Bool) {
+        guard boosting != isPostedFeedEdgeBoosting else { return }
+        isPostedFeedEdgeBoosting = boosting
+        guard let targetPlayer = player else { return }
+        guard targetPlayer.timeControlStatus == .playing else { return }
+        targetPlayer.rate = boosting ? 2.0 : 1.0
     }
 
     private func showOlder() {
@@ -606,6 +821,7 @@ struct CreatorPostedFeedView: View {
             keep.insert(url)
             if postedFeedPlayerCache[url] == nil {
                 let prepared = AVPlayer(url: url)
+                prepared.actionAtItemEnd = .none
                 prepared.pause()
                 postedFeedPlayerCache[url] = prepared
             }
@@ -706,6 +922,111 @@ struct CreatorPostedFeedView: View {
         }
     }
 
+    private func refreshCurrentVideoEngagement() async {
+        guard let videoId = currentVideoId else { return }
+        do {
+            let engagement = try await client.getVideoEngagement(videoId: videoId)
+            await MainActor.run {
+                engagementByVideoId[videoId] = engagement
+            }
+        } catch {}
+    }
+
+    private func toggleLikeForCurrentVideo() async {
+        guard let videoId = currentVideoId else { return }
+        let previous = engagementByVideoId[videoId] ?? VideoEngagementResult(
+            likes: projectContext.likes,
+            comments: projectContext.comments,
+            is_liked_by_current_user: projectContext.isLikedByCurrentUser
+        )
+        let optimistic = VideoEngagementResult(
+            likes: max(0, previous.likes + (previous.is_liked_by_current_user ? -1 : 1)),
+            comments: previous.comments,
+            is_liked_by_current_user: !previous.is_liked_by_current_user
+        )
+        await MainActor.run {
+            engagementByVideoId[videoId] = optimistic
+        }
+        do {
+            let updated = previous.is_liked_by_current_user
+                ? try await client.unlikeVideo(videoId: videoId)
+                : try await client.likeVideo(videoId: videoId)
+            await MainActor.run {
+                engagementByVideoId[videoId] = updated
+            }
+        } catch {
+            await MainActor.run {
+                engagementByVideoId[videoId] = previous
+                deleteErrorText = "Like failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func loadCommentsForCurrentVideo() async {
+        guard let videoId = currentVideoId else { return }
+        await MainActor.run {
+            commentsLoading = true
+            commentsError = ""
+        }
+        defer {
+            Task { @MainActor in
+                commentsLoading = false
+            }
+        }
+        do {
+            let rows = try await client.listVideoComments(videoId: videoId, limit: 80)
+            await MainActor.run {
+                commentsByVideoId[videoId] = rows.map(mapVideoCommentRow)
+            }
+            await refreshCurrentVideoEngagement()
+        } catch {
+            await MainActor.run {
+                commentsError = error.localizedDescription
+            }
+        }
+    }
+
+    private func submitCommentForCurrentVideo() async {
+        guard let videoId = currentVideoId else { return }
+        let content = pendingCommentBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { return }
+        await MainActor.run {
+            commentsSubmitting = true
+            commentsError = ""
+        }
+        defer {
+            Task { @MainActor in
+                commentsSubmitting = false
+            }
+        }
+        do {
+            let row = try await client.createVideoComment(videoId: videoId, body: content)
+            await MainActor.run {
+                var current = commentsByVideoId[videoId] ?? []
+                current.insert(mapVideoCommentRow(row), at: 0)
+                commentsByVideoId[videoId] = current
+                pendingCommentBody = ""
+            }
+            await refreshCurrentVideoEngagement()
+        } catch {
+            await MainActor.run {
+                commentsError = "Failed to send comment: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func mapVideoCommentRow(_ row: VideoCommentRow) -> FeedComment {
+        let parsedDate = ISO8601DateFormatter().date(from: row.created_at) ?? .now
+        return FeedComment(
+            id: row.comment_id,
+            username: row.username,
+            body: row.body,
+            likes: row.likes,
+            createdAt: parsedDate,
+            isSupporter: row.is_supporter
+        )
+    }
+
     private func formatJPY(_ amountMinor: Int) -> String {
         NumberFormatterProvider.jpy.string(from: NSNumber(value: Double(amountMinor))) ?? "JPY \(amountMinor)"
     }
@@ -731,17 +1052,27 @@ struct CreatorPostedFeedView: View {
     private var postedFeedCommentBar: some View {
         ZStack {
             Color.black
-            HStack {
-                Text("コメントする...")
-                    .font(.body)
-                    .foregroundStyle(.white.opacity(0.85))
-                Spacer()
+            Button {
+                showComments = true
+                pendingCommentBody = ""
+                commentsError = ""
+                Task {
+                    await loadCommentsForCurrentVideo()
+                }
+            } label: {
+                HStack {
+                    Text("コメントする...")
+                        .font(.body)
+                        .foregroundStyle(.white.opacity(0.85))
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 34)
+                .background(Color.white.opacity(0.12))
+                .clipShape(Capsule())
+                .padding(.horizontal, 14)
             }
-            .padding(.horizontal, 16)
-            .frame(height: 34)
-            .background(Color.white.opacity(0.12))
-            .clipShape(Capsule())
-            .padding(.horizontal, 14)
+            .buttonStyle(.plain)
         }
         .frame(height: appBottomBarHeight)
     }

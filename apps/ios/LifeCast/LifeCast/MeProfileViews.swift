@@ -111,6 +111,12 @@ struct MeTabView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
+                    .background(
+                        ScrollBounceConfigurator(disabled: false)
+                    )
+                    .safeAreaInset(edge: .bottom) {
+                        Color.clear.frame(height: appBottomBarHeight + 20)
+                    }
                 } else {
                     VStack(spacing: 14) {
                         Spacer()
@@ -240,6 +246,52 @@ struct MeTabView: View {
         }
     }
 
+}
+
+private struct ScrollBounceConfigurator: UIViewRepresentable {
+    let disabled: Bool
+
+    func makeUIView(context: Context) -> UIView {
+        UIView(frame: .zero)
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        let apply = {
+            if let scrollView = findNearestScrollView(from: view) ?? view.window.flatMap(findFirstScrollView(in:)) {
+                scrollView.bounces = !disabled
+                scrollView.alwaysBounceVertical = !disabled
+                scrollView.alwaysBounceHorizontal = !disabled
+            }
+        }
+        DispatchQueue.main.async(execute: apply)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: apply)
+    }
+
+    private func findNearestScrollView(from view: UIView) -> UIScrollView? {
+        var current: UIView? = view
+        while let node = current {
+            if let scroll = node as? UIScrollView {
+                return scroll
+            }
+            if let childScroll = findFirstScrollView(in: node) {
+                return childScroll
+            }
+            current = node.superview
+        }
+        return nil
+    }
+
+    private func findFirstScrollView(in root: UIView) -> UIScrollView? {
+        if let scroll = root as? UIScrollView {
+            return scroll
+        }
+        for child in root.subviews {
+            if let scroll = findFirstScrollView(in: child) {
+                return scroll
+            }
+        }
+        return nil
+    }
 }
 
 struct DevUserSwitcherSheet: View {
