@@ -1438,9 +1438,6 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
   });
 
   app.get("/v1/creators/:creatorUserId/supported-projects", async (req, reply) => {
-    const viewerUserId = requireRequestUserId(req, reply);
-    if (!viewerUserId) return;
-
     const parsed = supportedProjectsQuery.safeParse(req.query ?? {});
     if (!parsed.success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid supported-projects query"));

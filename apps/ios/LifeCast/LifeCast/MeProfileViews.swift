@@ -74,7 +74,7 @@ struct MeTabView: View {
                             }
                             .padding(.top, 6)
 
-                            ProfileTabIconStrip(selectedIndex: $selectedIndex, fullWidthCompact: true)
+                            ProfileTabIconStrip(selectedIndex: $selectedIndex, style: .fullWidthUnderline)
                                 .onChange(of: selectedIndex) { _, newValue in
                                     if newValue == 1 {
                                         onRefreshVideos()
@@ -110,6 +110,7 @@ struct MeTabView: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                        .frame(maxWidth: .infinity)
                     }
                     .background(
                         ScrollBounceConfigurator(disabled: false)
@@ -260,7 +261,8 @@ private struct ScrollBounceConfigurator: UIViewRepresentable {
             if let scrollView = findNearestScrollView(from: view) ?? view.window.flatMap(findFirstScrollView(in:)) {
                 scrollView.bounces = !disabled
                 scrollView.alwaysBounceVertical = !disabled
-                scrollView.alwaysBounceHorizontal = !disabled
+                scrollView.alwaysBounceHorizontal = false
+                scrollView.showsHorizontalScrollIndicator = false
             }
         }
         DispatchQueue.main.async(execute: apply)

@@ -25,11 +25,20 @@ struct VideoGridPlaceholder: View {
 }
 
 struct ProfileTabIconStrip: View {
+    enum Style {
+        case capsule
+        case fullWidthUnderline
+    }
+
     @Binding var selectedIndex: Int
-    var fullWidthCompact: Bool = false
+    var style: Style = .capsule
+
+    private var isFullWidthUnderline: Bool {
+        style == .fullWidthUnderline
+    }
 
     var body: some View {
-        if fullWidthCompact {
+        if isFullWidthUnderline {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     iconButton(index: 0, systemName: "folder")
@@ -46,6 +55,7 @@ struct ProfileTabIconStrip: View {
                 }
                 .frame(height: 1)
             }
+            .frame(maxWidth: .infinity)
         } else {
             HStack(spacing: 0) {
                 iconButton(index: 0, systemName: "folder")
@@ -55,6 +65,7 @@ struct ProfileTabIconStrip: View {
             .padding(4)
             .background(Color.secondary.opacity(0.12))
             .clipShape(Capsule())
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -62,14 +73,14 @@ struct ProfileTabIconStrip: View {
         Button {
             selectedIndex = index
         } label: {
-            VStack(spacing: fullWidthCompact ? 0 : 6) {
+            VStack(spacing: isFullWidthUnderline ? 0 : 6) {
                 Image(systemName: selectedIndex == index ? "\(systemName).fill" : systemName)
-                    .font(.system(size: fullWidthCompact ? 15 : 16, weight: .semibold))
+                    .font(.system(size: isFullWidthUnderline ? 15 : 16, weight: .semibold))
                     .foregroundStyle(.primary)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, fullWidthCompact ? 6 : 10)
-            .background(selectedIndex == index && !fullWidthCompact ? Color.white : Color.clear)
+            .padding(.vertical, isFullWidthUnderline ? 6 : 10)
+            .background(selectedIndex == index && !isFullWidthUnderline ? Color.white : Color.clear)
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -125,8 +136,6 @@ struct ProfileOverviewSection<ActionContent: View>: View {
                 profileStatButton(value: supportCount, label: "Support", action: onTapSupport)
             }
 
-            actionContent
-
             if !bioText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(bioText)
                     .font(.subheadline)
@@ -134,6 +143,8 @@ struct ProfileOverviewSection<ActionContent: View>: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
             }
+
+            actionContent
         }
     }
 

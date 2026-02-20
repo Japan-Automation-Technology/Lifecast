@@ -230,6 +230,13 @@ struct SupportFlowDemoView: View {
                 await refreshFeedProjectsFromAPI()
             }
         }
+        .onChange(of: selectedCreatorRoute) { _, newValue in
+            if newValue != nil {
+                homeFeedPlayer?.pause()
+            } else if selectedTab == 0 && !showFeedProjectPanel {
+                syncHomeFeedPlayer()
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { note in
             guard let endedItem = note.object as? AVPlayerItem else { return }
             guard let current = homeFeedPlayer, current.currentItem === endedItem else { return }

@@ -294,6 +294,13 @@ struct CreatorPostedFeedView: View {
                 await refreshCurrentVideoEngagement()
             }
         }
+        .onChange(of: selectedCreatorRoute) { _, newValue in
+            if newValue != nil {
+                player?.pause()
+            } else if !showFeedProjectPanel {
+                syncPlayerForCurrentIndex()
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { note in
             guard let endedItem = note.object as? AVPlayerItem else { return }
             guard let current = player, current.currentItem === endedItem else { return }

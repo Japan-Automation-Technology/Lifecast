@@ -333,10 +333,13 @@ struct CreatorPublicPageView: View {
                                             await toggleFollow()
                                         }
                                     }
-                                    .frame(width: 132)
-                                    .buttonStyle(.borderedProminent)
-                                    .buttonBorderShape(.roundedRectangle(radius: 8))
-                                    .tint(page.viewer_relationship.is_following ? .gray : .blue)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(page.viewer_relationship.is_following ? Color.primary : Color.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 34)
+                                    .background(page.viewer_relationship.is_following ? Color.gray.opacity(0.28) : Color.blue.opacity(0.82))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .buttonStyle(.plain)
 
                                     Button(page.viewer_relationship.is_supported ? "Supported" : "Support") {
                                         guard !page.viewer_relationship.is_supported else { return }
@@ -346,19 +349,22 @@ struct CreatorPublicPageView: View {
                                         }
                                         onSupportTap(project)
                                     }
-                                    .frame(width: 132)
-                                    .buttonStyle(.borderedProminent)
-                                    .buttonBorderShape(.roundedRectangle(radius: 8))
-                                    .tint(.green)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(page.viewer_relationship.is_supported ? Color.primary : Color.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 34)
+                                    .background(page.viewer_relationship.is_supported ? Color.gray.opacity(0.28) : Color.green)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .buttonStyle(.plain)
                                     .disabled(!page.viewer_relationship.is_supported && page.project == nil)
                                 }
+                                .padding(.horizontal, 16)
                             }
                         }
                     }
                     .padding(.top, 6)
 
-                    ProfileTabIconStrip(selectedIndex: $selectedIndex)
-                    .padding(.horizontal, 16)
+                    ProfileTabIconStrip(selectedIndex: $selectedIndex, style: .fullWidthUnderline)
 
                     Group {
                         if selectedIndex == 0 {
@@ -388,6 +394,10 @@ struct CreatorPublicPageView: View {
                         .padding(.horizontal, 16)
                 }
             }
+            .frame(maxWidth: .infinity)
+        }
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: appBottomBarHeight + 20)
         }
         .task(id: creatorId) {
             await MainActor.run {
