@@ -26,29 +26,51 @@ struct VideoGridPlaceholder: View {
 
 struct ProfileTabIconStrip: View {
     @Binding var selectedIndex: Int
+    var fullWidthCompact: Bool = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            iconButton(index: 0, systemName: "folder")
-            iconButton(index: 1, systemName: "square.grid.3x3")
-            iconButton(index: 2, systemName: "checkmark.seal")
+        if fullWidthCompact {
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    iconButton(index: 0, systemName: "folder")
+                    iconButton(index: 1, systemName: "square.grid.3x3")
+                    iconButton(index: 2, systemName: "checkmark.seal")
+                }
+                HStack(spacing: 0) {
+                    Rectangle()
+                        .fill(selectedIndex == 0 ? Color.primary : Color.secondary.opacity(0.28))
+                    Rectangle()
+                        .fill(selectedIndex == 1 ? Color.primary : Color.secondary.opacity(0.28))
+                    Rectangle()
+                        .fill(selectedIndex == 2 ? Color.primary : Color.secondary.opacity(0.28))
+                }
+                .frame(height: 1)
+            }
+        } else {
+            HStack(spacing: 0) {
+                iconButton(index: 0, systemName: "folder")
+                iconButton(index: 1, systemName: "square.grid.3x3")
+                iconButton(index: 2, systemName: "checkmark.seal")
+            }
+            .padding(4)
+            .background(Color.secondary.opacity(0.12))
+            .clipShape(Capsule())
         }
-        .padding(4)
-        .background(Color.secondary.opacity(0.12))
-        .clipShape(Capsule())
     }
 
     private func iconButton(index: Int, systemName: String) -> some View {
         Button {
             selectedIndex = index
         } label: {
-            Image(systemName: selectedIndex == index ? "\(systemName).fill" : systemName)
-                .font(.system(size: 16, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(selectedIndex == index ? Color.white : Color.clear)
-                .clipShape(Capsule())
-                .foregroundStyle(.primary)
+            VStack(spacing: fullWidthCompact ? 0 : 6) {
+                Image(systemName: selectedIndex == index ? "\(systemName).fill" : systemName)
+                    .font(.system(size: fullWidthCompact ? 15 : 16, weight: .semibold))
+                    .foregroundStyle(.primary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, fullWidthCompact ? 6 : 10)
+            .background(selectedIndex == index && !fullWidthCompact ? Color.white : Color.clear)
+            .clipShape(Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -105,11 +127,13 @@ struct ProfileOverviewSection<ActionContent: View>: View {
 
             actionContent
 
-            Text(bioText)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
+            if !bioText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(bioText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
         }
     }
 

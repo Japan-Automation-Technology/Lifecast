@@ -41,7 +41,7 @@ struct MeTabView: View {
                             ProfileOverviewSection(
                                 avatarURL: myProfile?.avatar_url,
                                 displayName: currentDisplayName,
-                                bioText: (myProfile?.bio?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (myProfile?.bio ?? "") : "Tap to add bio",
+                                bioText: myProfile?.bio?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
                                 followingCount: myProfileStats?.following_count ?? 0,
                                 followersCount: myProfileStats?.followers_count ?? 0,
                                 supportCount: myProfileStats?.supported_project_count ?? 0,
@@ -61,9 +61,9 @@ struct MeTabView: View {
                                 Button("Edit Profile") {
                                     showEditProfile = true
                                 }
-                                .font(.system(size: 18, weight: .semibold))
+                                .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(.primary)
-                                .frame(width: 146, height: 40)
+                                .frame(width: 136, height: 36)
                                 .background(Color.white)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 4)
@@ -74,8 +74,7 @@ struct MeTabView: View {
                             }
                             .padding(.top, 6)
 
-                            ProfileTabIconStrip(selectedIndex: $selectedIndex)
-                                .padding(.horizontal, 16)
+                            ProfileTabIconStrip(selectedIndex: $selectedIndex, fullWidthCompact: true)
                                 .onChange(of: selectedIndex) { _, newValue in
                                     if newValue == 1 {
                                         onRefreshVideos()
