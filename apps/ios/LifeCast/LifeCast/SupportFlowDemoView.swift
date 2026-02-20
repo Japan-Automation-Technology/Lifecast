@@ -20,9 +20,9 @@ struct SupportFlowDemoView: View {
     @State private var homePauseIndicatorToken = UUID()
     @State private var isHomeFeedEdgeBoosting = false
     @State private var showFeedProjectPanel = false
-    @State private var feedProjectDetail: MyProjectResult?
-    @State private var feedProjectDetailLoading = false
-    @State private var feedProjectDetailError = ""
+    @State private var feedProjectDetailsById: [UUID: MyProjectResult] = [:]
+    @State private var feedProjectDetailLoadingIds: Set<UUID> = []
+    @State private var feedProjectDetailErrorsById: [UUID: String] = [:]
     @State private var showComments = false
     @State private var showShare = false
     @State private var selectedCreatorRoute: CreatorRoute? = nil
@@ -219,6 +219,7 @@ struct SupportFlowDemoView: View {
         .onChange(of: currentFeedIndex) { _, _ in
             syncHomeFeedPlayer()
             Task {
+                await prefetchFeedProjectDetails(around: currentFeedIndex)
                 await refreshCurrentVideoEngagement()
             }
         }
@@ -487,16 +488,16 @@ struct SupportFlowDemoView: View {
     }
 
     private func feedProjectPanel(project: FeedProjectSummary, width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let cachedDetail = feedProjectDetailsById[project.id]
+        let isLoading = feedProjectDetailLoadingIds.contains(project.id)
+        let errorText = feedProjectDetailErrorsById[project.id] ?? ""
+
+        return VStack(alignment: .leading, spacing: 12) {
             Text("Project")
                 .font(.headline)
                 .foregroundStyle(.white)
 
-            if feedProjectDetailLoading && feedProjectDetail?.id != project.id {
-                ProgressView("Loading project...")
-                    .tint(.white)
-                    .foregroundStyle(.white.opacity(0.85))
-            } else if let detail = feedProjectDetail, detail.id == project.id {
+            if let detail = cachedDetail {
                 Text(detail.title)
                     .font(.headline)
                     .foregroundStyle(.white)
@@ -522,6 +523,10 @@ struct SupportFlowDemoView: View {
                         .font(.footnote)
                         .foregroundStyle(.white.opacity(0.9))
                 }
+            } else if isLoading {
+                ProgressView("Loading project...")
+                    .tint(.white)
+                    .foregroundStyle(.white.opacity(0.85))
             } else {
                 Text(project.caption)
                     .font(.footnote)
@@ -534,8 +539,8 @@ struct SupportFlowDemoView: View {
                     .foregroundStyle(.white.opacity(0.85))
             }
 
-            if !feedProjectDetailError.isEmpty {
-                Text(feedProjectDetailError)
+            if !errorText.isEmpty {
+                Text(errorText)
                     .font(.caption)
                     .foregroundStyle(.red)
             }
@@ -1167,19 +1172,23 @@ struct SupportFlowDemoView: View {
             } else {
                 currentFeedIndex = min(currentFeedIndex, max(0, updated.count - 1))
             }
-            if let selected = updated[safe: currentFeedIndex] {
-                feedProjectDetail = (feedProjectDetail?.id == selected.id) ? feedProjectDetail : nil
-            } else {
-                feedProjectDetail = nil
-            }
             syncHomeFeedPlayer()
         }
+        await prefetchFeedProjectDetails(around: currentFeedIndex)
         await refreshCurrentVideoEngagement()
     }
 
     private func fetchFollowingCreatorIds() async -> Set<UUID> {
         guard let network = try? await client.getMyNetwork(tab: .following, limit: 200) else { return [] }
         return Set(network.rows.map(\.creator_user_id))
+    }
+
+    private func prefetchFeedProjectDetails(around index: Int) async {
+        guard !feedProjects.isEmpty else { return }
+        let indices = [index - 1, index, index + 1].filter { $0 >= 0 && $0 < feedProjects.count }
+        for idx in indices {
+            await loadFeedProjectDetail(for: feedProjects[idx], forceRefresh: false)
+        }
     }
 
     private func refreshCurrentVideoEngagement() async {
@@ -1644,7 +1653,7 @@ struct SupportFlowDemoView: View {
         }
         homeFeedPlayer?.pause()
         Task {
-            await loadFeedProjectDetail(for: project)
+            await loadFeedProjectDetail(for: project, forceRefresh: false)
         }
     }
 
@@ -1661,28 +1670,28 @@ struct SupportFlowDemoView: View {
         showFeedProjectPanel = false
     }
 
-    private func loadFeedProjectDetail(for project: FeedProjectSummary) async {
+    private func loadFeedProjectDetail(for project: FeedProjectSummary, forceRefresh: Bool) async {
+        if !forceRefresh, feedProjectDetailsById[project.id] != nil { return }
+        if feedProjectDetailLoadingIds.contains(project.id) { return }
+
         await MainActor.run {
-            feedProjectDetailLoading = true
-            feedProjectDetailError = ""
-        }
-        defer {
-            Task { @MainActor in
-                feedProjectDetailLoading = false
-            }
+            feedProjectDetailLoadingIds.insert(project.id)
+            feedProjectDetailErrorsById[project.id] = nil
         }
         do {
             let page = try await client.getCreatorPage(creatorUserId: project.creatorId)
             await MainActor.run {
-                if currentProject?.id == project.id {
-                    feedProjectDetail = page.project
+                if let detail = page.project {
+                    feedProjectDetailsById[project.id] = detail
+                } else {
+                    feedProjectDetailErrorsById[project.id] = "No project detail found."
                 }
+                feedProjectDetailLoadingIds.remove(project.id)
             }
         } catch {
             await MainActor.run {
-                if currentProject?.id == project.id {
-                    feedProjectDetailError = error.localizedDescription
-                }
+                feedProjectDetailErrorsById[project.id] = error.localizedDescription
+                feedProjectDetailLoadingIds.remove(project.id)
             }
         }
     }

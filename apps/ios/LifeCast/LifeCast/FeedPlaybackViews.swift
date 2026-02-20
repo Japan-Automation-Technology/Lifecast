@@ -151,9 +151,9 @@ struct CreatorPostedFeedView: View {
     @State private var postedPauseIndicatorToken = UUID()
     @State private var isPostedFeedEdgeBoosting = false
     @State private var showFeedProjectPanel = false
-    @State private var feedProjectDetail: MyProjectResult?
-    @State private var feedProjectDetailLoading = false
-    @State private var feedProjectDetailError = ""
+    @State private var feedProjectDetailsById: [UUID: MyProjectResult] = [:]
+    @State private var feedProjectDetailLoadingIds: Set<UUID> = []
+    @State private var feedProjectDetailErrorsById: [UUID: String] = [:]
     @State private var showComments = false
     @State private var showShare = false
     @State private var showActions = false
@@ -282,6 +282,7 @@ struct CreatorPostedFeedView: View {
         .onAppear {
             syncPlayerForCurrentIndex()
             Task {
+                await prefetchPostedFeedProjectDetails(around: currentIndex)
                 await refreshCurrentVideoEngagement()
                 await refreshOwnCreatorProfileIfNeeded()
             }
@@ -289,6 +290,7 @@ struct CreatorPostedFeedView: View {
         .onChange(of: currentIndex) { _, _ in
             syncPlayerForCurrentIndex()
             Task {
+                await prefetchPostedFeedProjectDetails(around: currentIndex)
                 await refreshCurrentVideoEngagement()
             }
         }
@@ -505,16 +507,16 @@ struct CreatorPostedFeedView: View {
     }
 
     private func feedProjectPanel(project: FeedProjectSummary, width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let cachedDetail = feedProjectDetailsById[project.id]
+        let isLoading = feedProjectDetailLoadingIds.contains(project.id)
+        let errorText = feedProjectDetailErrorsById[project.id] ?? ""
+
+        return VStack(alignment: .leading, spacing: 12) {
             Text("Project")
                 .font(.headline)
                 .foregroundStyle(.white)
 
-            if feedProjectDetailLoading {
-                ProgressView("Loading project...")
-                    .tint(.white)
-                    .foregroundStyle(.white.opacity(0.85))
-            } else if let detail = feedProjectDetail {
+            if let detail = cachedDetail {
                 Text(detail.title)
                     .font(.headline)
                     .foregroundStyle(.white)
@@ -540,6 +542,10 @@ struct CreatorPostedFeedView: View {
                         .font(.footnote)
                         .foregroundStyle(.white.opacity(0.9))
                 }
+            } else if isLoading {
+                ProgressView("Loading project...")
+                    .tint(.white)
+                    .foregroundStyle(.white.opacity(0.85))
             } else {
                 Text(project.caption)
                     .font(.footnote)
@@ -552,8 +558,8 @@ struct CreatorPostedFeedView: View {
                     .foregroundStyle(.white.opacity(0.85))
             }
 
-            if !feedProjectDetailError.isEmpty {
-                Text(feedProjectDetailError)
+            if !errorText.isEmpty {
+                Text(errorText)
                     .font(.caption)
                     .foregroundStyle(.red)
             }
@@ -992,7 +998,7 @@ struct CreatorPostedFeedView: View {
         }
         player?.pause()
         Task {
-            await loadPostedFeedProjectDetail(for: project)
+            await loadPostedFeedProjectDetail(for: project, forceRefresh: false)
         }
     }
 
@@ -1009,25 +1015,37 @@ struct CreatorPostedFeedView: View {
         showFeedProjectPanel = false
     }
 
-    private func loadPostedFeedProjectDetail(for project: FeedProjectSummary) async {
+    private func loadPostedFeedProjectDetail(for project: FeedProjectSummary, forceRefresh: Bool) async {
+        if !forceRefresh, feedProjectDetailsById[project.id] != nil { return }
+        if feedProjectDetailLoadingIds.contains(project.id) { return }
+
         await MainActor.run {
-            feedProjectDetailLoading = true
-            feedProjectDetailError = ""
-        }
-        defer {
-            Task { @MainActor in
-                feedProjectDetailLoading = false
-            }
+            feedProjectDetailLoadingIds.insert(project.id)
+            feedProjectDetailErrorsById[project.id] = nil
         }
         do {
             let page = try await client.getCreatorPage(creatorUserId: project.creatorId)
             await MainActor.run {
-                feedProjectDetail = page.project
+                if let detail = page.project {
+                    feedProjectDetailsById[project.id] = detail
+                } else {
+                    feedProjectDetailErrorsById[project.id] = "No project detail found."
+                }
+                feedProjectDetailLoadingIds.remove(project.id)
             }
         } catch {
             await MainActor.run {
-                feedProjectDetailError = error.localizedDescription
+                feedProjectDetailErrorsById[project.id] = error.localizedDescription
+                feedProjectDetailLoadingIds.remove(project.id)
             }
+        }
+    }
+
+    private func prefetchPostedFeedProjectDetails(around index: Int) async {
+        guard !feedVideos.isEmpty else { return }
+        let indices = [index - 1, index, index + 1].filter { $0 >= 0 && $0 < feedVideos.count }
+        for _ in indices {
+            await loadPostedFeedProjectDetail(for: currentProject, forceRefresh: false)
         }
     }
 
