@@ -94,7 +94,8 @@ struct MeTabView: View {
                                     PostedVideosListView(
                                         videos: myVideos,
                                         errorText: myVideosError,
-                                        onRefreshVideos: onRefreshVideos
+                                        onRefreshVideos: onRefreshVideos,
+                                        creatorProfile: myProfile
                                     )
                                 } else {
                                     SupportedProjectsListView(

@@ -16,6 +16,8 @@ struct SupportFlowDemoView: View {
     @State private var homeFeedObservedPlayer: AVPlayer?
     @State private var homeFeedPlaybackProgress: Double = 0
     @State private var isHomeFeedScrubbing = false
+    @State private var showHomePauseIndicator = false
+    @State private var homePauseIndicatorToken = UUID()
     @State private var isHomeFeedEdgeBoosting = false
     @State private var showFeedProjectPanel = false
     @State private var feedProjectDetail: MyProjectResult?
@@ -45,6 +47,7 @@ struct SupportFlowDemoView: View {
     @State private var commentsError = ""
     @State private var pendingCommentBody = ""
     @State private var commentsSubmitting = false
+    @State private var showFeedActions = false
 
     @State private var errorText = ""
 
@@ -150,6 +153,15 @@ struct SupportFlowDemoView: View {
         } message: {
             Text("Choose one action")
         }
+        .confirmationDialog("Video options", isPresented: $showFeedActions, titleVisibility: .visible) {
+            Button("Not recommend like this") {
+                errorText = "Preference saved."
+            }
+            Button("Report", role: .destructive) {
+                errorText = "Thanks. We received your report."
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .sheet(isPresented: $showSupportFlow, onDismiss: handleSupportFlowDismiss) {
             supportFlowSheet
         }
@@ -208,6 +220,11 @@ struct SupportFlowDemoView: View {
             syncHomeFeedPlayer()
             Task {
                 await refreshCurrentVideoEngagement()
+            }
+        }
+        .onChange(of: feedMode) { _, _ in
+            Task {
+                await refreshFeedProjectsFromAPI()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { note in
@@ -336,6 +353,17 @@ struct SupportFlowDemoView: View {
                     .padding(.top, 120)
                     .padding(.bottom, appBottomBarHeight + 140)
                 }
+            }
+
+            if useLivePlayer && showHomePauseIndicator {
+                Image(systemName: "pause.fill")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(20)
+                    .background(Color.black.opacity(0.4))
+                    .clipShape(Circle())
+                    .transition(.opacity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
 
             VStack(spacing: 8) {
@@ -563,8 +591,51 @@ struct SupportFlowDemoView: View {
             } label: {
                 metricView(icon: "square.and.arrow.up.fill", value: 0, labelOverride: "Share")
             }
+            Button {
+                showFeedActions = true
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.title2)
+            }
+            .padding(.vertical, 6)
+            Button {
+                if project.creatorId == myProfile?.creator_user_id {
+                    selectedTab = 3
+                } else {
+                    selectedCreatorRoute = CreatorRoute(id: project.creatorId)
+                }
+            } label: {
+                feedCreatorAvatar(urlString: project.creatorAvatarURL, username: project.username)
+            }
+            .buttonStyle(.plain)
         }
         .foregroundStyle(.white)
+    }
+
+    private func feedCreatorAvatar(urlString: String?, username: String) -> some View {
+        Group {
+            if let avatar = urlString, let url = URL(string: avatar) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    default:
+                        Circle().fill(Color.white.opacity(0.2))
+                    }
+                }
+            } else {
+                Circle().fill(Color.white.opacity(0.2))
+            }
+        }
+        .frame(width: 38, height: 38)
+        .overlay {
+            if urlString == nil {
+                Text(String(username.prefix(1)).uppercased())
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .clipShape(Circle())
     }
 
     private func metricButton(icon: String, value: Int, isActive: Bool = false, action: @escaping () -> Void) -> some View {
@@ -621,8 +692,21 @@ struct SupportFlowDemoView: View {
                         HStack(alignment: .top, spacing: 10) {
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack(spacing: 6) {
-                                    Text("@\(comment.username)")
-                                        .font(.subheadline.weight(.semibold))
+                                    Button {
+                                        guard let userId = comment.userId else { return }
+                                        showComments = false
+                                        DispatchQueue.main.async {
+                                            if userId == myProfile?.creator_user_id {
+                                                selectedTab = 3
+                                            } else {
+                                                selectedCreatorRoute = CreatorRoute(id: userId)
+                                            }
+                                        }
+                                    } label: {
+                                        Text("@\(comment.username)")
+                                            .font(.subheadline.weight(.semibold))
+                                    }
+                                    .buttonStyle(.plain)
                                     if comment.isSupporter {
                                         Text("SUPPORTER")
                                             .font(.caption2.bold())
@@ -636,12 +720,19 @@ struct SupportFlowDemoView: View {
                                     .font(.body)
                             }
                             Spacer()
-                            VStack(spacing: 4) {
-                                Image(systemName: "heart")
-                                Text("\(comment.likes)")
-                                    .font(.caption)
+                            Button {
+                                Task {
+                                    await toggleLikeForComment(comment)
+                                }
+                            } label: {
+                                VStack(spacing: 4) {
+                                    Image(systemName: comment.isLikedByCurrentUser ? "heart.fill" : "heart")
+                                    Text("\(comment.likes)")
+                                        .font(.caption)
+                                }
+                                .foregroundStyle(comment.isLikedByCurrentUser ? Color.pink : Color.secondary)
                             }
-                            .foregroundStyle(.secondary)
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -857,6 +948,7 @@ struct SupportFlowDemoView: View {
                             id: existing.id,
                             creatorId: existing.creatorId,
                             username: existing.username,
+                            creatorAvatarURL: existing.creatorAvatarURL,
                             caption: existing.caption,
                             videoId: existing.videoId,
                             playbackURL: existing.playbackURL,
@@ -1055,7 +1147,16 @@ struct SupportFlowDemoView: View {
     }
 
     private func refreshFeedProjectsFromAPI() async {
-        let rows = (try? await client.listFeedProjects(limit: 20)) ?? []
+        let baseRows = (try? await client.listFeedProjects(limit: 20)) ?? []
+        let rows: [FeedProjectRow]
+        switch feedMode {
+        case .forYou:
+            rows = baseRows
+        case .following:
+            let followingCreatorIds = await fetchFollowingCreatorIds()
+            rows = baseRows.filter { followingCreatorIds.contains($0.creator_user_id) }
+        }
+
         let updated = await buildExpandedFeedProjects(from: rows)
         await MainActor.run {
             let previousVideoId = feedProjects[safe: currentFeedIndex]?.videoId
@@ -1074,6 +1175,11 @@ struct SupportFlowDemoView: View {
             syncHomeFeedPlayer()
         }
         await refreshCurrentVideoEngagement()
+    }
+
+    private func fetchFollowingCreatorIds() async -> Set<UUID> {
+        guard let network = try? await client.getMyNetwork(tab: .following, limit: 200) else { return [] }
+        return Set(network.rows.map(\.creator_user_id))
     }
 
     private func refreshCurrentVideoEngagement() async {
@@ -1108,6 +1214,7 @@ struct SupportFlowDemoView: View {
                             id: row.project_id,
                             creatorId: row.creator_user_id,
                             username: row.username,
+                            creatorAvatarURL: page.profile.avatar_url ?? row.creator_avatar_url,
                             caption: row.caption,
                             videoId: video.video_id,
                             playbackURL: video.playback_url,
@@ -1131,6 +1238,7 @@ struct SupportFlowDemoView: View {
                         id: row.project_id,
                         creatorId: row.creator_user_id,
                         username: row.username,
+                        creatorAvatarURL: row.creator_avatar_url,
                         caption: row.caption,
                         videoId: row.video_id,
                         playbackURL: row.playback_url,
@@ -1256,6 +1364,52 @@ struct SupportFlowDemoView: View {
         }
     }
 
+    private func toggleLikeForComment(_ comment: FeedComment) async {
+        guard let videoId = currentProject?.videoId else { return }
+        guard isAuthenticated else {
+            await MainActor.run {
+                showAuthSheet = true
+            }
+            return
+        }
+        let optimistic = FeedComment(
+            id: comment.id,
+            userId: comment.userId,
+            username: comment.username,
+            body: comment.body,
+            likes: max(0, comment.likes + (comment.isLikedByCurrentUser ? -1 : 1)),
+            createdAt: comment.createdAt,
+            isLikedByCurrentUser: !comment.isLikedByCurrentUser,
+            isSupporter: comment.isSupporter
+        )
+        await MainActor.run {
+            replaceComment(videoId: videoId, with: optimistic)
+        }
+        do {
+            let engagement = comment.isLikedByCurrentUser
+                ? try await client.unlikeVideoComment(videoId: videoId, commentId: comment.id)
+                : try await client.likeVideoComment(videoId: videoId, commentId: comment.id)
+            await MainActor.run {
+                let resolved = FeedComment(
+                    id: comment.id,
+                    userId: comment.userId,
+                    username: comment.username,
+                    body: comment.body,
+                    likes: engagement.likes,
+                    createdAt: comment.createdAt,
+                    isLikedByCurrentUser: engagement.is_liked_by_current_user,
+                    isSupporter: comment.isSupporter
+                )
+                replaceComment(videoId: videoId, with: resolved)
+            }
+        } catch {
+            await MainActor.run {
+                replaceComment(videoId: videoId, with: comment)
+                commentsError = "Failed to like comment: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func applyVideoEngagement(videoId: UUID, engagement: VideoEngagementResult) {
         feedProjects = feedProjects.map { item in
             guard item.videoId == videoId else { return item }
@@ -1263,6 +1417,7 @@ struct SupportFlowDemoView: View {
                 id: item.id,
                 creatorId: item.creatorId,
                 username: item.username,
+                creatorAvatarURL: item.creatorAvatarURL,
                 caption: item.caption,
                 videoId: item.videoId,
                 playbackURL: item.playbackURL,
@@ -1283,12 +1438,21 @@ struct SupportFlowDemoView: View {
         let parsedDate = ISO8601DateFormatter().date(from: row.created_at) ?? .now
         return FeedComment(
             id: row.comment_id,
+            userId: row.user_id,
             username: row.username,
             body: row.body,
             likes: row.likes,
             createdAt: parsedDate,
+            isLikedByCurrentUser: row.is_liked_by_current_user,
             isSupporter: row.is_supporter
         )
+    }
+
+    private func replaceComment(videoId: UUID, with updated: FeedComment) {
+        var list = commentsByVideoId[videoId] ?? []
+        guard let index = list.firstIndex(where: { $0.id == updated.id }) else { return }
+        list[index] = updated
+        commentsByVideoId[videoId] = list
     }
 
     private func syncHomeFeedPlayer() {
@@ -1397,10 +1561,25 @@ struct SupportFlowDemoView: View {
         guard let player = homeFeedPlayer else { return }
         if player.timeControlStatus == .playing {
             player.pause()
+            showHomePauseIndicatorTemporarily()
         } else if !showFeedProjectPanel {
             player.play()
             if isHomeFeedEdgeBoosting {
                 player.rate = 2.0
+            }
+        }
+    }
+
+    private func showHomePauseIndicatorTemporarily() {
+        let token = UUID()
+        homePauseIndicatorToken = token
+        withAnimation(.easeOut(duration: 0.12)) {
+            showHomePauseIndicator = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard homePauseIndicatorToken == token else { return }
+            withAnimation(.easeOut(duration: 0.18)) {
+                showHomePauseIndicator = false
             }
         }
     }

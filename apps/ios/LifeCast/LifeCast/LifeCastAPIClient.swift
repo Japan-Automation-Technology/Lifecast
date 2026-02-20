@@ -124,6 +124,7 @@ struct FeedProjectRow: Decodable, Identifiable {
     let project_id: UUID
     let creator_user_id: UUID
     let username: String
+    let creator_avatar_url: String?
     let caption: String
     let video_id: UUID?
     let playback_url: String?
@@ -158,6 +159,7 @@ struct VideoCommentRow: Decodable, Identifiable {
     let body: String
     let created_at: String
     let likes: Int
+    let is_liked_by_current_user: Bool
     let is_supporter: Bool
 
     var id: UUID { comment_id }
@@ -173,6 +175,11 @@ struct CreateVideoCommentRequest: Encodable {
 
 struct CreateVideoCommentResult: Decodable {
     let comment: VideoCommentRow
+}
+
+struct CommentEngagementResult: Decodable {
+    let likes: Int
+    let is_liked_by_current_user: Bool
 }
 
 enum CreatorNetworkTab: String, CaseIterable {
@@ -779,6 +786,24 @@ final class LifeCastAPIClient {
             idempotencyKey: "ios-comment-video-\(videoId.uuidString)-\(UUID().uuidString)"
         )
         return result.comment
+    }
+
+    func likeVideoComment(videoId: UUID, commentId: UUID) async throws -> CommentEngagementResult {
+        try await send(
+            path: "/v1/videos/\(videoId.uuidString)/comments/\(commentId.uuidString)/like",
+            method: "PUT",
+            body: Optional<String>.none,
+            idempotencyKey: "ios-like-comment-\(commentId.uuidString)"
+        )
+    }
+
+    func unlikeVideoComment(videoId: UUID, commentId: UUID) async throws -> CommentEngagementResult {
+        try await send(
+            path: "/v1/videos/\(videoId.uuidString)/comments/\(commentId.uuidString)/like",
+            method: "DELETE",
+            body: Optional<String>.none,
+            idempotencyKey: "ios-unlike-comment-\(commentId.uuidString)"
+        )
     }
 
     func getCreatorPage(creatorUserId: UUID) async throws -> CreatorPublicPageResult {

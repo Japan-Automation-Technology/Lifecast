@@ -4,6 +4,7 @@ struct PostedVideosListView: View {
     let videos: [MyVideo]
     let errorText: String
     let onRefreshVideos: () -> Void
+    let creatorProfile: CreatorPublicProfile?
     @State private var selectedVideo: MyVideo?
     @State private var thumbnailCacheBust = UUID().uuidString
 
@@ -94,10 +95,11 @@ struct PostedVideosListView: View {
                 videos: newestFirstVideos,
                 initialVideoId: video.video_id,
                 client: LifeCastAPIClient(baseURL: URL(string: "http://localhost:8080")!),
-                projectContext: sampleProjects.first ?? FeedProjectSummary(
+                projectContext: FeedProjectSummary(
                     id: UUID(),
-                    creatorId: UUID(),
-                    username: "lifecast_maker",
+                    creatorId: creatorProfile?.creator_user_id ?? UUID(),
+                    username: creatorProfile?.username ?? "lifecast_maker",
+                    creatorAvatarURL: creatorProfile?.avatar_url,
                     caption: "Prototype update",
                     videoId: nil,
                     playbackURL: nil,
@@ -145,6 +147,8 @@ struct CreatorPostedFeedView: View {
     @State private var postedFeedObservedPlayer: AVPlayer?
     @State private var postedFeedPlaybackProgress: Double = 0
     @State private var isPostedFeedScrubbing = false
+    @State private var showPostedPauseIndicator = false
+    @State private var postedPauseIndicatorToken = UUID()
     @State private var isPostedFeedEdgeBoosting = false
     @State private var showFeedProjectPanel = false
     @State private var feedProjectDetail: MyProjectResult?
@@ -160,6 +164,8 @@ struct CreatorPostedFeedView: View {
     @State private var commentsError = ""
     @State private var pendingCommentBody = ""
     @State private var commentsSubmitting = false
+    @State private var selectedCreatorRoute: CreatorRoute?
+    @State private var creatorProfileOverride: CreatorPublicProfile?
 
     init(
         videos: [MyVideo],
@@ -277,6 +283,7 @@ struct CreatorPostedFeedView: View {
             syncPlayerForCurrentIndex()
             Task {
                 await refreshCurrentVideoEngagement()
+                await refreshOwnCreatorProfileIfNeeded()
             }
         }
         .onChange(of: currentIndex) { _, _ in
@@ -302,15 +309,45 @@ struct CreatorPostedFeedView: View {
                 prepared.pause()
             }
         }
+        .fullScreenCover(item: $selectedCreatorRoute) { route in
+            CreatorPublicPageView(
+                client: client,
+                creatorId: route.id,
+                onSupportTap: { _ in }
+            )
+        }
     }
 
     private var currentProject: FeedProjectSummary {
-        guard let videoId = currentVideoId else { return projectContext }
-        guard let engagement = engagementByVideoId[videoId] else { return projectContext }
+        let resolvedCreatorId = isCurrentUserVideo ? (creatorProfileOverride?.creator_user_id ?? projectContext.creatorId) : projectContext.creatorId
+        let resolvedUsername = isCurrentUserVideo ? (creatorProfileOverride?.username ?? projectContext.username) : projectContext.username
+        let resolvedAvatarURL = isCurrentUserVideo ? (creatorProfileOverride?.avatar_url ?? projectContext.creatorAvatarURL) : projectContext.creatorAvatarURL
+        guard let videoId = currentVideoId else {
+            return FeedProjectSummary(
+                id: projectContext.id,
+                creatorId: resolvedCreatorId,
+                username: resolvedUsername,
+                creatorAvatarURL: resolvedAvatarURL,
+                caption: projectContext.caption,
+                videoId: projectContext.videoId,
+                playbackURL: projectContext.playbackURL,
+                thumbnailURL: projectContext.thumbnailURL,
+                minPlanPriceMinor: projectContext.minPlanPriceMinor,
+                goalAmountMinor: projectContext.goalAmountMinor,
+                fundedAmountMinor: projectContext.fundedAmountMinor,
+                remainingDays: projectContext.remainingDays,
+                likes: projectContext.likes,
+                comments: projectContext.comments,
+                isLikedByCurrentUser: projectContext.isLikedByCurrentUser,
+                isSupportedByCurrentUser: projectContext.isSupportedByCurrentUser
+            )
+        }
+        let engagement = engagementByVideoId[videoId]
         return FeedProjectSummary(
             id: projectContext.id,
-            creatorId: projectContext.creatorId,
-            username: projectContext.username,
+            creatorId: resolvedCreatorId,
+            username: resolvedUsername,
+            creatorAvatarURL: resolvedAvatarURL,
             caption: projectContext.caption,
             videoId: videoId,
             playbackURL: projectContext.playbackURL,
@@ -319,9 +356,9 @@ struct CreatorPostedFeedView: View {
             goalAmountMinor: projectContext.goalAmountMinor,
             fundedAmountMinor: projectContext.fundedAmountMinor,
             remainingDays: projectContext.remainingDays,
-            likes: engagement.likes,
-            comments: engagement.comments,
-            isLikedByCurrentUser: engagement.is_liked_by_current_user,
+            likes: engagement?.likes ?? projectContext.likes,
+            comments: engagement?.comments ?? projectContext.comments,
+            isLikedByCurrentUser: engagement?.is_liked_by_current_user ?? projectContext.isLikedByCurrentUser,
             isSupportedByCurrentUser: projectContext.isSupportedByCurrentUser
         )
     }
@@ -374,11 +411,29 @@ struct CreatorPostedFeedView: View {
                 }
             }
 
+            if useLivePlayer && showPostedPauseIndicator {
+                Image(systemName: "pause.fill")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(20)
+                    .background(Color.black.opacity(0.4))
+                    .clipShape(Circle())
+                    .transition(.opacity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            }
+
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("@\(project.username)")
-                        .font(.headline)
-                        .foregroundStyle(.white)
+                    Button("@\(project.username)") {
+                        if isCurrentUserVideo {
+                            dismiss()
+                        } else {
+                            selectedCreatorRoute = CreatorRoute(id: project.creatorId)
+                        }
+                    }
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .buttonStyle(.plain)
 
                     Text(project.caption)
                         .font(.subheadline)
@@ -552,9 +607,46 @@ struct CreatorPostedFeedView: View {
                 Image(systemName: "ellipsis")
                     .font(.title2)
             }
+            .padding(.vertical, 6)
             .accessibilityIdentifier("video-actions")
+            Button {
+                if isCurrentUserVideo {
+                    dismiss()
+                } else {
+                    selectedCreatorRoute = CreatorRoute(id: project.creatorId)
+                }
+            } label: {
+                feedCreatorAvatar(urlString: project.creatorAvatarURL, username: project.username)
+            }
+            .buttonStyle(.plain)
         }
         .foregroundStyle(.white)
+    }
+
+    private func feedCreatorAvatar(urlString: String?, username: String) -> some View {
+        Group {
+            if let avatar = urlString, let url = URL(string: avatar) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    default:
+                        Circle().fill(Color.white.opacity(0.2))
+                    }
+                }
+            } else {
+                Circle().fill(Color.white.opacity(0.2))
+            }
+        }
+        .frame(width: 38, height: 38)
+        .overlay {
+            if urlString == nil {
+                Text(String(username.prefix(1)).uppercased())
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .clipShape(Circle())
     }
 
     private func metricButton(icon: String, value: Int, isActive: Bool = false, action: @escaping () -> Void) -> some View {
@@ -627,8 +719,21 @@ struct CreatorPostedFeedView: View {
                         HStack(alignment: .top, spacing: 10) {
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack(spacing: 6) {
-                                    Text("@\(comment.username)")
-                                        .font(.subheadline.weight(.semibold))
+                                    Button {
+                                        guard let userId = comment.userId else { return }
+                                        showComments = false
+                                        DispatchQueue.main.async {
+                                            if isCurrentUserVideo, userId == currentProject.creatorId {
+                                                dismiss()
+                                            } else {
+                                                selectedCreatorRoute = CreatorRoute(id: userId)
+                                            }
+                                        }
+                                    } label: {
+                                        Text("@\(comment.username)")
+                                            .font(.subheadline.weight(.semibold))
+                                    }
+                                    .buttonStyle(.plain)
                                     if comment.isSupporter {
                                         Text("SUPPORTER")
                                             .font(.caption2.bold())
@@ -642,12 +747,19 @@ struct CreatorPostedFeedView: View {
                                     .font(.body)
                             }
                             Spacer()
-                            VStack(spacing: 4) {
-                                Image(systemName: "heart")
-                                Text("\(comment.likes)")
-                                    .font(.caption)
+                            Button {
+                                Task {
+                                    await toggleLikeForComment(comment)
+                                }
+                            } label: {
+                                VStack(spacing: 4) {
+                                    Image(systemName: comment.isLikedByCurrentUser ? "heart.fill" : "heart")
+                                    Text("\(comment.likes)")
+                                        .font(.caption)
+                                }
+                                .foregroundStyle(comment.isLikedByCurrentUser ? Color.pink : Color.secondary)
                             }
-                            .foregroundStyle(.secondary)
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -781,10 +893,25 @@ struct CreatorPostedFeedView: View {
         guard let targetPlayer = player else { return }
         if targetPlayer.timeControlStatus == .playing {
             targetPlayer.pause()
+            showPostedPauseIndicatorTemporarily()
         } else if !showFeedProjectPanel {
             targetPlayer.play()
             if isPostedFeedEdgeBoosting {
                 targetPlayer.rate = 2.0
+            }
+        }
+    }
+
+    private func showPostedPauseIndicatorTemporarily() {
+        let token = UUID()
+        postedPauseIndicatorToken = token
+        withAnimation(.easeOut(duration: 0.12)) {
+            showPostedPauseIndicator = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard postedPauseIndicatorToken == token else { return }
+            withAnimation(.easeOut(duration: 0.18)) {
+                showPostedPauseIndicator = false
             }
         }
     }
@@ -937,6 +1064,18 @@ struct CreatorPostedFeedView: View {
         } catch {}
     }
 
+    private func refreshOwnCreatorProfileIfNeeded() async {
+        guard isCurrentUserVideo else { return }
+        do {
+            let profile = try await client.getMyProfile().profile
+            await MainActor.run {
+                creatorProfileOverride = profile
+            }
+        } catch {
+            // Keep existing context when profile refresh fails.
+        }
+    }
+
     private func toggleLikeForCurrentVideo() async {
         guard let videoId = currentVideoId else { return }
         let previous = engagementByVideoId[videoId] ?? VideoEngagementResult(
@@ -1020,16 +1159,65 @@ struct CreatorPostedFeedView: View {
         }
     }
 
+    private func toggleLikeForComment(_ comment: FeedComment) async {
+        guard let videoId = currentVideoId else { return }
+        let optimistic = FeedComment(
+            id: comment.id,
+            userId: comment.userId,
+            username: comment.username,
+            body: comment.body,
+            likes: max(0, comment.likes + (comment.isLikedByCurrentUser ? -1 : 1)),
+            createdAt: comment.createdAt,
+            isLikedByCurrentUser: !comment.isLikedByCurrentUser,
+            isSupporter: comment.isSupporter
+        )
+        await MainActor.run {
+            replaceComment(videoId: videoId, with: optimistic)
+        }
+        do {
+            let engagement = comment.isLikedByCurrentUser
+                ? try await client.unlikeVideoComment(videoId: videoId, commentId: comment.id)
+                : try await client.likeVideoComment(videoId: videoId, commentId: comment.id)
+            await MainActor.run {
+                let resolved = FeedComment(
+                    id: comment.id,
+                    userId: comment.userId,
+                    username: comment.username,
+                    body: comment.body,
+                    likes: engagement.likes,
+                    createdAt: comment.createdAt,
+                    isLikedByCurrentUser: engagement.is_liked_by_current_user,
+                    isSupporter: comment.isSupporter
+                )
+                replaceComment(videoId: videoId, with: resolved)
+            }
+        } catch {
+            await MainActor.run {
+                replaceComment(videoId: videoId, with: comment)
+                commentsError = "Failed to like comment: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func mapVideoCommentRow(_ row: VideoCommentRow) -> FeedComment {
         let parsedDate = ISO8601DateFormatter().date(from: row.created_at) ?? .now
         return FeedComment(
             id: row.comment_id,
+            userId: row.user_id,
             username: row.username,
             body: row.body,
             likes: row.likes,
             createdAt: parsedDate,
+            isLikedByCurrentUser: row.is_liked_by_current_user,
             isSupporter: row.is_supporter
         )
+    }
+
+    private func replaceComment(videoId: UUID, with updated: FeedComment) {
+        var list = commentsByVideoId[videoId] ?? []
+        guard let index = list.firstIndex(where: { $0.id == updated.id }) else { return }
+        list[index] = updated
+        commentsByVideoId[videoId] = list
     }
 
     private func formatJPY(_ amountMinor: Int) -> String {

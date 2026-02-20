@@ -268,6 +268,37 @@ async function loadVideoEngagement(client: PoolClient, videoId: string, viewerUs
   };
 }
 
+async function loadCommentEngagement(client: PoolClient, commentId: string, viewerUserId: string | null) {
+  const result = await client.query<{
+    likes: string | number;
+    is_liked_by_current_user: boolean;
+  }>(
+    `
+      select
+        coalesce((
+          select count(*)
+          from video_comment_likes vcl
+          where vcl.comment_id = $1
+        ), 0) as likes,
+        case
+          when $2::uuid is null then false
+          else exists(
+            select 1
+            from video_comment_likes vcl
+            where vcl.comment_id = $1
+              and vcl.user_id = $2::uuid
+          )
+        end as is_liked_by_current_user
+    `,
+    [commentId, viewerUserId],
+  );
+
+  return {
+    likes: Number(result.rows[0]?.likes ?? 0),
+    is_liked_by_current_user: Boolean(result.rows[0]?.is_liked_by_current_user),
+  };
+}
+
 export async function registerDiscoverRoutes(app: FastifyInstance) {
   app.get("/v1/feed/projects", async (req, reply) => {
     const parsed = feedQuery.safeParse(req.query ?? {});
@@ -293,6 +324,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         project_id: string;
         creator_user_id: string;
         username: string;
+        creator_avatar_url: string | null;
         caption: string | null;
         video_id: string | null;
         min_plan_price_minor: string | number;
@@ -309,6 +341,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
           p.id as project_id,
           p.creator_user_id,
           coalesce(cp.username, u.username, 'user_' || left(p.creator_user_id::text, 8)) as username,
+          coalesce(cp.avatar_url, u.avatar_url) as creator_avatar_url,
           coalesce(
             nullif(concat_ws(' · ', p.title, nullif(p.subtitle, '')), ''),
             nullif(p.description, ''),
@@ -389,6 +422,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             project_id: row.project_id,
             creator_user_id: row.creator_user_id,
             username: row.username,
+            creator_avatar_url: row.creator_avatar_url,
             caption: row.caption ?? "Project update",
             video_id: row.video_id,
             playback_url: row.video_id ? `${publicBaseUrl}/v1/videos/${row.video_id}/playback` : null,
@@ -522,6 +556,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       return reply.send(ok({ rows: [] }));
     }
 
+    const viewerUserId = req.lifecastAuth.userId;
     const client = await dbPool.connect();
     try {
       const rows = await client.query<{
@@ -531,6 +566,8 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         display_name: string | null;
         body: string;
         created_at: string;
+        likes: string | number;
+        is_liked_by_current_user: boolean;
         is_supporter: boolean;
       }>(
         `
@@ -541,6 +578,20 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
           coalesce(cp.display_name, u.display_name) as display_name,
           vc.body,
           vc.created_at,
+          coalesce((
+            select count(*)
+            from video_comment_likes vcl
+            where vcl.comment_id = vc.id
+          ), 0) as likes,
+          case
+            when $3::uuid is null then false
+            else exists(
+              select 1
+              from video_comment_likes vcl
+              where vcl.comment_id = vc.id
+                and vcl.user_id = $3::uuid
+            )
+          end as is_liked_by_current_user,
           exists(
             select 1
             from video_assets va
@@ -557,7 +608,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         order by vc.created_at desc
         limit $2
       `,
-        [videoId, limit],
+        [videoId, limit, viewerUserId],
       );
       return reply.send(
         ok({
@@ -568,7 +619,8 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             display_name: row.display_name,
             body: row.body,
             created_at: row.created_at,
-            likes: 0,
+            likes: Number(row.likes),
+            is_liked_by_current_user: row.is_liked_by_current_user,
             is_supporter: row.is_supporter,
           })),
         }),
@@ -600,6 +652,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             body: body.data.body,
             created_at: new Date().toISOString(),
             likes: 0,
+            is_liked_by_current_user: false,
             is_supporter: false,
           },
         }),
@@ -658,6 +711,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             body: inserted.rows[0].body,
             created_at: inserted.rows[0].created_at,
             likes: 0,
+            is_liked_by_current_user: false,
             is_supporter: inserted.rows[0].is_supporter,
           },
         }),
@@ -668,6 +722,88 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Video not found"));
       }
       throw error;
+    } finally {
+      client.release();
+    }
+  });
+
+  app.put("/v1/videos/:videoId/comments/:commentId/like", async (req, reply) => {
+    const viewerUserId = requireRequestUserId(req, reply);
+    if (!viewerUserId) return;
+    const { videoId, commentId } = req.params as { videoId: string; commentId: string };
+    if (!z.string().uuid().safeParse(videoId).success || !z.string().uuid().safeParse(commentId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid video id or comment id"));
+    }
+    if (!hasDb() || !dbPool) {
+      return reply.send(ok({ likes: 0, is_liked_by_current_user: true }));
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const comment = await client.query<{ id: string }>(
+        `
+        select id
+        from video_comments
+        where id = $1
+          and video_id = $2
+        limit 1
+      `,
+        [commentId, videoId],
+      );
+      if (comment.rows.length === 0) {
+        return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Comment not found"));
+      }
+      await client.query(
+        `
+        insert into video_comment_likes (comment_id, user_id, created_at)
+        values ($1, $2, now())
+        on conflict do nothing
+      `,
+        [commentId, viewerUserId],
+      );
+      const engagement = await loadCommentEngagement(client, commentId, viewerUserId);
+      return reply.send(ok(engagement));
+    } finally {
+      client.release();
+    }
+  });
+
+  app.delete("/v1/videos/:videoId/comments/:commentId/like", async (req, reply) => {
+    const viewerUserId = requireRequestUserId(req, reply);
+    if (!viewerUserId) return;
+    const { videoId, commentId } = req.params as { videoId: string; commentId: string };
+    if (!z.string().uuid().safeParse(videoId).success || !z.string().uuid().safeParse(commentId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid video id or comment id"));
+    }
+    if (!hasDb() || !dbPool) {
+      return reply.send(ok({ likes: 0, is_liked_by_current_user: false }));
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const comment = await client.query<{ id: string }>(
+        `
+        select id
+        from video_comments
+        where id = $1
+          and video_id = $2
+        limit 1
+      `,
+        [commentId, videoId],
+      );
+      if (comment.rows.length === 0) {
+        return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Comment not found"));
+      }
+      await client.query(
+        `
+        delete from video_comment_likes
+        where comment_id = $1
+          and user_id = $2
+      `,
+        [commentId, viewerUserId],
+      );
+      const engagement = await loadCommentEngagement(client, commentId, viewerUserId);
+      return reply.send(ok(engagement));
     } finally {
       client.release();
     }

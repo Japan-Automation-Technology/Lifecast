@@ -37,6 +37,7 @@ struct FeedProjectSummary: Identifiable {
     let id: UUID
     let creatorId: UUID
     let username: String
+    let creatorAvatarURL: String?
     let caption: String
     let videoId: UUID?
     let playbackURL: String?
@@ -53,10 +54,12 @@ struct FeedProjectSummary: Identifiable {
 
 struct FeedComment: Identifiable {
     let id: UUID
+    let userId: UUID?
     let username: String
     let body: String
     let likes: Int
     let createdAt: Date
+    let isLikedByCurrentUser: Bool
     let isSupporter: Bool
 }
 
@@ -94,6 +97,7 @@ let sampleProjects: [FeedProjectSummary] = [
         id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
         creatorId: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
         username: "tak_game_lab",
+        creatorAvatarURL: nil,
         caption: "Building our handheld game prototype. Today: thermal and battery test.",
         videoId: nil,
         playbackURL: nil,
@@ -111,6 +115,7 @@ let sampleProjects: [FeedProjectSummary] = [
         id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
         creatorId: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!,
         username: "boardcraft_studio",
+        creatorAvatarURL: nil,
         caption: "Week 3: tuning tactile switches with community feedback.",
         videoId: nil,
         playbackURL: nil,
@@ -128,6 +133,7 @@ let sampleProjects: [FeedProjectSummary] = [
         id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
         creatorId: UUID(uuidString: "00000000-0000-0000-0000-000000000006")!,
         username: "mini_console_lab",
+        creatorAvatarURL: nil,
         caption: "Prototype shell test print. Need your vote on materials.",
         videoId: nil,
         playbackURL: nil,
@@ -144,7 +150,7 @@ let sampleProjects: [FeedProjectSummary] = [
 ]
 
 let sampleComments: [FeedComment] = [
-    FeedComment(id: UUID(), username: "pixel_rena", body: "Make the shell matte black please", likes: 420, createdAt: .now.addingTimeInterval(-3600), isSupporter: true),
-    FeedComment(id: UUID(), username: "retro_haru", body: "Thermal test looked promising!", likes: 210, createdAt: .now.addingTimeInterval(-7200), isSupporter: true),
-    FeedComment(id: UUID(), username: "kei_dev", body: "Can you share battery life at 60fps?", likes: 180, createdAt: .now.addingTimeInterval(-8600), isSupporter: false)
+    FeedComment(id: UUID(), userId: nil, username: "pixel_rena", body: "Make the shell matte black please", likes: 420, createdAt: .now.addingTimeInterval(-3600), isLikedByCurrentUser: false, isSupporter: true),
+    FeedComment(id: UUID(), userId: nil, username: "retro_haru", body: "Thermal test looked promising!", likes: 210, createdAt: .now.addingTimeInterval(-7200), isLikedByCurrentUser: false, isSupporter: true),
+    FeedComment(id: UUID(), userId: nil, username: "kei_dev", body: "Can you share battery life at 60fps?", likes: 180, createdAt: .now.addingTimeInterval(-8600), isLikedByCurrentUser: false, isSupporter: false)
 ]
