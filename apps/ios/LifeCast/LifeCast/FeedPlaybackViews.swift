@@ -191,11 +191,11 @@ struct CreatorPostedFeedView: View {
                 InteractiveVerticalFeedPager(
                     items: feedVideos,
                     currentIndex: $currentIndex,
-                    verticalDragDisabled: showFeedProjectPanel,
+                    verticalDragDisabled: false,
                     horizontalActionExclusionBottomInset: 28,
                     onWillMove: {
                         player?.pause()
-                        closePostedFeedProjectPanel()
+                        closePostedFeedProjectPanelForVerticalMove()
                     },
                     onDidMove: {
                         syncPlayerForCurrentIndex()
@@ -333,7 +333,7 @@ struct CreatorPostedFeedView: View {
 
     private func feedPage(video: MyVideo, project: FeedProjectSummary, useLivePlayer: Bool) -> some View {
         ZStack(alignment: .bottom) {
-            SlidingFeedPanelLayer(isPanelOpen: showFeedProjectPanel, cornerRadius: 0) {
+            SlidingFeedPanelLayer(isPanelOpen: showFeedProjectPanel && useLivePlayer, cornerRadius: 0) {
                 feedVideoLayer(video: video, useLivePlayer: useLivePlayer)
             } panelLayer: { width in
                 feedProjectPanel(project: project, width: width)
@@ -875,6 +875,11 @@ struct CreatorPostedFeedView: View {
             showFeedProjectPanel = false
         }
         syncPlayerForCurrentIndex()
+    }
+
+    private func closePostedFeedProjectPanelForVerticalMove() {
+        guard showFeedProjectPanel else { return }
+        showFeedProjectPanel = false
     }
 
     private func loadPostedFeedProjectDetail(for project: FeedProjectSummary) async {

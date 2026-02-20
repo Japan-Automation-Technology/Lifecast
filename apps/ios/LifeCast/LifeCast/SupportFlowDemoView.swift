@@ -229,11 +229,11 @@ struct SupportFlowDemoView: View {
                     InteractiveVerticalFeedPager(
                         items: feedProjects,
                         currentIndex: $currentFeedIndex,
-                        verticalDragDisabled: showFeedProjectPanel,
+                        verticalDragDisabled: false,
                         horizontalActionExclusionBottomInset: 28,
                         onWillMove: {
                             homeFeedPlayer?.pause()
-                            closeFeedProjectPanel()
+                            closeFeedProjectPanelForVerticalMove()
                         },
                         onDidMove: {
                             syncHomeFeedPlayer()
@@ -296,7 +296,7 @@ struct SupportFlowDemoView: View {
 
     private func feedCard(project: FeedProjectSummary, useLivePlayer: Bool = true) -> some View {
         ZStack(alignment: .bottom) {
-            SlidingFeedPanelLayer(isPanelOpen: showFeedProjectPanel, cornerRadius: 0) {
+            SlidingFeedPanelLayer(isPanelOpen: showFeedProjectPanel && useLivePlayer, cornerRadius: 0) {
                 feedVideoLayer(project: project, useLivePlayer: useLivePlayer)
             } panelLayer: { width in
                 feedProjectPanel(project: project, width: width)
@@ -1475,6 +1475,11 @@ struct SupportFlowDemoView: View {
             showFeedProjectPanel = false
         }
         syncHomeFeedPlayer()
+    }
+
+    private func closeFeedProjectPanelForVerticalMove() {
+        guard showFeedProjectPanel else { return }
+        showFeedProjectPanel = false
     }
 
     private func loadFeedProjectDetail(for project: FeedProjectSummary) async {
