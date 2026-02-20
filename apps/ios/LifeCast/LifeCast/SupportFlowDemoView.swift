@@ -10,6 +10,7 @@ struct SupportFlowDemoView: View {
     @State private var selectedTab = 0
     @State private var feedMode: FeedMode = .forYou
     @State private var currentFeedIndex = 0
+    @State private var isHomeFeedVisible = false
     @State private var homeFeedPlayer: AVPlayer? = nil
     @State private var homeFeedPlayerCache: [URL: AVPlayer] = [:]
     @State private var homeFeedPlayerObserver: Any?
@@ -301,6 +302,14 @@ struct SupportFlowDemoView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Color.clear
                 .frame(height: appBottomBarHeight)
+        }
+        .onAppear {
+            isHomeFeedVisible = true
+            syncHomeFeedPlayer()
+        }
+        .onDisappear {
+            isHomeFeedVisible = false
+            homeFeedPlayer?.pause()
         }
     }
 
@@ -1513,7 +1522,7 @@ struct SupportFlowDemoView: View {
     }
 
     private func syncHomeFeedPlayer() {
-        guard selectedTab == 0 else {
+        guard selectedTab == 0, isHomeFeedVisible else {
             setHomeFeedEdgeBoosting(false)
             homeFeedPlayer?.pause()
             homeFeedPlayer = nil

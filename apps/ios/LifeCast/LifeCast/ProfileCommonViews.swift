@@ -25,6 +25,11 @@ struct VideoGridPlaceholder: View {
 }
 
 struct ProfileTabIconStrip: View {
+    private enum TabIconType {
+        case projectRocket
+        case system(normal: String, selected: String)
+    }
+
     enum Style {
         case capsule
         case fullWidthUnderline
@@ -41,9 +46,9 @@ struct ProfileTabIconStrip: View {
         if isFullWidthUnderline {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
-                    iconButton(index: 0, systemName: "folder")
-                    iconButton(index: 1, systemName: "square.grid.3x3")
-                    iconButton(index: 2, systemName: "checkmark.seal")
+                    iconButton(index: 0, icon: .projectRocket)
+                    iconButton(index: 1, icon: .system(normal: "square.grid.3x3", selected: "square.grid.3x3.fill"))
+                    iconButton(index: 2, icon: .system(normal: "checkmark.seal", selected: "checkmark.seal.fill"))
                 }
                 HStack(spacing: 0) {
                     Rectangle()
@@ -58,9 +63,9 @@ struct ProfileTabIconStrip: View {
             .frame(maxWidth: .infinity)
         } else {
             HStack(spacing: 0) {
-                iconButton(index: 0, systemName: "folder")
-                iconButton(index: 1, systemName: "square.grid.3x3")
-                iconButton(index: 2, systemName: "checkmark.seal")
+                iconButton(index: 0, icon: .projectRocket)
+                iconButton(index: 1, icon: .system(normal: "square.grid.3x3", selected: "square.grid.3x3.fill"))
+                iconButton(index: 2, icon: .system(normal: "checkmark.seal", selected: "checkmark.seal.fill"))
             }
             .padding(4)
             .background(Color.secondary.opacity(0.12))
@@ -69,14 +74,22 @@ struct ProfileTabIconStrip: View {
         }
     }
 
-    private func iconButton(index: Int, systemName: String) -> some View {
+    private func iconButton(index: Int, icon: TabIconType) -> some View {
         Button {
             selectedIndex = index
         } label: {
             VStack(spacing: isFullWidthUnderline ? 0 : 6) {
-                Image(systemName: selectedIndex == index ? "\(systemName).fill" : systemName)
-                    .font(.system(size: isFullWidthUnderline ? 15 : 16, weight: .semibold))
-                    .foregroundStyle(.primary)
+                switch icon {
+                case .projectRocket:
+                    Image(selectedIndex == index ? "ProjectRocketBlack" : "ProjectRocketWhite")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: isFullWidthUnderline ? 19 : 20, height: isFullWidthUnderline ? 19 : 20)
+                case .system(let normal, let selected):
+                    Image(systemName: selectedIndex == index ? selected : normal)
+                        .font(.system(size: isFullWidthUnderline ? 15 : 16, weight: .semibold))
+                        .foregroundStyle(.primary)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, isFullWidthUnderline ? 6 : 10)
