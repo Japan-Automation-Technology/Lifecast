@@ -833,8 +833,27 @@ struct SupportFlowDemoView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 HStack {
-                    TextField("Add comment...", text: $pendingCommentBody)
-                        .textFieldStyle(.roundedBorder)
+                    if isAuthenticated {
+                        TextField("Add comment...", text: $pendingCommentBody)
+                            .textFieldStyle(.roundedBorder)
+                    } else {
+                        Button {
+                            showAuthSheet = true
+                        } label: {
+                            HStack {
+                                Text("Add comment...")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(height: 36)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
                     Button("Send") {
                         Task {
                             await submitCommentForCurrentVideo()
