@@ -290,6 +290,7 @@ struct CreateProjectRequest: Encodable {
     let title: String
     let subtitle: String?
     let image_url: String?
+    let image_urls: [String]?
     let category: String?
     let location: String?
     let goal_amount_minor: Int
@@ -1092,6 +1093,7 @@ final class LifeCastAPIClient {
         title: String,
         subtitle: String?,
         imageURL: String?,
+        imageURLs: [String]?,
         category: String?,
         location: String?,
         goalAmountMinor: Int,
@@ -1105,7 +1107,8 @@ final class LifeCastAPIClient {
         let body = CreateProjectRequest(
             title: title,
             subtitle: subtitle,
-            image_url: imageURL,
+            image_url: imageURLs?.first ?? imageURL,
+            image_urls: imageURLs,
             category: category,
             location: location,
             goal_amount_minor: goalAmountMinor,

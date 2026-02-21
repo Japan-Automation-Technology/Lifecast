@@ -13,6 +13,7 @@ const createProjectBody = z.object({
   title: z.string().min(1).max(120),
   subtitle: z.string().max(160).optional(),
   image_url: z.string().url().max(2048).optional(),
+  image_urls: z.array(z.string().url().max(2048)).min(1).max(5).optional(),
   category: z.string().max(80).optional(),
   location: z.string().max(120).optional(),
   goal_amount_minor: z.number().int().positive().optional(),
@@ -242,12 +243,16 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     if (!goalAmountMinor || goalAmountMinor <= 0) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "goal_amount_minor or funding_goal_minor is required"));
     }
+    const primaryImageUrl = body.data.image_urls?.[0]?.trim() || body.data.image_url?.trim() || null;
+    if (!primaryImageUrl) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "At least one project image is required"));
+    }
 
     const project = await store.createProjectForCreator({
       creatorUserId,
       title: body.data.title,
       subtitle: body.data.subtitle?.trim() || null,
-      imageUrl: body.data.image_url?.trim() || null,
+      imageUrl: primaryImageUrl,
       category: body.data.category?.trim() || null,
       location: body.data.location?.trim() || null,
       goalAmountMinor,

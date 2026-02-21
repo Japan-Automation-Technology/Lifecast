@@ -671,8 +671,8 @@ struct ProjectPageView: View {
     @State private var projectErrorText = ""
     @State private var projectTitle = ""
     @State private var projectSubtitle = ""
-    @State private var projectImageSelection: SelectedProjectImage?
-    @State private var projectCoverPickerItem: PhotosPickerItem?
+    @State private var projectImageSelections: [SelectedProjectImage] = []
+    @State private var projectCoverPickerItems: [PhotosPickerItem] = []
     @State private var projectCategory = ""
     @State private var projectLocation = ""
     @State private var projectGoalMinor = "500000"
@@ -791,9 +791,9 @@ struct ProjectPageView: View {
         } message: {
             Text("Project will be marked as ended. Refund policy is fixed to full refund.")
         }
-        .onChange(of: projectCoverPickerItem) { _, newValue in
+        .onChange(of: projectCoverPickerItems) { _, newValue in
             Task {
-                await loadProjectCover(from: newValue)
+                await loadProjectCovers(from: newValue)
             }
         }
     }
@@ -813,24 +813,34 @@ struct ProjectPageView: View {
                     .textFieldStyle(.roundedBorder)
             }
 
-            labeledField("Project Image", isOptional: true) {
+            labeledField("Project Images", isOptional: false) {
                 VStack(alignment: .leading, spacing: 8) {
-                    PhotosPicker(selection: $projectCoverPickerItem, matching: .images, photoLibrary: .shared()) {
-                        Label(projectImageSelection == nil ? "Select Cover Image" : "Change Cover Image", systemImage: "photo")
+                    PhotosPicker(selection: $projectCoverPickerItems, maxSelectionCount: 5, matching: .images, photoLibrary: .shared()) {
+                        Label(projectImageSelections.isEmpty ? "Select Project Images" : "Change Project Images", systemImage: "photo")
                     }
                     .buttonStyle(.bordered)
-                    if let projectImageSelection, let uiImage = UIImage(data: projectImageSelection.data) {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(height: 140)
-                            .frame(maxWidth: .infinity)
-                            .clipped()
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                    } else {
-                        Text("No image selected. A default placeholder will be used.")
+                    Text("Up to 5 images. At least 1 image is required.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if projectImageSelections.isEmpty {
+                        Text("No image selected.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(Array(projectImageSelections.enumerated()), id: \.offset) { _, selection in
+                                    if let uiImage = UIImage(data: selection.data) {
+                                        Image(uiImage: uiImage)
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 96, height: 96)
+                                            .clipped()
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1159,24 +1169,30 @@ struct ProjectPageView: View {
         )
     }
 
-    private func loadProjectCover(from pickerItem: PhotosPickerItem?) async {
-        guard let pickerItem else {
-            projectImageSelection = nil
+    private func loadProjectCovers(from pickerItems: [PhotosPickerItem]) async {
+        if pickerItems.isEmpty {
+            await MainActor.run {
+                projectImageSelections = []
+            }
             return
         }
         do {
-            guard let data = try await pickerItem.loadTransferable(type: Data.self) else {
-                throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Could not read selected image"])
+            var nextSelections: [SelectedProjectImage] = []
+            for pickerItem in pickerItems.prefix(5) {
+                guard let data = try await pickerItem.loadTransferable(type: Data.self) else {
+                    throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Could not read selected image"])
+                }
+                let fileName = pickerItem.itemIdentifier.map { "\($0).jpg" } ?? "project-cover.jpg"
+                let contentType = pickerItem.supportedContentTypes.first?.preferredMIMEType ?? UTType.jpeg.preferredMIMEType ?? "image/jpeg"
+                nextSelections.append(SelectedProjectImage(data: data, fileName: fileName, contentType: contentType))
             }
-            let fileName = pickerItem.itemIdentifier.map { "\($0).jpg" } ?? "project-cover.jpg"
-            let contentType = pickerItem.supportedContentTypes.first?.preferredMIMEType ?? UTType.jpeg.preferredMIMEType ?? "image/jpeg"
             await MainActor.run {
-                projectImageSelection = SelectedProjectImage(data: data, fileName: fileName, contentType: contentType)
+                projectImageSelections = nextSelections
                 projectErrorText = ""
             }
         } catch {
             await MainActor.run {
-                projectImageSelection = nil
+                projectImageSelections = []
                 projectErrorText = error.localizedDescription
             }
         }
@@ -1249,14 +1265,21 @@ struct ProjectPageView: View {
                 }
                 return normalized
             }
-            var imageURL: String?
-            if let cover = projectImageSelection {
-                projectCreateStatusText = "Uploading project image..."
-                imageURL = try await client.uploadProjectImage(
+            guard !projectImageSelections.isEmpty else {
+                throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "At least one project image is required"])
+            }
+
+            var projectImageURLs: [String] = []
+            var projectImageIndex = 0
+            for cover in projectImageSelections.prefix(5) {
+                projectImageIndex += 1
+                projectCreateStatusText = "Uploading project image \(projectImageIndex)..."
+                let uploadedURL = try await client.uploadProjectImage(
                     data: cover.data,
                     fileName: cover.fileName,
                     contentType: cover.contentType
                 )
+                projectImageURLs.append(uploadedURL)
             }
 
             var uploadedImageMap: [UUID: String] = [:]
@@ -1300,7 +1323,8 @@ struct ProjectPageView: View {
             let project = try await client.createProject(
                 title: projectTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                 subtitle: projectSubtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : projectSubtitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                imageURL: imageURL,
+                imageURL: projectImageURLs.first,
+                imageURLs: projectImageURLs,
                 category: projectCategory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : projectCategory.trimmingCharacters(in: .whitespacesAndNewlines),
                 location: projectLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : projectLocation.trimmingCharacters(in: .whitespacesAndNewlines),
                 goalAmountMinor: goal,
