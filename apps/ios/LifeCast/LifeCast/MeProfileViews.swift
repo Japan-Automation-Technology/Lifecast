@@ -1249,13 +1249,23 @@ struct ProjectPageView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             if let category = project.category, !category.isEmpty {
-                                Text("Category: \(category)")
+                                HStack(spacing: 4) {
+                                    Image(systemName: "tag")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    Text(category)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            HStack(spacing: 4) {
+                                Image(systemName: "calendar")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Text(periodLine(createdISO: project.created_at, deadlineISO: project.deadline_at, durationDays: project.duration_days))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
-                            Text("Created: \(project.created_at)")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
                         }
                         .padding(10)
                         .background(Color.secondary.opacity(0.08))
@@ -1516,6 +1526,27 @@ struct ProjectPageView: View {
             headerActionTitle: canEditProject(project) ? "Edit" : nil,
             onTapHeaderAction: canEditProject(project) ? { isEditingProjectInline = true } : nil
         )
+    }
+
+    private func periodLine(createdISO: String, deadlineISO: String, durationDays: Int?) -> String {
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime]
+        let isoFormatterWithFractional = ISO8601DateFormatter()
+        isoFormatterWithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let calendar = Calendar(identifier: .gregorian)
+        let deadline = isoFormatterWithFractional.date(from: deadlineISO) ?? isoFormatter.date(from: deadlineISO)
+        var start = isoFormatterWithFractional.date(from: createdISO) ?? isoFormatter.date(from: createdISO)
+        if start == nil, let deadline, let durationDays {
+            start = calendar.date(byAdding: .day, value: -durationDays, to: deadline)
+        }
+
+        let displayFormatter = DateFormatter()
+        displayFormatter.locale = Locale(identifier: "en_US_POSIX")
+        displayFormatter.calendar = calendar
+        displayFormatter.dateFormat = "MMM d, yyyy"
+        let startText = start.map { displayFormatter.string(from: $0) } ?? "-"
+        let endText = deadline.map { displayFormatter.string(from: $0) } ?? "-"
+        return "\(startText) ~ \(endText)"
     }
 
     @ViewBuilder

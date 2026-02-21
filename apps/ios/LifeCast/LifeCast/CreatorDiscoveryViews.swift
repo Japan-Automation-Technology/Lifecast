@@ -714,7 +714,7 @@ struct CreatorPublicPageView: View {
                                 }
                             }
                             .frame(maxWidth: .infinity)
-                            .aspectRatio(1, contentMode: .fit)
+                            .aspectRatio(9.0 / 16.0, contentMode: .fit)
                             .clipped()
                         }
                         .buttonStyle(.plain)

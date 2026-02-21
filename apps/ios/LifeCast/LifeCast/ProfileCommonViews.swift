@@ -509,14 +509,24 @@ struct ProfileProjectDetailView: View {
             plansCarousel
 
             if let category = project.category, !category.isEmpty {
-                Text("Category: \(category)")
+                HStack(spacing: 6) {
+                    Image(systemName: "tag")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(category)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "calendar")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(projectPeriodLine(createdISO: project.created_at, deadlineISO: project.deadline_at, durationDays: project.duration_days))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-
-            Text(deadlineDurationLine(deadlineISO: project.deadline_at, durationDays: project.duration_days))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
 
             if let location = project.location, !location.isEmpty {
                 HStack(spacing: 6) {
@@ -683,29 +693,25 @@ struct ProfileProjectDetailView: View {
         .frame(height: 188)
     }
 
-    private func deadlineDurationLine(deadlineISO: String, durationDays: Int?) -> String {
-        let formatter = ISO8601DateFormatter()
-        guard let deadline = formatter.date(from: deadlineISO) else {
-            if let durationDays {
-                return "残り-、期間\(durationDays)日"
-            }
-            return "残り-"
+    private func projectPeriodLine(createdISO: String, deadlineISO: String, durationDays: Int?) -> String {
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime]
+        let isoFormatterWithFractional = ISO8601DateFormatter()
+        isoFormatterWithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let calendar = Calendar(identifier: .gregorian)
+        let deadline = isoFormatterWithFractional.date(from: deadlineISO) ?? isoFormatter.date(from: deadlineISO)
+        var start = isoFormatterWithFractional.date(from: createdISO) ?? isoFormatter.date(from: createdISO)
+        if start == nil, let deadline, let durationDays {
+            start = calendar.date(byAdding: .day, value: -durationDays, to: deadline)
         }
 
-        let now = Date()
-        if deadline <= now {
-            if let durationDays {
-                return "残り0日0時間、期間\(durationDays)日"
-            }
-            return "残り0日0時間"
-        }
+        let displayFormatter = DateFormatter()
+        displayFormatter.locale = Locale(identifier: "en_US_POSIX")
+        displayFormatter.calendar = calendar
+        displayFormatter.dateFormat = "MMM d, yyyy"
 
-        let comps = Calendar.current.dateComponents([.day, .hour], from: now, to: deadline)
-        let days = max(0, comps.day ?? 0)
-        let hours = max(0, comps.hour ?? 0) % 24
-        if let durationDays {
-            return "残り\(days)日\(hours)時間、期間\(durationDays)日"
-        }
-        return "残り\(days)日\(hours)時間"
+        let startText = start.map { displayFormatter.string(from: $0) } ?? "-"
+        let endText = deadline.map { displayFormatter.string(from: $0) } ?? "-"
+        return "\(startText) ~ \(endText)"
     }
 }
