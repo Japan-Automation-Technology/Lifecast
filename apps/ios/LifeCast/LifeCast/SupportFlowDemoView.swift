@@ -93,15 +93,27 @@ struct SupportFlowDemoView: View {
                             onRequireAuth: {
                                 showAuthSheet = true
                             },
-                            onSupportTap: { project in
+                            onSupportTap: { project, preferredPlanId in
                                 guard isAuthenticated else {
                                     showAuthSheet = true
                                     return
                                 }
                                 supportEntryPoint = .feed
                                 supportTargetProject = project
-                                selectedPlan = nil
-                                supportStep = .planSelect
+                                if let preferredPlanId,
+                                   let plans = project.plans,
+                                   let chosen = plans.first(where: { $0.id == preferredPlanId }) {
+                                    selectedPlan = SupportPlan(
+                                        id: chosen.id,
+                                        name: chosen.name,
+                                        priceMinor: chosen.price_minor,
+                                        rewardSummary: chosen.reward_summary
+                                    )
+                                    supportStep = .confirm
+                                } else {
+                                    selectedPlan = nil
+                                    supportStep = .planSelect
+                                }
                                 showSupportFlow = true
                             }
                         )
@@ -110,11 +122,23 @@ struct SupportFlowDemoView: View {
                 .tabItem { Image(systemName: "house.fill") }
                 .tag(0)
 
-            DiscoverSearchView(client: client, onSupportTap: { project in
+            DiscoverSearchView(client: client, onSupportTap: { project, preferredPlanId in
                 supportEntryPoint = .feed
                 supportTargetProject = project
-                selectedPlan = nil
-                supportStep = .planSelect
+                if let preferredPlanId,
+                   let plans = project.plans,
+                   let chosen = plans.first(where: { $0.id == preferredPlanId }) {
+                    selectedPlan = SupportPlan(
+                        id: chosen.id,
+                        name: chosen.name,
+                        priceMinor: chosen.price_minor,
+                        rewardSummary: chosen.reward_summary
+                    )
+                    supportStep = .confirm
+                } else {
+                    selectedPlan = nil
+                    supportStep = .planSelect
+                }
                 showSupportFlow = true
             })
                 .safeAreaPadding(.bottom, bottomBarInset)
@@ -1624,6 +1648,7 @@ struct SupportFlowDemoView: View {
                     if seenVideoIds.contains(video.video_id) { continue }
                     seenVideoIds.insert(video.video_id)
                     appendedForCreator = true
+                    let isRowPrimaryVideo = row.video_id == video.video_id
                     expanded.append(
                         FeedProjectSummary(
                             id: row.project_id,
@@ -1638,9 +1663,9 @@ struct SupportFlowDemoView: View {
                             goalAmountMinor: row.goal_amount_minor,
                             fundedAmountMinor: row.funded_amount_minor,
                             remainingDays: row.remaining_days,
-                            likes: row.likes,
-                            comments: row.comments,
-                            isLikedByCurrentUser: row.is_liked_by_current_user,
+                            likes: isRowPrimaryVideo ? row.likes : 0,
+                            comments: isRowPrimaryVideo ? row.comments : 0,
+                            isLikedByCurrentUser: isRowPrimaryVideo ? row.is_liked_by_current_user : false,
                             isSupportedByCurrentUser: row.is_supported_by_current_user
                         )
                     )

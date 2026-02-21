@@ -17,7 +17,7 @@ private struct DiscoverCreatorDestination: Identifiable, Hashable {
 
 struct DiscoverSearchView: View {
     let client: LifeCastAPIClient
-    let onSupportTap: (MyProjectResult) -> Void
+    let onSupportTap: (MyProjectResult, UUID?) -> Void
 
     @State private var query = ""
     @State private var searchHistory: [DiscoverSearchHistoryEntry] = []
@@ -187,7 +187,7 @@ private enum DiscoverSearchTab: String, CaseIterable {
 
 private struct DiscoverSearchResultsView: View {
     let client: LifeCastAPIClient
-    let onSupportTap: (MyProjectResult) -> Void
+    let onSupportTap: (MyProjectResult, UUID?) -> Void
     let query: String
     let onRememberQuery: (String) -> Void
 
@@ -410,7 +410,7 @@ struct CreatorPublicPageView: View {
     let client: LifeCastAPIClient
     let creatorId: UUID
     let onRequireAuth: () -> Void
-    let onSupportTap: (MyProjectResult) -> Void
+    let onSupportTap: (MyProjectResult, UUID?) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var page: CreatorPublicPageResult?
@@ -432,7 +432,7 @@ struct CreatorPublicPageView: View {
         client: LifeCastAPIClient,
         creatorId: UUID,
         onRequireAuth: @escaping () -> Void = {},
-        onSupportTap: @escaping (MyProjectResult) -> Void
+        onSupportTap: @escaping (MyProjectResult, UUID?) -> Void
     ) {
         self.client = client
         self.creatorId = creatorId
@@ -477,10 +477,17 @@ struct CreatorPublicPageView: View {
                                         }
                                     }
                                     .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(page.viewer_relationship.is_following ? Color.primary : Color.white)
+                                    .foregroundStyle(Color.black.opacity(page.viewer_relationship.is_following ? 0.9 : 0.82))
                                     .frame(maxWidth: .infinity)
                                     .frame(height: 34)
-                                    .background(page.viewer_relationship.is_following ? Color.gray.opacity(0.28) : Color.blue.opacity(0.82))
+                                    .background(page.viewer_relationship.is_following ? Color.gray.opacity(0.28) : Color.white)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(
+                                                page.viewer_relationship.is_following ? Color.clear : Color.black.opacity(0.82),
+                                                lineWidth: page.viewer_relationship.is_following ? 0 : 1.4
+                                            )
+                                    )
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
                                     .buttonStyle(.plain)
 
@@ -494,7 +501,7 @@ struct CreatorPublicPageView: View {
                                             errorText = "No active project to support"
                                             return
                                         }
-                                        onSupportTap(project)
+                                        onSupportTap(project, nil)
                                     }
                                     .font(.system(size: 15, weight: .semibold))
                                     .foregroundStyle(page.viewer_relationship.is_supported ? Color.primary : Color.white)
@@ -505,7 +512,7 @@ struct CreatorPublicPageView: View {
                                     .buttonStyle(.plain)
                                     .disabled(!page.viewer_relationship.is_supported && page.project == nil)
                                 }
-                                .padding(.horizontal, 16)
+                                .padding(.horizontal, 24)
                             }
                         }
                     }
@@ -542,8 +549,7 @@ struct CreatorPublicPageView: View {
                             .background(Color.white)
                     }
                 } else if loading {
-                    ProgressView("Loading creator...")
-                        .padding(.top, 20)
+                    ProfileCenteredLoadingView(title: nil)
                 } else if !errorText.isEmpty {
                     Text(errorText)
                         .font(.caption)
@@ -663,9 +669,9 @@ struct CreatorPublicPageView: View {
                         ? (page.viewer_relationship.is_supported ? "Supported" : "Support")
                         : nil,
                     supportButtonDisabled: page.viewer_relationship.is_supported,
-                    onTapSupport: {
+                    onTapSupport: { preferredPlanId in
                         if page.viewer_relationship.is_supported { return }
-                        onSupportTap(project)
+                        onSupportTap(project, preferredPlanId)
                     }
                 )
             } else {
@@ -776,8 +782,8 @@ struct CreatorPublicPageView: View {
                 goalAmountMinor: max(project.goal_amount_minor, 1),
                 fundedAmountMinor: max(project.funded_amount_minor, 0),
                 remainingDays: remainingDays,
-                likes: 4500,
-                comments: 173,
+                likes: 0,
+                comments: 0,
                 isLikedByCurrentUser: false,
                 isSupportedByCurrentUser: page.viewer_relationship.is_supported
             )
@@ -796,8 +802,8 @@ struct CreatorPublicPageView: View {
             goalAmountMinor: 1,
             fundedAmountMinor: 0,
             remainingDays: 0,
-            likes: 4500,
-            comments: 173,
+            likes: 0,
+            comments: 0,
             isLikedByCurrentUser: false,
             isSupportedByCurrentUser: page.viewer_relationship.is_supported
         )

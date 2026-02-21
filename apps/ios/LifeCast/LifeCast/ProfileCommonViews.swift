@@ -1,5 +1,25 @@
 import SwiftUI
 
+struct ProfileCenteredLoadingView: View {
+    let title: String?
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.regular)
+            if let title, !title.isEmpty {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 180)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+}
+
 struct VideoGridPlaceholder: View {
     let title: String
 
@@ -221,9 +241,7 @@ struct SupportedProjectsListView: View {
         VStack(alignment: .leading, spacing: 10) {
 
             if isLoading {
-                ProgressView("Loading supports...")
-                    .font(.caption)
-                    .padding(.horizontal, 16)
+                ProfileCenteredLoadingView(title: "Loading supports...")
             } else if !errorText.isEmpty {
                 Text(errorText)
                     .font(.caption)
@@ -374,7 +392,7 @@ struct ProfileProjectDetailView: View {
     let project: MyProjectResult
     var supportButtonTitle: String?
     var supportButtonDisabled: Bool = false
-    var onTapSupport: (() -> Void)? = nil
+    var onTapSupport: ((UUID?) -> Void)? = nil
     var headerActionTitle: String? = nil
     var onTapHeaderAction: (() -> Void)? = nil
 
@@ -513,7 +531,7 @@ struct ProfileProjectDetailView: View {
 
             if let supportButtonTitle, let onTapSupport {
                 Button(supportButtonTitle) {
-                    onTapSupport()
+                    onTapSupport(nil)
                 }
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.white)
@@ -568,9 +586,29 @@ struct ProfileProjectDetailView: View {
                     }
 
                     Spacer(minLength: 0)
-                    Button("Support (Coming soon)") {}
-                        .buttonStyle(.borderedProminent)
-                        .disabled(true)
+                    if let supportButtonTitle, let onTapSupport {
+                        Button(supportButtonTitle) {
+                            selectedPlan = nil
+                            DispatchQueue.main.async {
+                                onTapSupport(plan.id)
+                            }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(
+                                colors: [Color(red: 0.20, green: 0.78, blue: 0.42), Color(red: 0.11, green: 0.66, blue: 0.32)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
+                        .disabled(supportButtonDisabled)
+                        .opacity(supportButtonDisabled ? 0.6 : 1.0)
+                    }
                 }
                 .padding(16)
                 .navigationTitle("Plan details")

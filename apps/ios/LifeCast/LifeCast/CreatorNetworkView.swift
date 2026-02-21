@@ -81,7 +81,7 @@ struct CreatorNetworkView: View {
                 CreatorPublicPageView(
                     client: client,
                     creatorId: creatorId,
-                    onSupportTap: { _ in }
+                    onSupportTap: { _, _ in }
                 )
             } else {
                 Text("Creator not selected")

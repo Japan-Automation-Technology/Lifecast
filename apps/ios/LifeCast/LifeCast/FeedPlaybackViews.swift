@@ -5,6 +5,7 @@ struct PostedVideosListView: View {
     let errorText: String
     let onRefreshVideos: () -> Void
     let creatorProfile: CreatorPublicProfile?
+    @State private var resolvedCreatorProfile: CreatorPublicProfile?
     @State private var selectedVideo: MyVideo?
     @State private var thumbnailCacheBust = UUID().uuidString
 
@@ -78,7 +79,7 @@ struct PostedVideosListView: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                             }
                             .frame(maxWidth: .infinity)
-                            .aspectRatio(1, contentMode: .fit)
+                            .aspectRatio(9.0 / 16.0, contentMode: .fit)
                             .clipped()
                         }
                         .buttonStyle(.plain)
@@ -90,15 +91,16 @@ struct PostedVideosListView: View {
         }
         .padding(.top, -16)
         .fullScreenCover(item: $selectedVideo) { video in
+            let effectiveProfile = resolvedCreatorProfile ?? creatorProfile
             CreatorPostedFeedView(
                 videos: newestFirstVideos,
                 initialVideoId: video.video_id,
                 client: LifeCastAPIClient(baseURL: URL(string: "http://localhost:8080")!),
                 projectContext: FeedProjectSummary(
                     id: UUID(),
-                    creatorId: creatorProfile?.creator_user_id ?? UUID(),
-                    username: creatorProfile?.username ?? "lifecast_maker",
-                    creatorAvatarURL: creatorProfile?.avatar_url,
+                    creatorId: effectiveProfile?.creator_user_id ?? UUID(),
+                    username: effectiveProfile?.username ?? "lifecast_maker",
+                    creatorAvatarURL: effectiveProfile?.avatar_url,
                     caption: "Prototype update",
                     videoId: nil,
                     playbackURL: nil,
@@ -107,8 +109,8 @@ struct PostedVideosListView: View {
                     goalAmountMinor: 1_000_000,
                     fundedAmountMinor: 0,
                     remainingDays: 12,
-                    likes: 4500,
-                    comments: 173,
+                    likes: 0,
+                    comments: 0,
                     isLikedByCurrentUser: false,
                     isSupportedByCurrentUser: false
                 ),
@@ -117,6 +119,14 @@ struct PostedVideosListView: View {
                     onRefreshVideos()
                 }
             )
+        }
+        .task {
+            if resolvedCreatorProfile == nil {
+                let api = LifeCastAPIClient(baseURL: URL(string: "http://localhost:8080")!)
+                if let fetched = try? await api.getMyProfile().profile {
+                    resolvedCreatorProfile = fetched
+                }
+            }
         }
     }
 
@@ -351,7 +361,7 @@ struct CreatorPostedFeedView: View {
             CreatorPublicPageView(
                 client: client,
                 creatorId: route.id,
-                onSupportTap: { _ in }
+                onSupportTap: { _, _ in }
             )
         }
     }
@@ -842,8 +852,10 @@ struct CreatorPostedFeedView: View {
     }
 
     private func feedCreatorAvatar(urlString: String?, username: String) -> some View {
-        Group {
-            if let avatar = urlString, let url = URL(string: avatar) {
+        let normalized = urlString?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let validURL = (normalized?.isEmpty == false) ? URL(string: normalized ?? "") : nil
+        return Group {
+            if let url = validURL {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
@@ -858,7 +870,7 @@ struct CreatorPostedFeedView: View {
         }
         .frame(width: 38, height: 38)
         .overlay {
-            if urlString == nil {
+            if validURL == nil {
                 Text(String(username.prefix(1)).uppercased())
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.white)

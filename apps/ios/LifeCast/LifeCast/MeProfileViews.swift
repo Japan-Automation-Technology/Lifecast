@@ -209,7 +209,7 @@ struct MeTabView: View {
                 CreatorPublicPageView(
                     client: client,
                     creatorId: route.id,
-                    onSupportTap: { _ in }
+                    onSupportTap: { _, _ in }
                 )
             }
             .sheet(isPresented: $showEditProfile) {
@@ -1172,8 +1172,7 @@ struct ProjectPageView: View {
         ZStack(alignment: .topLeading) {
             VStack(alignment: .leading, spacing: 12) {
                 if !hasLoadedProjectsOnce {
-                    ProgressView("Loading project...")
-                        .font(.caption)
+                    ProfileCenteredLoadingView(title: "Loading project...")
                 } else if let myProject {
                     if isEditingProjectInline && canEditProject(myProject) {
                         ProjectInlineEditView(
