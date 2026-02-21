@@ -121,6 +121,24 @@ struct DiscoverCreatorsResult: Decodable {
     let rows: [DiscoverCreatorRow]
 }
 
+struct DiscoverVideoRow: Decodable, Identifiable {
+    let video_id: UUID
+    let creator_user_id: UUID
+    let username: String
+    let display_name: String?
+    let file_name: String
+    let project_title: String?
+    let playback_url: String?
+    let thumbnail_url: String?
+    let created_at: String
+
+    var id: UUID { video_id }
+}
+
+struct DiscoverVideosResult: Decodable {
+    let rows: [DiscoverVideoRow]
+}
+
 struct FeedProjectRow: Decodable, Identifiable {
     let project_id: UUID
     let creator_user_id: UUID
@@ -701,6 +719,45 @@ final class LifeCastAPIClient {
         }
 
         let envelope = try JSONDecoder().decode(APIEnvelope<DiscoverCreatorsResult>.self, from: data)
+        return envelope.result.rows
+    }
+
+    func discoverVideos(query: String) async throws -> [DiscoverVideoRow] {
+        guard var components = URLComponents(
+            url: baseURL.appendingPathComponent("v1/discover/videos"),
+            resolvingAgainstBaseURL: false
+        ) else {
+            throw NSError(
+                domain: "LifeCastAPI",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "invalid discover URL"]
+            )
+        }
+        components.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "limit", value: "36")
+        ]
+        guard let url = components.url else {
+            throw NSError(
+                domain: "LifeCastAPI",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "invalid discover URL"]
+            )
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        applyAuthHeaders(&request)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw NSError(domain: "LifeCastAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "invalid response"])
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let payloadText = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "LifeCastAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: payloadText])
+        }
+
+        let envelope = try JSONDecoder().decode(APIEnvelope<DiscoverVideosResult>.self, from: data)
         return envelope.result.rows
     }
 

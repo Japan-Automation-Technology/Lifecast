@@ -81,7 +81,14 @@ struct SupportFlowDemoView: View {
                         CreatorPublicPageView(
                             client: client,
                             creatorId: route.id,
+                            onRequireAuth: {
+                                showAuthSheet = true
+                            },
                             onSupportTap: { project in
+                                guard isAuthenticated else {
+                                    showAuthSheet = true
+                                    return
+                                }
                                 supportEntryPoint = .feed
                                 supportTargetProject = project
                                 selectedPlan = nil
@@ -502,6 +509,10 @@ struct SupportFlowDemoView: View {
 
     private func requestAppTabSelection(_ tab: Int) {
         guard selectedTab != tab else { return }
+        if tab == 2 && !isAuthenticated {
+            showAuthSheet = true
+            return
+        }
         if selectedTab == 3 && meHasUnsavedProjectEdits && tab != 3 {
             pendingAppTabAfterDiscard = tab
             showDiscardProjectEditDialog = true
@@ -1187,6 +1198,12 @@ struct SupportFlowDemoView: View {
     }
 
     private func presentSupportFlow(for project: FeedProjectSummary) async {
+        guard isAuthenticated else {
+            await MainActor.run {
+                showAuthSheet = true
+            }
+            return
+        }
         do {
             let page = try await client.getCreatorPage(creatorUserId: project.creatorId)
             guard let target = page.project, let plans = target.plans, !plans.isEmpty else {
@@ -1839,56 +1856,129 @@ private struct AuthEntrySheet: View {
     @State private var isSignUp = false
     @State private var isLoading = false
     @State private var errorText = ""
+    
+    private var isPrimaryDisabled: Bool {
+        isLoading || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty
+    }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Account") {
-                    TextField("Email", text: $email)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.emailAddress)
-                    SecureField("Password", text: $password)
-                    if isSignUp {
-                        TextField("Username (optional)", text: $username)
-                            .textInputAutocapitalization(.never)
-                        TextField("Display name (optional)", text: $displayName)
-                    }
-                }
+            ScrollView {
+                VStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(isSignUp ? "Create your profile" : "Welcome back")
+                                    .font(.system(size: 20, weight: .bold))
+                                Text(isSignUp ? "Set up your account to start posting." : "Sign in to continue in LifeCast.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.indigo)
+                        }
 
-                Section("Sign in options") {
-                    Button(isSignUp ? "Create account" : "Sign in with Email") {
-                        Task { await submitEmailAuth() }
-                    }
-                    .disabled(isLoading || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
+                        HStack(spacing: 8) {
+                            Button("Sign in") {
+                                isSignUp = false
+                                errorText = ""
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(isSignUp ? Color.clear : Color.black)
+                            .foregroundStyle(isSignUp ? Color.secondary : Color.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .disabled(isLoading)
 
-                    Button("Continue with Google") {
-                        Task { await continueOAuth(provider: "google") }
-                    }
-                    .disabled(isLoading)
+                            Button("Sign up") {
+                                isSignUp = true
+                                errorText = ""
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(isSignUp ? Color.black : Color.clear)
+                            .foregroundStyle(isSignUp ? Color.white : Color.secondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .disabled(isLoading)
+                        }
+                        .padding(4)
+                        .background(Color.black.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                    Button("Continue with Apple") {
-                        Task { await continueOAuth(provider: "apple") }
-                    }
-                    .disabled(isLoading)
-                }
+                        VStack(spacing: 10) {
+                            authIconTextField(symbol: "envelope", placeholder: "Email", text: $email, keyboardType: .emailAddress, capitalization: .never)
+                            authIconSecureField(symbol: "lock", placeholder: "Password", text: $password)
+                            if isSignUp {
+                                authIconTextField(symbol: "at", placeholder: "Username (optional)", text: $username, capitalization: .never)
+                                authIconTextField(symbol: "person", placeholder: "Display name (optional)", text: $displayName)
+                            }
+                        }
 
-                Section {
-                    Button(isSignUp ? "Already have an account? Sign in" : "Need an account? Sign up") {
-                        isSignUp.toggle()
-                        errorText = ""
-                    }
-                    .font(.footnote)
-                }
+                        Button {
+                            Task { await submitEmailAuth() }
+                        } label: {
+                            Text(isSignUp ? "Create account with Email" : "Sign in with Email")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(
+                                    LinearGradient(
+                                        colors: [Color.black, Color.indigo.opacity(0.85)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isPrimaryDisabled)
+                        .opacity(isPrimaryDisabled ? 0.6 : 1.0)
 
-                if !errorText.isEmpty {
-                    Section {
-                        Text(errorText)
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                        Button {
+                            Task { await continueOAuth(provider: "google") }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "globe")
+                                Text("Continue with Google")
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(Color.white.opacity(0.9))
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.14), lineWidth: 1))
+                            .foregroundStyle(.primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isLoading)
+
+                        if !errorText.isEmpty {
+                            Text(errorText)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .padding(.top, 2)
+                        }
                     }
+                    .padding(16)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(.secondarySystemBackground), Color.white],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.08), lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
                 }
             }
-            .navigationTitle(isSignUp ? "Sign Up" : "Sign In")
+            .navigationTitle("Sign In")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1910,6 +2000,40 @@ private struct AuthEntrySheet: View {
                 dismiss()
             }
         }
+    }
+
+    private func authIconTextField(
+        symbol: String,
+        placeholder: String,
+        text: Binding<String>,
+        keyboardType: UIKeyboardType = .default,
+        capitalization: TextInputAutocapitalization = .sentences
+    ) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .foregroundStyle(.secondary)
+            TextField(placeholder, text: text)
+                .keyboardType(keyboardType)
+                .textInputAutocapitalization(capitalization)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(Color.white.opacity(0.9))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.black.opacity(0.08), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func authIconSecureField(symbol: String, placeholder: String, text: Binding<String>) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .foregroundStyle(.secondary)
+            SecureField(placeholder, text: text)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(Color.white.opacity(0.9))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.black.opacity(0.08), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private func submitEmailAuth() async {

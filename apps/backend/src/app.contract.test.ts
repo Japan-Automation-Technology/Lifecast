@@ -280,3 +280,26 @@ test("analytics and ops endpoints return 200 envelopes", async () => {
     await app.close();
   }
 });
+
+test("discover endpoints return 200 envelopes", async () => {
+  const app = await buildApp();
+  try {
+    const creators = await app.inject({
+      method: "GET",
+      url: "/v1/discover/creators?query=maker&limit=10",
+      headers: authHeaders(),
+    });
+    assert.equal(creators.statusCode, 200);
+    assert.ok(Array.isArray(creators.json().result.rows));
+
+    const videos = await app.inject({
+      method: "GET",
+      url: "/v1/discover/videos?query=maker&limit=10",
+      headers: authHeaders(),
+    });
+    assert.equal(videos.statusCode, 200);
+    assert.ok(Array.isArray(videos.json().result.rows));
+  } finally {
+    await app.close();
+  }
+});

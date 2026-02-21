@@ -14,6 +14,11 @@ const discoverQuery = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional(),
 });
 
+const discoverVideosQuery = z.object({
+  query: z.string().max(80).optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+});
+
 const feedQuery = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional(),
 });
@@ -877,6 +882,100 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       return reply.send(
         ok({
           rows: result.rows,
+        }),
+      );
+    } finally {
+      client.release();
+    }
+  });
+
+  app.get("/v1/discover/videos", async (req, reply) => {
+    const parsed = discoverVideosQuery.safeParse(req.query ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid discover videos query"));
+    }
+
+    const query = (parsed.data.query ?? "").trim();
+    const limit = parsed.data.limit ?? 20;
+
+    if (!hasDb() || !dbPool) {
+      return reply.send(
+        ok({
+          rows: [],
+        }),
+      );
+    }
+
+    const client = await dbPool.connect();
+    try {
+      const publicBaseUrl = (process.env.LIFECAST_PUBLIC_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+      const result = await client.query<{
+        video_id: string;
+        creator_user_id: string;
+        username: string;
+        display_name: string | null;
+        file_name: string;
+        project_title: string | null;
+        created_at: string;
+      }>(
+        `
+        select
+          va.video_id,
+          va.creator_user_id,
+          coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
+          coalesce(cp.display_name, u.display_name) as display_name,
+          vus.file_name,
+          p.title as project_title,
+          va.created_at
+        from video_assets va
+        inner join users u on u.id = va.creator_user_id
+        inner join video_upload_sessions vus on vus.id = va.upload_session_id
+        left join creator_profiles cp on cp.creator_user_id = u.id
+        left join lateral (
+          select
+            pr.title
+          from projects pr
+          where pr.creator_user_id = u.id
+            and pr.status in ('active', 'draft')
+          order by
+            case when pr.status = 'active' then 0 else 1 end,
+            pr.created_at desc
+          limit 1
+        ) p on true
+        where
+          va.status = 'ready'
+          and
+          ($1 = ''
+            or coalesce(cp.username, u.username, '') ilike '%' || $1 || '%'
+            or coalesce(cp.display_name, u.display_name, '') ilike '%' || $1 || '%'
+            or vus.file_name ilike '%' || $1 || '%'
+            or coalesce(p.title, '') ilike '%' || $1 || '%')
+        order by
+          case
+            when lower(vus.file_name) = lower($1) then 0
+            when coalesce(cp.username, u.username, '') ilike $1 || '%' then 1
+            when vus.file_name ilike $1 || '%' then 2
+            else 3
+          end,
+          va.created_at desc
+        limit $2
+      `,
+        [query, limit],
+      );
+
+      return reply.send(
+        ok({
+          rows: result.rows.map((row) => ({
+            video_id: row.video_id,
+            creator_user_id: row.creator_user_id,
+            username: row.username,
+            display_name: row.display_name,
+            file_name: row.file_name,
+            project_title: row.project_title,
+            playback_url: `${publicBaseUrl}/v1/videos/${row.video_id}/playback`,
+            thumbnail_url: `${publicBaseUrl}/v1/videos/${row.video_id}/thumbnail`,
+            created_at: row.created_at,
+          })),
         }),
       );
     } finally {

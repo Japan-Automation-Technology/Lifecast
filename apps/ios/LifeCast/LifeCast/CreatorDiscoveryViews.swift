@@ -1,10 +1,14 @@
 import SwiftUI
 
 private struct DiscoverSearchHistoryEntry: Codable, Identifiable, Hashable {
-    let creatorId: UUID
-    let username: String
+    let query: String
 
-    var id: UUID { creatorId }
+    var id: String { query.lowercased() }
+}
+
+private struct DiscoverSearchResultsDestination: Identifiable, Hashable {
+    let id = UUID()
+    let query: String
 }
 
 private struct DiscoverCreatorDestination: Identifiable, Hashable {
@@ -16,13 +20,8 @@ struct DiscoverSearchView: View {
     let onSupportTap: (MyProjectResult) -> Void
 
     @State private var query = ""
-    @State private var rows: [DiscoverCreatorRow] = []
-    @State private var loading = false
-    @State private var errorText = ""
-    @State private var hasSearched = false
     @State private var searchHistory: [DiscoverSearchHistoryEntry] = []
-    @State private var liveSearchTask: Task<Void, Never>?
-    @State private var destination: DiscoverCreatorDestination?
+    @State private var destination: DiscoverSearchResultsDestination?
     @FocusState private var isSearchFieldFocused: Bool
 
     private static let historyKey = "discover.search.history.v1"
@@ -37,10 +36,10 @@ struct DiscoverSearchView: View {
                         .focused($isSearchFieldFocused)
                         .submitLabel(.search)
                         .onSubmit {
-                            Task { await search() }
+                            submitSearch()
                         }
                     Button("Search") {
-                        Task { await search() }
+                        submitSearch()
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -58,39 +57,17 @@ struct DiscoverSearchView: View {
                     .padding(.horizontal, 16)
                 }
 
-                if loading {
-                    ProgressView("Searching...")
-                        .font(.caption)
-                }
-
-                if !errorText.isEmpty {
-                    Text(errorText)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .padding(.horizontal, 16)
-                }
-
-                if rows.isEmpty {
-                    if hasSearched && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && errorText.isEmpty {
-                        ContentUnavailableView(
-                            "No creators found",
-                            systemImage: "magnifyingglass",
-                            description: Text("Try another keyword")
-                        )
-                        .padding(.horizontal, 16)
-                    } else {
-                        historySection
-                    }
-                } else {
-                    resultsSection
-                }
+                historySection
             }
             .navigationTitle("Discover")
             .navigationDestination(item: $destination) { target in
-                CreatorPublicPageView(
+                DiscoverSearchResultsView(
                     client: client,
-                    creatorId: target.id,
-                    onSupportTap: onSupportTap
+                    onSupportTap: onSupportTap,
+                    query: target.query,
+                    onRememberQuery: { value in
+                        rememberQuery(value)
+                    }
                 )
             }
             .task {
@@ -102,39 +79,7 @@ struct DiscoverSearchView: View {
                     isSearchFieldFocused = false
                 }
             }
-            .onChange(of: query) { _, newValue in
-                scheduleLiveSearch(for: newValue)
-            }
-            .onDisappear {
-                liveSearchTask?.cancel()
-            }
         }
-    }
-
-    private var resultsSection: some View {
-        List(rows) { creator in
-            Button {
-                rememberVisitedCreator(creator)
-                destination = DiscoverCreatorDestination(id: creator.creator_user_id)
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("@\(creator.username)")
-                        .font(.headline)
-                    if let displayName = creator.display_name, !displayName.isEmpty {
-                        Text(displayName)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let projectTitle = creator.project_title, !projectTitle.isEmpty {
-                        Text(projectTitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-        }
-        .listStyle(.plain)
     }
 
     @ViewBuilder
@@ -155,10 +100,10 @@ struct DiscoverSearchView: View {
                                 .foregroundStyle(.secondary)
 
                             Button {
-                                query = entry.username
-                                destination = DiscoverCreatorDestination(id: entry.creatorId)
+                                query = entry.query
+                                submitSearch()
                             } label: {
-                                Text("@\(entry.username)")
+                                Text(entry.query)
                                     .foregroundStyle(.primary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -171,7 +116,7 @@ struct DiscoverSearchView: View {
                                     .foregroundStyle(.tertiary)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("Delete \(entry.username) from search history")
+                            .accessibilityLabel("Delete \(entry.query) from search history")
                         }
                     }
                 } header: {
@@ -201,62 +146,25 @@ struct DiscoverSearchView: View {
         searchHistory = decoded
     }
 
-    private func search() async {
+    private func submitSearch() {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        await performSearch(query: trimmed, explicit: true)
+        destination = DiscoverSearchResultsDestination(query: trimmed)
     }
 
-    private func scheduleLiveSearch(for rawQuery: String) {
-        liveSearchTask?.cancel()
-        let trimmed = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            rows = []
-            errorText = ""
-            hasSearched = false
-            return
-        }
-
-        liveSearchTask = Task {
-            try? await Task.sleep(nanoseconds: 280_000_000)
-            guard !Task.isCancelled else { return }
-            await performSearch(query: trimmed, explicit: false)
-        }
-    }
-
-    private func performSearch(query requestQuery: String, explicit: Bool) async {
-        loading = true
-        if explicit { hasSearched = true }
-        errorText = ""
-        defer { loading = false }
-        do {
-            let result = try await client.discoverCreators(query: requestQuery)
-            await MainActor.run {
-                if requestQuery != query.trimmingCharacters(in: .whitespacesAndNewlines) { return }
-                rows = result
-                errorText = ""
-            }
-        } catch {
-            await MainActor.run {
-                if requestQuery != query.trimmingCharacters(in: .whitespacesAndNewlines) { return }
-                rows = []
-                errorText = error.localizedDescription
-            }
-        }
-    }
-
-    private func rememberVisitedCreator(_ creator: DiscoverCreatorRow) {
-        let entry = DiscoverSearchHistoryEntry(creatorId: creator.creator_user_id, username: creator.username)
-        var values = searchHistory.filter { $0.creatorId != entry.creatorId }
+    private func rememberQuery(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let entry = DiscoverSearchHistoryEntry(query: trimmed)
+        var values = searchHistory.filter { $0.id != entry.id }
         values.insert(entry, at: 0)
         if values.count > historyLimit { values = Array(values.prefix(historyLimit)) }
-
         searchHistory = values
         persistSearchHistory(values)
     }
 
     private func removeSearchHistoryEntry(_ entry: DiscoverSearchHistoryEntry) {
-        searchHistory.removeAll { $0.creatorId == entry.creatorId }
+        searchHistory.removeAll { $0.id == entry.id }
         persistSearchHistory(searchHistory)
     }
 
@@ -271,9 +179,237 @@ struct DiscoverSearchView: View {
     }
 }
 
+private enum DiscoverSearchTab: String, CaseIterable {
+    case recommended = "Recommended"
+    case accounts = "Accounts"
+    case videos = "Videos"
+}
+
+private struct DiscoverSearchResultsView: View {
+    let client: LifeCastAPIClient
+    let onSupportTap: (MyProjectResult) -> Void
+    let query: String
+    let onRememberQuery: (String) -> Void
+
+    @State private var selectedTab: DiscoverSearchTab = .recommended
+    @State private var creators: [DiscoverCreatorRow] = []
+    @State private var videos: [DiscoverVideoRow] = []
+    @State private var loading = false
+    @State private var errorText = ""
+    @State private var destination: DiscoverCreatorDestination?
+
+    private let gridColumns: [GridItem] = [GridItem(.flexible(), spacing: 0), GridItem(.flexible(), spacing: 0), GridItem(.flexible(), spacing: 0)]
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                tabStrip
+
+                if loading {
+                    ProgressView("Searching...")
+                        .font(.caption)
+                } else if !errorText.isEmpty {
+                    Text(errorText)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                } else if creators.isEmpty && videos.isEmpty {
+                    ContentUnavailableView(
+                        "No results",
+                        systemImage: "magnifyingglass",
+                        description: Text("Try another keyword")
+                    )
+                    .padding(.horizontal, 16)
+                } else {
+                    contentForSelectedTab
+                }
+            }
+            .padding(.top, 10)
+            .padding(.bottom, 16)
+        }
+        .navigationTitle("\"\(query)\"")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(item: $destination) { target in
+            CreatorPublicPageView(
+                client: client,
+                creatorId: target.id,
+                onSupportTap: onSupportTap
+            )
+        }
+        .task(id: query) {
+            onRememberQuery(query)
+            await loadResults()
+        }
+        .refreshable {
+            await loadResults()
+        }
+    }
+
+    private var tabStrip: some View {
+        HStack(spacing: 6) {
+            ForEach(DiscoverSearchTab.allCases, id: \.self) { tab in
+                Button {
+                    selectedTab = tab
+                } label: {
+                    Text(tab.rawValue)
+                        .font(.subheadline.weight(selectedTab == tab ? .semibold : .regular))
+                        .foregroundStyle(selectedTab == tab ? Color.white : Color.primary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 34)
+                        .background(selectedTab == tab ? Color.black : Color.gray.opacity(0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    @ViewBuilder
+    private var contentForSelectedTab: some View {
+        switch selectedTab {
+        case .recommended:
+            VStack(alignment: .leading, spacing: 14) {
+                if !creators.isEmpty {
+                    Text("Accounts")
+                        .font(.headline)
+                        .padding(.horizontal, 16)
+                    VStack(spacing: 0) {
+                        ForEach(creators) { creator in
+                            accountRow(creator)
+                        }
+                    }
+                }
+
+                if !videos.isEmpty {
+                    Text("Videos")
+                        .font(.headline)
+                        .padding(.horizontal, 16)
+                    videosGrid(videos)
+                }
+            }
+        case .accounts:
+            VStack(spacing: 0) {
+                ForEach(creators) { creator in
+                    accountRow(creator)
+                }
+            }
+        case .videos:
+            videosGrid(videos)
+        }
+    }
+
+    private func accountRow(_ creator: DiscoverCreatorRow) -> some View {
+        Button {
+            destination = DiscoverCreatorDestination(id: creator.creator_user_id)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "person.crop.circle.fill")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 28))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("@\(creator.username)")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    if let displayName = creator.display_name, !displayName.isEmpty {
+                        Text(displayName)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let projectTitle = creator.project_title, !projectTitle.isEmpty {
+                        Text(projectTitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func videosGrid(_ rows: [DiscoverVideoRow]) -> some View {
+        LazyVGrid(columns: gridColumns, spacing: 0) {
+            ForEach(rows) { video in
+                Button {
+                    destination = DiscoverCreatorDestination(id: video.creator_user_id)
+                } label: {
+                    ZStack(alignment: .bottomLeading) {
+                        Group {
+                            if let thumbnail = video.thumbnail_url, let url = URL(string: thumbnail) {
+                                AsyncImage(url: url) { phase in
+                                    switch phase {
+                                    case .empty:
+                                        RoundedRectangle(cornerRadius: 0).fill(Color.gray.opacity(0.15))
+                                    case .success(let image):
+                                        image.resizable().scaledToFill()
+                                    case .failure:
+                                        RoundedRectangle(cornerRadius: 0).fill(Color.gray.opacity(0.22))
+                                    @unknown default:
+                                        RoundedRectangle(cornerRadius: 0).fill(Color.gray.opacity(0.15))
+                                    }
+                                }
+                            } else {
+                                RoundedRectangle(cornerRadius: 0).fill(Color.gray.opacity(0.15))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipped()
+
+                        LinearGradient(colors: [Color.black.opacity(0.0), Color.black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 50)
+
+                        Text("@\(video.username)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .padding(.horizontal, 6)
+                            .padding(.bottom, 6)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 0)
+    }
+
+    private func loadResults() async {
+        await MainActor.run {
+            loading = true
+            errorText = ""
+        }
+        defer {
+            Task { @MainActor in
+                loading = false
+            }
+        }
+        do {
+            async let creatorResult = client.discoverCreators(query: query)
+            async let videoResult = client.discoverVideos(query: query)
+            let (nextCreators, nextVideos) = try await (creatorResult, videoResult)
+            await MainActor.run {
+                creators = nextCreators
+                videos = nextVideos
+                errorText = ""
+            }
+        } catch {
+            await MainActor.run {
+                creators = []
+                videos = []
+                errorText = error.localizedDescription
+            }
+        }
+    }
+}
+
 struct CreatorPublicPageView: View {
     let client: LifeCastAPIClient
     let creatorId: UUID
+    let onRequireAuth: () -> Void
     let onSupportTap: (MyProjectResult) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -294,10 +430,12 @@ struct CreatorPublicPageView: View {
     init(
         client: LifeCastAPIClient,
         creatorId: UUID,
+        onRequireAuth: @escaping () -> Void = {},
         onSupportTap: @escaping (MyProjectResult) -> Void
     ) {
         self.client = client
         self.creatorId = creatorId
+        self.onRequireAuth = onRequireAuth
         self.onSupportTap = onSupportTap
     }
 
@@ -329,6 +467,10 @@ struct CreatorPublicPageView: View {
                             if viewerContextResolved && isViewingSelfProfile == false {
                                 HStack(spacing: 10) {
                                     Button(page.viewer_relationship.is_following ? "Following" : "Follow") {
+                                        guard client.hasAuthSession else {
+                                            onRequireAuth()
+                                            return
+                                        }
                                         Task {
                                             await toggleFollow()
                                         }
@@ -343,6 +485,10 @@ struct CreatorPublicPageView: View {
 
                                     Button(page.viewer_relationship.is_supported ? "Supported" : "Support") {
                                         guard !page.viewer_relationship.is_supported else { return }
+                                        guard client.hasAuthSession else {
+                                            onRequireAuth()
+                                            return
+                                        }
                                         guard let project = page.project else {
                                             errorText = "No active project to support"
                                             return
@@ -489,7 +635,7 @@ struct CreatorPublicPageView: View {
 
     private func creatorBioText(profile: CreatorPublicProfile) -> String {
         let bio = (profile.bio ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return bio.isEmpty ? "No bio yet" : bio
+        return bio
     }
 
     private func creatorProjectSection(page: CreatorPublicPageResult) -> some View {
@@ -702,6 +848,12 @@ struct CreatorPublicPageView: View {
 
     private func toggleFollow() async {
         guard let current = page else { return }
+        guard client.hasAuthSession else {
+            await MainActor.run {
+                onRequireAuth()
+            }
+            return
+        }
         do {
             let relationship: CreatorViewerRelationship
             if current.viewer_relationship.is_following {
