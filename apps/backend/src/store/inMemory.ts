@@ -185,6 +185,74 @@ export class InMemoryStore {
     return project;
   }
 
+  updateProjectForCreator(input: {
+    creatorUserId: string;
+    projectId: string;
+    subtitle?: string | null;
+    description?: string | null;
+    imageUrl?: string | null;
+    urls?: string[];
+    plans?: Array<{
+      id?: string;
+      name?: string;
+      priceMinor?: number;
+      rewardSummary?: string;
+      description?: string | null;
+      imageUrl?: string | null;
+      currency?: string;
+    }>;
+  }) {
+    const existing = this.projectsById.get(input.projectId);
+    if (!existing) return "not_found" as const;
+    if (existing.creatorUserId !== input.creatorUserId) return "forbidden" as const;
+    if (["stopped", "failed", "succeeded"].includes(existing.status)) return "invalid_state" as const;
+
+    const nextPlans = [...existing.plans];
+    const minExistingPrice = nextPlans.reduce((acc, row) => Math.min(acc, row.priceMinor), Number.POSITIVE_INFINITY);
+    if (input.plans && input.plans.length > 0) {
+      for (const plan of input.plans) {
+        if (plan.id) {
+          const idx = nextPlans.findIndex((p) => p.id === plan.id);
+          if (idx < 0) return "validation_error" as const;
+          nextPlans[idx] = {
+            ...nextPlans[idx],
+            description: plan.description === undefined ? nextPlans[idx].description : (plan.description ?? null),
+            imageUrl: plan.imageUrl === undefined ? nextPlans[idx].imageUrl : (plan.imageUrl ?? null),
+          };
+          continue;
+        }
+
+        if (!plan.name || !plan.rewardSummary || !plan.currency || !plan.priceMinor || plan.priceMinor <= 0) {
+          return "validation_error" as const;
+        }
+        if (Number.isFinite(minExistingPrice) && plan.priceMinor < minExistingPrice) {
+          return "invalid_plan_price" as const;
+        }
+        nextPlans.push({
+          id: randomUUID(),
+          name: plan.name,
+          priceMinor: plan.priceMinor,
+          rewardSummary: plan.rewardSummary,
+          description: plan.description ?? null,
+          imageUrl: plan.imageUrl ?? null,
+          currency: plan.currency,
+        });
+      }
+    }
+
+    const nextProject = {
+      ...existing,
+      subtitle: input.subtitle === undefined ? existing.subtitle : input.subtitle,
+      description: input.description === undefined ? existing.description : input.description,
+      imageUrl: input.imageUrl === undefined ? existing.imageUrl : input.imageUrl,
+      urls: input.urls === undefined ? existing.urls : input.urls,
+      plans: nextPlans,
+      minimumPlan: nextPlans[0] ?? null,
+    };
+    this.projectsById.set(input.projectId, nextProject);
+    return nextProject;
+  }
+
   deleteProjectForCreator(input: { creatorUserId: string; projectId: string }) {
     const existing = this.projectsById.get(input.projectId);
     if (!existing) return "not_found" as const;

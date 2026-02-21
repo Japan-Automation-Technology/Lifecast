@@ -70,7 +70,7 @@ struct MyVideosResult: Decodable {
     let rows: [MyVideo]
 }
 
-struct ProjectPlanResult: Decodable {
+struct ProjectPlanResult: Decodable, Identifiable {
     let id: UUID
     let name: String
     let price_minor: Int
@@ -300,6 +300,25 @@ struct CreateProjectRequest: Encodable {
     let description: String?
     let urls: [String]?
     let plans: [Plan]
+}
+
+struct UpdateProjectRequest: Encodable {
+    struct Plan: Encodable {
+        let id: UUID?
+        let name: String?
+        let price_minor: Int?
+        let reward_summary: String?
+        let description: String?
+        let image_url: String?
+        let currency: String?
+    }
+
+    let subtitle: String?
+    let description: String?
+    let image_url: String?
+    let image_urls: [String]?
+    let urls: [String]?
+    let plans: [Plan]?
 }
 
 struct UploadProjectImageRequest: Encodable {
@@ -1120,6 +1139,31 @@ final class LifeCastAPIClient {
             plans: plans
         )
         return try await send(path: "/v1/projects", method: "POST", body: body, idempotencyKey: "ios-project-create-\(UUID().uuidString)")
+    }
+
+    func updateProject(
+        projectId: UUID,
+        subtitle: String?,
+        description: String?,
+        imageURL: String?,
+        imageURLs: [String]?,
+        urls: [String]?,
+        plans: [UpdateProjectRequest.Plan]?
+    ) async throws -> MyProjectResult {
+        let body = UpdateProjectRequest(
+            subtitle: subtitle,
+            description: description,
+            image_url: imageURLs?.first ?? imageURL,
+            image_urls: imageURLs,
+            urls: urls,
+            plans: plans
+        )
+        return try await send(
+            path: "/v1/projects/\(projectId.uuidString)",
+            method: "PATCH",
+            body: body,
+            idempotencyKey: "ios-project-update-\(UUID().uuidString)"
+        )
     }
 
     func uploadProjectImage(data: Data, fileName: String?, contentType: String) async throws -> String {

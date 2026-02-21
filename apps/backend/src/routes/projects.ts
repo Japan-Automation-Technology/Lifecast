@@ -54,6 +54,28 @@ const endProjectBody = z
   })
   .optional();
 
+const updateProjectBody = z.object({
+  subtitle: z.string().max(160).nullable().optional(),
+  description: z.string().max(5000).nullable().optional(),
+  image_url: z.string().url().max(2048).nullable().optional(),
+  image_urls: z.array(z.string().url().max(2048)).min(1).max(5).optional(),
+  urls: z.array(z.string().url().max(2048)).max(10).optional(),
+  plans: z
+    .array(
+      z.object({
+        id: z.string().uuid().optional(),
+        name: z.string().min(1).max(60).optional(),
+        price_minor: z.number().int().positive().optional(),
+        reward_summary: z.string().min(1).max(500).optional(),
+        description: z.string().max(1000).nullable().optional(),
+        image_url: z.string().url().max(2048).nullable().optional(),
+        currency: z.string().length(3).optional(),
+      }),
+    )
+    .max(10)
+    .optional(),
+});
+
 const projectImageUploadBody = z.object({
   file_name: z.string().max(255).optional(),
   content_type: z.string().max(100),
@@ -290,6 +312,60 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     }
 
     return reply.send(ok(mapProject(project)));
+  });
+
+  app.patch("/v1/projects/:projectId", async (req, reply) => {
+    const creatorUserId = requireRequestUserId(req, reply);
+    if (!creatorUserId) return;
+
+    const projectId = (req.params as { projectId: string }).projectId;
+    if (!z.string().uuid().safeParse(projectId).success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid project id"));
+    }
+
+    const body = updateProjectBody.safeParse(req.body);
+    if (!body.success) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid project payload"));
+    }
+
+    const mergedImageUrl = body.data.image_urls?.[0] ?? body.data.image_url;
+    const updated = await store.updateProjectForCreator({
+      creatorUserId,
+      projectId,
+      subtitle: body.data.subtitle === undefined ? undefined : body.data.subtitle?.trim() ?? null,
+      description: body.data.description === undefined ? undefined : body.data.description?.trim() ?? null,
+      imageUrl: mergedImageUrl === undefined ? undefined : mergedImageUrl?.trim() ?? null,
+      urls: body.data.urls,
+      plans: body.data.plans?.map((plan) => ({
+        id: plan.id,
+        name: plan.name,
+        priceMinor: plan.price_minor,
+        rewardSummary: plan.reward_summary,
+        description: plan.description === undefined ? undefined : plan.description?.trim() ?? null,
+        imageUrl: plan.image_url === undefined ? undefined : plan.image_url?.trim() ?? null,
+        currency: plan.currency?.toUpperCase(),
+      })),
+    });
+
+    if (updated === "not_found" || !updated) {
+      return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Project not found"));
+    }
+    if (updated === "forbidden") {
+      return reply.code(403).send(fail("FORBIDDEN", "You cannot edit this project"));
+    }
+    if (updated === "invalid_state") {
+      return reply.code(409).send(fail("STATE_CONFLICT", "Ended or deleted projects cannot be edited"));
+    }
+    if (updated === "invalid_plan_price") {
+      return reply
+        .code(409)
+        .send(fail("STATE_CONFLICT", "New plans cannot be cheaper than existing plans"));
+    }
+    if (updated === "validation_error") {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid plan payload"));
+    }
+
+    return reply.send(ok(mapProject(updated)));
   });
 
   app.delete("/v1/projects/:projectId", async (req, reply) => {

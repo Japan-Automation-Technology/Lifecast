@@ -277,3 +277,291 @@ struct SupportedProjectsListView: View {
         return formatter.string(from: date)
     }
 }
+
+struct ProfileProjectDetailView: View {
+    let project: MyProjectResult
+    var supportButtonTitle: String?
+    var supportButtonDisabled: Bool = false
+    var onTapSupport: (() -> Void)? = nil
+
+    @State private var selectedPlan: ProjectPlanResult?
+
+    private var funded: Int { max(project.funded_amount_minor, 0) }
+    private var goal: Int { max(project.goal_amount_minor, 1) }
+    private var progressRatio: Double { Double(funded) / Double(goal) }
+    private var progressClamped: Double { min(progressRatio, 1.0) }
+    private var progressPercent: Int { Int(progressRatio * 100.0) }
+
+    private var galleryURLs: [String] {
+        var urls: [String] = []
+        if let cover = project.image_url?.trimmingCharacters(in: .whitespacesAndNewlines), !cover.isEmpty {
+            urls.append(cover)
+        }
+        for plan in project.plans ?? [] {
+            if let url = plan.image_url?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty, !urls.contains(url) {
+                urls.append(url)
+            }
+        }
+        return urls
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(project.title)
+                .font(.title3.weight(.semibold))
+
+            if let subtitle = project.subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            ProgressView(value: progressClamped)
+                .tint(fundingProgressTint(progressRatio))
+            Text("\(progressPercent)% (\(funded.formatted()) / \(goal.formatted()) \(project.currency))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                Image(systemName: "person.2.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("\(project.supporter_count) supporters")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !galleryURLs.isEmpty {
+                TabView {
+                    ForEach(galleryURLs, id: \.self) { raw in
+                        if let url = URL(string: raw) {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .empty:
+                                    Rectangle().fill(Color.secondary.opacity(0.15))
+                                case .success(let image):
+                                    image.resizable().scaledToFill()
+                                case .failure:
+                                    Rectangle().fill(Color.secondary.opacity(0.15))
+                                @unknown default:
+                                    Rectangle().fill(Color.secondary.opacity(0.15))
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 210)
+                            .clipped()
+                        }
+                    }
+                }
+                .frame(height: 210)
+                .tabViewStyle(.page(indexDisplayMode: .automatic))
+            }
+
+            if let description = project.description, !description.isEmpty {
+                Text(description)
+                    .font(.footnote)
+            }
+
+            if let urls = project.urls, !urls.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("URLs")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(urls, id: \.self) { raw in
+                        if let url = URL(string: raw) {
+                            Link(raw, destination: url)
+                                .font(.caption)
+                                .lineLimit(1)
+                        } else {
+                            Text(raw)
+                                .font(.caption)
+                        }
+                    }
+                }
+            }
+
+            Text("Plans")
+                .font(.subheadline.weight(.semibold))
+            plansCarousel
+
+            if let category = project.category, !category.isEmpty {
+                Text("Category: \(category)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(deadlineDurationLine(deadlineISO: project.deadline_at, durationDays: project.duration_days))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            if let location = project.location, !location.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(location)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let supportButtonTitle, let onTapSupport {
+                Button(supportButtonTitle) {
+                    onTapSupport()
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(
+                    LinearGradient(
+                        colors: [Color(red: 0.20, green: 0.78, blue: 0.42), Color(red: 0.11, green: 0.66, blue: 0.32)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
+                .disabled(supportButtonDisabled)
+                .opacity(supportButtonDisabled ? 0.6 : 1.0)
+                .padding(.top, 2)
+            }
+        }
+        .sheet(item: $selectedPlan) { plan in
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let raw = plan.image_url, let url = URL(string: raw) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .empty:
+                                Rectangle().fill(Color.secondary.opacity(0.15))
+                            case .success(let image):
+                                image.resizable().scaledToFill()
+                            case .failure:
+                                Rectangle().fill(Color.secondary.opacity(0.15))
+                            @unknown default:
+                                Rectangle().fill(Color.secondary.opacity(0.15))
+                            }
+                        }
+                        .frame(height: 200)
+                        .frame(maxWidth: .infinity)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+
+                    Text(plan.name)
+                        .font(.title3.weight(.semibold))
+                    Text("\(plan.price_minor.formatted()) \(plan.currency)")
+                        .font(.headline)
+                    Text(plan.reward_summary)
+                        .font(.body)
+                    if let description = plan.description, !description.isEmpty {
+                        Text(description)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
+                    Button("Support (Coming soon)") {}
+                        .buttonStyle(.borderedProminent)
+                        .disabled(true)
+                }
+                .padding(16)
+                .navigationTitle("Plan details")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Close") {
+                            selectedPlan = nil
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
+    }
+
+    private var plansCarousel: some View {
+        GeometryReader { proxy in
+            let cardWidth = max((proxy.size.width - 12) / 2, 140)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 12) {
+                    ForEach(project.plans ?? [], id: \.id) { plan in
+                        Button {
+                            selectedPlan = plan
+                        } label: {
+                            VStack(alignment: .leading, spacing: 8) {
+                                if let raw = plan.image_url, let url = URL(string: raw) {
+                                    AsyncImage(url: url) { phase in
+                                        switch phase {
+                                        case .empty:
+                                            Rectangle().fill(Color.secondary.opacity(0.15))
+                                        case .success(let image):
+                                            image.resizable().scaledToFill()
+                                        case .failure:
+                                            Rectangle().fill(Color.secondary.opacity(0.15))
+                                        @unknown default:
+                                            Rectangle().fill(Color.secondary.opacity(0.15))
+                                        }
+                                    }
+                                    .frame(height: 96)
+                                    .frame(maxWidth: .infinity)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                } else {
+                                    Rectangle()
+                                        .fill(Color.secondary.opacity(0.15))
+                                        .frame(height: 96)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                Text(plan.name)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                Text("\(plan.price_minor.formatted()) \(plan.currency)")
+                                    .font(.caption)
+                                    .foregroundStyle(.primary)
+                                Text(plan.reward_summary)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            .padding(10)
+                            .frame(width: cardWidth, alignment: .leading)
+                            .background(Color.secondary.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .frame(height: 188)
+    }
+
+    private func deadlineDurationLine(deadlineISO: String, durationDays: Int?) -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let deadline = formatter.date(from: deadlineISO) else {
+            if let durationDays {
+                return "残り-、期間\(durationDays)日"
+            }
+            return "残り-"
+        }
+
+        let now = Date()
+        if deadline <= now {
+            if let durationDays {
+                return "残り0日0時間、期間\(durationDays)日"
+            }
+            return "残り0日0時間"
+        }
+
+        let comps = Calendar.current.dateComponents([.day, .hour], from: now, to: deadline)
+        let days = max(0, comps.day ?? 0)
+        let hours = max(0, comps.hour ?? 0) % 24
+        if let durationDays {
+            return "残り\(days)日\(hours)時間、期間\(durationDays)日"
+        }
+        return "残り\(days)日\(hours)時間"
+    }
+}

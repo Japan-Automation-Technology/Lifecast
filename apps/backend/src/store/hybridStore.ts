@@ -1045,6 +1045,26 @@ export class HybridStore {
     return this.projectsService.createProjectForCreator(input);
   }
 
+  async updateProjectForCreator(input: {
+    creatorUserId: string;
+    projectId: string;
+    subtitle?: string | null;
+    description?: string | null;
+    imageUrl?: string | null;
+    urls?: string[];
+    plans?: Array<{
+      id?: string;
+      name?: string;
+      priceMinor?: number;
+      rewardSummary?: string;
+      description?: string | null;
+      imageUrl?: string | null;
+      currency?: string;
+    }>;
+  }) {
+    return this.projectsService.updateProjectForCreator(input);
+  }
+
   async deleteProjectForCreator(input: { creatorUserId: string; projectId: string }) {
     return this.projectsService.deleteProjectForCreator(input);
   }

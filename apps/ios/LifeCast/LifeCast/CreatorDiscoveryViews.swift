@@ -495,137 +495,17 @@ struct CreatorPublicPageView: View {
     private func creatorProjectSection(page: CreatorPublicPageResult) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if let project = page.project {
-                let funded = max(project.funded_amount_minor, 0)
-                let goal = max(project.goal_amount_minor, 1)
-                let rawRatio = Double(funded) / Double(goal)
-                let progress = min(Double(funded) / Double(goal), 1.0)
-                let percent = Int((Double(funded) / Double(goal)) * 100.0)
-                if let imageUrl = project.image_url, let url = URL(string: imageUrl) {
-                    AsyncImage(url: url) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        Rectangle().fill(Color.secondary.opacity(0.15))
-                    }
-                    .frame(height: 180)
-                    .frame(maxWidth: .infinity)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                Text(project.title)
-                    .font(.title3.weight(.semibold))
-                if let subtitle = project.subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-
-                ProgressView(value: progress)
-                    .tint(fundingProgressTint(rawRatio))
-                Text("\(percent)% funded (\(funded.formatted()) / \(goal.formatted()) \(project.currency))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text("Supporters: \(project.supporter_count)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                Text("Goal: \(project.goal_amount_minor.formatted()) \(project.currency)")
-                    .font(.footnote)
-                if let days = project.duration_days {
-                    Text("Duration: \(days) days")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                Text("Deadline: \(project.deadline_at)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                if let category = project.category, !category.isEmpty {
-                    Text("Category: \(category)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                if let location = project.location, !location.isEmpty {
-                    Text("Location: \(location)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                if let description = project.description, !description.isEmpty {
-                    Text(description)
-                        .font(.footnote)
-                }
-                if let urls = project.urls, !urls.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("URLs")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        ForEach(urls, id: \.self) { raw in
-                            if let url = URL(string: raw) {
-                                Link(raw, destination: url)
-                                    .font(.caption)
-                                    .lineLimit(1)
-                            } else {
-                                Text(raw)
-                                    .font(.caption)
-                            }
-                        }
-                    }
-                }
-                Text("Plans")
-                    .font(.subheadline.weight(.semibold))
-                ForEach(project.plans ?? [], id: \.id) { plan in
-                    VStack(alignment: .leading, spacing: 6) {
-                        if let image = plan.image_url, let url = URL(string: image) {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .empty:
-                                    Rectangle().fill(Color.secondary.opacity(0.15))
-                                case .success(let image):
-                                    image.resizable().scaledToFill()
-                                case .failure:
-                                    Rectangle().fill(Color.secondary.opacity(0.15))
-                                @unknown default:
-                                    Rectangle().fill(Color.secondary.opacity(0.15))
-                                }
-                            }
-                            .frame(height: 120)
-                            .frame(maxWidth: .infinity)
-                            .clipped()
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                        } else {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.gray.opacity(0.25))
-                                Image(systemName: "photo")
-                                    .font(.system(size: 28, weight: .semibold))
-                                    .foregroundStyle(.gray.opacity(0.9))
-                            }
-                            .frame(height: 120)
-                            .frame(maxWidth: .infinity)
-                        }
-                        Text(plan.name)
-                            .font(.subheadline.weight(.semibold))
-                        Text("\(plan.price_minor.formatted()) \(plan.currency)")
-                            .font(.caption)
-                        Text(plan.reward_summary)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if let description = plan.description, !description.isEmpty {
-                            Text(description)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(10)
-                    .background(Color.secondary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-
-                if viewerContextResolved && isViewingSelfProfile == false {
-                    Button(page.viewer_relationship.is_supported ? "Supported" : "Support this project") {
+                ProfileProjectDetailView(
+                    project: project,
+                    supportButtonTitle: viewerContextResolved && isViewingSelfProfile == false
+                        ? (page.viewer_relationship.is_supported ? "Supported" : "Support")
+                        : nil,
+                    supportButtonDisabled: page.viewer_relationship.is_supported,
+                    onTapSupport: {
                         if page.viewer_relationship.is_supported { return }
                         onSupportTap(project)
                     }
-                    .buttonStyle(.borderedProminent)
-                }
+                )
             } else {
                 Text("No active project")
                     .font(.subheadline)

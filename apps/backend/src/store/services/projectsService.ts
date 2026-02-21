@@ -383,6 +383,158 @@ export class ProjectsService {
     }
   }
 
+  async updateProjectForCreator(input: {
+    creatorUserId: string;
+    projectId: string;
+    subtitle?: string | null;
+    description?: string | null;
+    imageUrl?: string | null;
+    urls?: string[];
+    plans?: Array<{
+      id?: string;
+      name?: string;
+      priceMinor?: number;
+      rewardSummary?: string;
+      description?: string | null;
+      imageUrl?: string | null;
+      currency?: string;
+    }>;
+  }) {
+    if (!hasDb() || !dbPool) {
+      return this.memory.updateProjectForCreator(input);
+    }
+
+    const client = await dbPool.connect();
+    try {
+      await client.query("begin");
+      const existing = await client.query<{
+        id: string;
+        creator_user_id: string;
+        status: string;
+        subtitle: string | null;
+        description: string | null;
+        cover_image_url: string | null;
+        external_urls: unknown;
+      }>(
+        `select id, creator_user_id, status, subtitle, description, cover_image_url, external_urls from projects where id = $1 limit 1`,
+        [input.projectId],
+      );
+      if ((existing.rowCount ?? 0) === 0) {
+        await client.query("rollback");
+        return "not_found" as const;
+      }
+      if (existing.rows[0].creator_user_id !== input.creatorUserId) {
+        await client.query("rollback");
+        return "forbidden" as const;
+      }
+      if (["stopped", "failed", "succeeded"].includes(existing.rows[0].status)) {
+        await client.query("rollback");
+        return "invalid_state" as const;
+      }
+
+      const current = existing.rows[0];
+      const mergedSubtitle = input.subtitle === undefined ? current.subtitle : input.subtitle;
+      const mergedDescription = input.description === undefined ? current.description : input.description;
+      const mergedImageUrl = input.imageUrl === undefined ? current.cover_image_url : input.imageUrl;
+      const currentUrls = Array.isArray(current.external_urls)
+        ? (current.external_urls as string[]).filter((v) => typeof v === "string")
+        : [];
+      const mergedUrls = input.urls === undefined ? currentUrls : input.urls;
+
+      await client.query(
+        `
+        update projects
+        set subtitle = $3,
+            description = $4,
+            cover_image_url = $5,
+            external_urls = $6::jsonb,
+            updated_at = now()
+        where id = $1 and creator_user_id = $2
+      `,
+        [input.projectId, input.creatorUserId, mergedSubtitle, mergedDescription, mergedImageUrl, JSON.stringify(mergedUrls)],
+      );
+
+      if (input.plans && input.plans.length > 0) {
+        const planRows = await client.query<{
+          id: string;
+          price_minor: number;
+          description: string | null;
+          image_url: string | null;
+        }>(
+          `
+          select id, price_minor, description, image_url
+          from project_plans
+          where project_id = $1
+        `,
+          [input.projectId],
+        );
+
+        const existingPlanMap = new Map(planRows.rows.map((row) => [row.id, row]));
+        const minExistingPrice = planRows.rows.reduce((acc, row) => Math.min(acc, row.price_minor), Number.POSITIVE_INFINITY);
+
+        for (const plan of input.plans) {
+          if (plan.id) {
+            const currentPlan = existingPlanMap.get(plan.id);
+            if (!currentPlan) {
+              await client.query("rollback");
+              return "validation_error" as const;
+            }
+            const mergedPlanDescription = plan.description === undefined ? currentPlan.description : plan.description;
+            const mergedPlanImageUrl = plan.imageUrl === undefined ? currentPlan.image_url : plan.imageUrl;
+            await client.query(
+              `
+              update project_plans
+              set description = $2,
+                  image_url = $3,
+                  updated_at = now()
+              where id = $1 and project_id = $4
+            `,
+              [plan.id, mergedPlanDescription, mergedPlanImageUrl, input.projectId],
+            );
+            continue;
+          }
+
+          if (!plan.name || !plan.rewardSummary || !plan.currency || !plan.priceMinor || plan.priceMinor <= 0) {
+            await client.query("rollback");
+            return "validation_error" as const;
+          }
+
+          if (Number.isFinite(minExistingPrice) && plan.priceMinor < minExistingPrice) {
+            await client.query("rollback");
+            return "invalid_plan_price" as const;
+          }
+
+          await client.query(
+            `
+            insert into project_plans (
+              id, project_id, name, reward_summary, description, image_url, is_physical_reward, price_minor, currency, created_at, updated_at
+            )
+            values ($1, $2, $3, $4, $5, $6, true, $7, $8, now(), now())
+          `,
+            [
+              randomUUID(),
+              input.projectId,
+              plan.name,
+              plan.rewardSummary,
+              plan.description ?? null,
+              plan.imageUrl ?? null,
+              plan.priceMinor,
+              plan.currency,
+            ],
+          );
+        }
+      }
+
+      await client.query("commit");
+      return this.getProjectByCreator(input.creatorUserId);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async deleteProjectForCreator(input: { creatorUserId: string; projectId: string }) {
     if (!hasDb() || !dbPool) {
       return this.memory.deleteProjectForCreator(input);
