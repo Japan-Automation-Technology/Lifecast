@@ -249,45 +249,117 @@ struct SupportedProjectsListView: View {
         let funded = max(row.project_funded_amount_minor, 0)
         let progress = min(Double(funded) / Double(goal), 1.0)
         let percent = Int((Double(funded) / Double(goal)) * 100.0)
+        let trimmedCreatorDisplayName = (row.creator_display_name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let creatorName = trimmedCreatorDisplayName.isEmpty ? "@\(row.creator_username)" : trimmedCreatorDisplayName
+        let supportAmountText = "\(row.amount_minor.formatted()) \(row.currency)"
 
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(row.project_title)
-                .font(.subheadline.weight(.semibold))
-            if let subtitle = row.project_subtitle, !subtitle.isEmpty {
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        return VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .bottomLeading) {
+                if let raw = row.project_image_url,
+                   let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .empty:
+                            Rectangle().fill(Color.secondary.opacity(0.12))
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        case .failure:
+                            Rectangle().fill(Color.secondary.opacity(0.12))
+                        @unknown default:
+                            Rectangle().fill(Color.secondary.opacity(0.12))
+                        }
+                    }
+                } else {
+                    LinearGradient(
+                        colors: [Color.secondary.opacity(0.22), Color.secondary.opacity(0.08)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
+
+                LinearGradient(
+                    colors: [Color.black.opacity(0.0), Color.black.opacity(0.36)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+
+                HStack {
+                    Text("\(percent)% funded")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.38))
+                        .clipShape(Capsule())
+                    Spacer()
+                    Text("You: \(supportAmountText)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.38))
+                        .clipShape(Capsule())
+                }
+                .padding(10)
             }
+            .frame(maxWidth: .infinity)
+            .frame(height: 146)
+            .clipped()
 
-            HStack {
-                Text("Supported at \(formatSupportDate(row.supported_at))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("You: \(row.amount_minor.formatted()) \(row.currency)")
-                    .font(.caption.weight(.semibold))
+            VStack(alignment: .leading, spacing: 9) {
+                Text(row.project_title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+
+                HStack(spacing: 6) {
+                    Image(systemName: "person.crop.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(creatorName)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(formatSupportDate(row.supported_at))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                ProgressView(value: progress)
+                    .tint(fundingProgressTint(Double(funded) / Double(goal)))
+                HStack {
+                    Text("\(funded.formatted()) / \(goal.formatted()) \(row.project_currency)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(row.project_supporter_count) supporters")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
-
-            ProgressView(value: progress)
-                .tint(fundingProgressTint(Double(funded) / Double(goal)))
-            Text("\(percent)% funded (\(funded.formatted()) / \(goal.formatted()) \(row.project_currency))")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text("Supporters: \(row.project_supporter_count)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
         }
-        .padding(10)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.06), radius: 8, y: 3)
     }
 
     private func formatSupportDate(_ iso: String) -> String {
-        let isoFormatter = ISO8601DateFormatter()
-        guard let date = isoFormatter.date(from: iso) else { return iso }
+        let primaryISOFormatter = ISO8601DateFormatter()
+        primaryISOFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fallbackISOFormatter = ISO8601DateFormatter()
+        fallbackISOFormatter.formatOptions = [.withInternetDateTime]
+        guard let date = primaryISOFormatter.date(from: iso) ?? fallbackISOFormatter.date(from: iso) else {
+            return iso
+        }
         let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
+        formatter.dateFormat = "yyyy/MM/dd"
         return formatter.string(from: date)
     }
 }
