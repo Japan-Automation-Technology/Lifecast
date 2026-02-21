@@ -303,7 +303,7 @@ struct CreatorPublicPageView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            LazyVStack(spacing: 16, pinnedViews: [.sectionHeaders]) {
                 if let page {
                     VStack(spacing: 8) {
                         ProfileOverviewSection(
@@ -364,26 +364,29 @@ struct CreatorPublicPageView: View {
                     }
                     .padding(.top, 6)
 
-                    ProfileTabIconStrip(selectedIndex: $selectedIndex, style: .fullWidthUnderline)
-
-                    Group {
-                        if selectedIndex == 0 {
-                            creatorProjectSection(page: page)
-                        } else if selectedIndex == 1 {
-                            creatorPostsSection(page: page)
-                        } else {
-                            SupportedProjectsListView(
-                                rows: supportedProjects,
-                                isLoading: supportedProjectsLoading,
-                                errorText: supportedProjectsError,
-                                emptyText: "No supported projects yet",
-                                onRefresh: {
-                                    Task { await loadSupportedProjects() }
-                                }
-                            )
+                    Section {
+                        Group {
+                            if selectedIndex == 0 {
+                                creatorProjectSection(page: page)
+                            } else if selectedIndex == 1 {
+                                creatorPostsSection(page: page)
+                            } else {
+                                SupportedProjectsListView(
+                                    rows: supportedProjects,
+                                    isLoading: supportedProjectsLoading,
+                                    errorText: supportedProjectsError,
+                                    emptyText: "No supported projects yet",
+                                    onRefresh: {
+                                        Task { await loadSupportedProjects() }
+                                    }
+                                )
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } header: {
+                        ProfileTabIconStrip(selectedIndex: $selectedIndex, style: .fullWidthUnderline)
+                            .background(Color.white)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 } else if loading {
                     ProgressView("Loading creator...")
                         .padding(.top, 20)
@@ -398,6 +401,12 @@ struct CreatorPublicPageView: View {
         }
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: appBottomBarHeight + 20)
+        }
+        .refreshable {
+            await load()
+            if selectedIndex == 2 {
+                await loadSupportedProjects()
+            }
         }
         .task(id: creatorId) {
             await MainActor.run {
@@ -491,9 +500,6 @@ struct CreatorPublicPageView: View {
                 let rawRatio = Double(funded) / Double(goal)
                 let progress = min(Double(funded) / Double(goal), 1.0)
                 let percent = Int((Double(funded) / Double(goal)) * 100.0)
-
-                Text("Project page")
-                    .font(.headline)
                 if let imageUrl = project.image_url, let url = URL(string: imageUrl) {
                     AsyncImage(url: url) { image in
                         image.resizable().scaledToFill()
@@ -631,22 +637,12 @@ struct CreatorPublicPageView: View {
 
     private func creatorPostsSection(page: CreatorPublicPageResult) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Posted videos")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Button("Refresh") {
-                    thumbnailCacheBust = UUID().uuidString
-                    Task { await load() }
-                }
-                .font(.caption)
-            }
             if page.videos.isEmpty {
                 Text("No videos yet")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 0), GridItem(.flexible(), spacing: 0), GridItem(.flexible(), spacing: 0)], spacing: 0) {
                     ForEach(Array(page.videos.enumerated()), id: \.element.video_id) { index, video in
                         Button {
                             selectedVideo = video
@@ -669,8 +665,9 @@ struct CreatorPublicPageView: View {
                                     RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.15))
                                 }
                             }
-                            .frame(height: 150)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .frame(maxWidth: .infinity)
+                            .aspectRatio(1, contentMode: .fit)
+                            .clipped()
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("creator-posted-grid-video-\(index)")
@@ -679,7 +676,8 @@ struct CreatorPublicPageView: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.top, -16)
+        .padding(.horizontal, 0)
         .fullScreenCover(item: $selectedVideo) { video in
             CreatorPostedFeedView(
                 videos: convertCreatorVideosToMyVideos(page.videos),

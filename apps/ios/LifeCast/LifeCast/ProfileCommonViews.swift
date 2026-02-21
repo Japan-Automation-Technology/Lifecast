@@ -204,16 +204,6 @@ struct SupportedProjectsListView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Supported projects")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Button("Refresh") {
-                    onRefresh()
-                }
-                .font(.caption)
-            }
-            .padding(.horizontal, 16)
 
             if isLoading {
                 ProgressView("Loading supports...")

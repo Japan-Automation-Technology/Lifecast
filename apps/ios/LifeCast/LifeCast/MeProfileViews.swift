@@ -37,7 +37,7 @@ struct MeTabView: View {
             Group {
                 if isAuthenticated {
                     ScrollView {
-                        VStack(spacing: 16) {
+                        LazyVStack(spacing: 16, pinnedViews: [.sectionHeaders]) {
                             ProfileOverviewSection(
                                 avatarURL: myProfile?.avatar_url,
                                 displayName: currentDisplayName,
@@ -74,41 +74,44 @@ struct MeTabView: View {
                             }
                             .padding(.top, 6)
 
-                            ProfileTabIconStrip(selectedIndex: $selectedIndex, style: .fullWidthUnderline)
-                                .onChange(of: selectedIndex) { _, newValue in
-                                    if newValue == 1 {
-                                        onRefreshVideos()
-                                    } else if newValue == 2 {
-                                        Task { await loadMySupportedProjects() }
+                            Section {
+                                Group {
+                                    if selectedIndex == 0 {
+                                        ProjectPageView(
+                                            client: client,
+                                            onProjectChanged: onProjectChanged
+                                        )
+                                    } else if selectedIndex == 1 {
+                                        PostedVideosListView(
+                                            videos: myVideos,
+                                            errorText: myVideosError,
+                                            onRefreshVideos: onRefreshVideos,
+                                            creatorProfile: myProfile
+                                        )
+                                    } else {
+                                        SupportedProjectsListView(
+                                            rows: supportedProjects,
+                                            isLoading: supportedProjectsLoading,
+                                            errorText: supportedProjectsError,
+                                            emptyText: "No supported projects yet",
+                                            onRefresh: {
+                                                Task { await loadMySupportedProjects() }
+                                            }
+                                        )
                                     }
                                 }
-
-                            Group {
-                                if selectedIndex == 0 {
-                                    ProjectPageView(
-                                        client: client,
-                                        onProjectChanged: onProjectChanged
-                                    )
-                                } else if selectedIndex == 1 {
-                                    PostedVideosListView(
-                                        videos: myVideos,
-                                        errorText: myVideosError,
-                                        onRefreshVideos: onRefreshVideos,
-                                        creatorProfile: myProfile
-                                    )
-                                } else {
-                                    SupportedProjectsListView(
-                                        rows: supportedProjects,
-                                        isLoading: supportedProjectsLoading,
-                                        errorText: supportedProjectsError,
-                                        emptyText: "No supported projects yet",
-                                        onRefresh: {
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            } header: {
+                                ProfileTabIconStrip(selectedIndex: $selectedIndex, style: .fullWidthUnderline)
+                                    .background(Color.white)
+                                    .onChange(of: selectedIndex) { _, newValue in
+                                        if newValue == 1 {
+                                            onRefreshVideos()
+                                        } else if newValue == 2 {
                                             Task { await loadMySupportedProjects() }
                                         }
-                                    )
-                                }
+                                    }
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -117,6 +120,17 @@ struct MeTabView: View {
                     )
                     .safeAreaInset(edge: .bottom) {
                         Color.clear.frame(height: appBottomBarHeight + 20)
+                    }
+                    .refreshable {
+                        onRefreshProfile()
+                        switch selectedIndex {
+                        case 1:
+                            onRefreshVideos()
+                        case 2:
+                            await loadMySupportedProjects()
+                        default:
+                            break
+                        }
                     }
                 } else {
                     VStack(spacing: 14) {
@@ -674,12 +688,14 @@ struct ProjectPageView: View {
     @State private var showEndConfirm = false
     @State private var projectCreateInFlight = false
     @State private var projectCreateStatusText = ""
+    @State private var hasLoadedProjectsOnce = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let myProject {
-                Text("Project page")
-                    .font(.headline)
+            if !hasLoadedProjectsOnce {
+                ProgressView("Loading project...")
+                    .font(.caption)
+            } else if let myProject {
                 projectDetailsView(project: myProject)
                 if myProject.status == "stopped" {
                     Text("Ended project. Refund policy: full refund.")
@@ -1194,11 +1210,13 @@ struct ProjectPageView: View {
                 myProject = projects.first(where: { $0.status == "active" || $0.status == "draft" })
                 projectHistory = projects.filter { $0.status != "active" && $0.status != "draft" }
                 projectErrorText = ""
+                hasLoadedProjectsOnce = true
             }
         } catch {
             await MainActor.run {
                 myProject = nil
                 projectHistory = []
+                hasLoadedProjectsOnce = true
             }
         }
     }

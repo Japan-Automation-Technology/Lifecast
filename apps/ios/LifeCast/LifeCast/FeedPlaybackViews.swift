@@ -16,17 +16,6 @@ struct PostedVideosListView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Posted videos")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Button("Refresh") {
-                    thumbnailCacheBust = UUID().uuidString
-                    onRefreshVideos()
-                }
-                .font(.caption)
-            }
-            .padding(.horizontal, 16)
 
             if !errorText.isEmpty {
                 Text(errorText)
@@ -41,7 +30,7 @@ struct PostedVideosListView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 16)
             } else {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 4) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 0), GridItem(.flexible(), spacing: 0), GridItem(.flexible(), spacing: 0)], spacing: 0) {
                     ForEach(Array(newestFirstVideos.enumerated()), id: \.element.video_id) { index, video in
                         Button {
                             selectedVideo = video
@@ -79,17 +68,17 @@ struct PostedVideosListView: View {
                                 )
                             }
                             .frame(maxWidth: .infinity)
-                            .aspectRatio(9.0 / 16.0, contentMode: .fit)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .aspectRatio(1, contentMode: .fit)
+                            .clipped()
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("posted-grid-video-\(index)")
                         .accessibilityLabel("Open posted \(index)")
                     }
                 }
-                .padding(.horizontal, 16)
             }
         }
+        .padding(.top, -16)
         .fullScreenCover(item: $selectedVideo) { video in
             CreatorPostedFeedView(
                 videos: newestFirstVideos,
