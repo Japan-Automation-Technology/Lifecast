@@ -58,9 +58,6 @@ struct PostedVideosListView: View {
                                             )
                                         )
                                 }
-                                Image(systemName: "play.circle.fill")
-                                    .font(.system(size: 28))
-                                    .foregroundStyle(.white.opacity(0.9))
                                 LinearGradient(
                                     colors: [Color.black.opacity(0.0), Color.black.opacity(0.55)],
                                     startPoint: .top,

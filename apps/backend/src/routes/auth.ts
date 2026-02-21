@@ -8,11 +8,45 @@ const devSwitchBody = z.object({
   user_id: z.string().uuid(),
 });
 
+const usernamePattern = /^[A-Za-z0-9_]+$/;
+const passwordHasUppercase = /[A-Z]/;
+const passwordHasLowercase = /[a-z]/;
+const passwordHasNumber = /[0-9]/;
+const passwordHasSymbol = /[^A-Za-z0-9]/;
+const passwordHasWhitespace = /\s/;
+
 const emailSignUpBody = z.object({
   email: z.string().email(),
-  password: z.string().min(8).max(200),
+  password: z.string().min(10).max(72),
   username: z.string().min(3).max(40).optional(),
-  display_name: z.string().min(1).max(80).optional(),
+  display_name: z.string().min(1).max(30).optional(),
+}).superRefine((value, ctx) => {
+  if (passwordHasWhitespace.test(value.password)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["password"],
+      message: "password must not contain spaces",
+    });
+  }
+  if (
+    !passwordHasUppercase.test(value.password)
+    || !passwordHasLowercase.test(value.password)
+    || !passwordHasNumber.test(value.password)
+    || !passwordHasSymbol.test(value.password)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["password"],
+      message: "password must include uppercase, lowercase, number, and symbol",
+    });
+  }
+  if (value.username !== undefined && !usernamePattern.test(value.username)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["username"],
+      message: "username must contain only letters, numbers, and underscore",
+    });
+  }
 });
 
 const emailSignInBody = z.object({
@@ -62,11 +96,58 @@ async function supabaseAuthRequest(
   }
 }
 
+function extractSupabaseErrorMessage(payload: Record<string, unknown>, fallback: string) {
+  const candidates = [
+    payload.message,
+    payload.msg,
+    payload.error_description,
+    payload.error,
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  const errorCode = typeof payload.error_code === "string" ? payload.error_code : "";
+  if (errorCode === "over_email_send_rate_limit") {
+    return "Too many sign-up attempts for this email. Please wait a moment and try again.";
+  }
+  if (errorCode === "email_exists" || errorCode === "user_already_exists") {
+    return "This email is already registered. Please sign in instead.";
+  }
+  return fallback;
+}
+
 export async function registerAuthRoutes(app: FastifyInstance) {
   app.post("/v1/auth/email/sign-up", async (req, reply) => {
     const body = emailSignUpBody.safeParse(req.body);
     if (!body.success) {
-      return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid sign-up payload"));
+      const firstIssue = body.error.issues[0];
+      const message = firstIssue?.message ?? "Invalid sign-up payload";
+      return reply.code(400).send(fail("VALIDATION_ERROR", message));
+    }
+
+    const normalizedUsername = body.data.username?.trim();
+    if (normalizedUsername && hasDb() && dbPool) {
+      const client = await dbPool.connect();
+      try {
+        const existing = await client.query<{ exists: boolean }>(
+          `
+          select exists(
+            select 1 from users where lower(username) = lower($1)
+            union all
+            select 1 from creator_profiles where lower(username) = lower($1)
+          ) as exists
+        `,
+          [normalizedUsername],
+        );
+        if (existing.rows[0]?.exists) {
+          return reply.code(409).send(fail("STATE_CONFLICT", "Username is already taken. Please choose another one."));
+        }
+      } finally {
+        client.release();
+      }
     }
 
     const response = await supabaseAuthRequest("/auth/v1/signup", {
@@ -74,15 +155,22 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         email: body.data.email,
         password: body.data.password,
         data: {
-          username: body.data.username ?? null,
+          username: normalizedUsername ?? null,
           display_name: body.data.display_name ?? null,
         },
       },
     });
     if (!response.ok) {
+      const message = extractSupabaseErrorMessage(response.payload, "Sign-up failed");
+      if (/already registered/i.test(message)) {
+        return reply.code(409).send(fail("STATE_CONFLICT", "This email is already registered. Please sign in instead."));
+      }
+      if (/username|uq_users_username_ci|creator_profiles.*username|duplicate key value/i.test(message)) {
+        return reply.code(409).send(fail("STATE_CONFLICT", "Username is already taken. Please choose another one."));
+      }
       return reply
         .code(response.status >= 400 && response.status < 500 ? response.status : 400)
-        .send(fail("AUTH_FAILED", String(response.payload.message ?? "Sign-up failed")));
+        .send(fail("AUTH_FAILED", message));
     }
 
     return reply.send(

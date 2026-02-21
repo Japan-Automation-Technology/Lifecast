@@ -481,15 +481,21 @@ struct SupportFlowDemoView: View {
                                 await presentSupportFlow(for: project)
                             }
                         } label: {
-                            Text(project.isSupportedByCurrentUser ? "Supported" : "Support")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(project.isSupportedByCurrentUser ? Color.black.opacity(0.9) : Color.white)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 15, style: .continuous)
-                                        .fill(project.isSupportedByCurrentUser ? Color.white.opacity(0.72) : Color.green.opacity(0.92))
-                                )
+                            HStack(spacing: 6) {
+                                if project.isSupportedByCurrentUser {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption.weight(.bold))
+                                }
+                                Text(project.isSupportedByCurrentUser ? "Supported" : "Support")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .foregroundStyle(project.isSupportedByCurrentUser ? Color.black.opacity(0.9) : Color.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                                    .fill(project.isSupportedByCurrentUser ? Color.white.opacity(0.72) : Color.green.opacity(0.92))
+                            )
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(project.isSupportedByCurrentUser ? "Supported" : "Support")
@@ -2244,6 +2250,7 @@ private struct AuthEntrySheet: View {
     @State private var username = ""
     @State private var displayName = ""
     @State private var isSignUp = false
+    @State private var isPasswordVisible = false
     @State private var isLoading = false
     @State private var errorText = ""
     
@@ -2301,10 +2308,37 @@ private struct AuthEntrySheet: View {
 
                         VStack(spacing: 10) {
                             authIconTextField(symbol: "envelope", placeholder: "Email", text: $email, keyboardType: .emailAddress, capitalization: .never)
-                            authIconSecureField(symbol: "lock", placeholder: "Password", text: $password)
+                            authIconSecureField(symbol: "lock", placeholder: "Password", text: $password, isVisible: $isPasswordVisible)
                             if isSignUp {
+                                HStack(spacing: 10) {
+                                    Text("Password must be 10 to 72 characters and include at least one uppercase letter, one lowercase letter, one number, and one symbol. Spaces are not allowed.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                                    Button {
+                                        password = generateRandomPassword()
+                                        isPasswordVisible = true
+                                        errorText = ""
+                                    } label: {
+                                        Image(systemName: "arrow.triangle.2.circlepath")
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 7)
+                                    .background(Color.black.opacity(0.08))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .stroke(Color.black.opacity(0.16), lineWidth: 1)
+                                    )
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .buttonStyle(.plain)
+                                }
                                 authIconTextField(symbol: "at", placeholder: "Username (optional)", text: $username, capitalization: .never)
                                 authIconTextField(symbol: "person", placeholder: "Display name (optional)", text: $displayName)
+                                Text("Username and Display name can be changed later from Edit Profile.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
 
@@ -2413,11 +2447,22 @@ private struct AuthEntrySheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    private func authIconSecureField(symbol: String, placeholder: String, text: Binding<String>) -> some View {
+    private func authIconSecureField(symbol: String, placeholder: String, text: Binding<String>, isVisible: Binding<Bool>) -> some View {
         HStack(spacing: 10) {
             Image(systemName: symbol)
                 .foregroundStyle(.secondary)
-            SecureField(placeholder, text: text)
+            if isVisible.wrappedValue {
+                TextField(placeholder, text: text)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+            } else {
+                SecureField(placeholder, text: text)
+            }
+            Button(isVisible.wrappedValue ? "Hide" : "Show") {
+                isVisible.wrappedValue.toggle()
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 11)
@@ -2427,6 +2472,23 @@ private struct AuthEntrySheet: View {
     }
 
     private func submitEmailAuth() async {
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let validationError = validateAuthInput(
+            email: normalizedEmail,
+            password: normalizedPassword,
+            username: normalizedUsername,
+            displayName: normalizedDisplayName,
+            isSignUp: isSignUp
+        ) {
+            await MainActor.run {
+                errorText = validationError
+            }
+            return
+        }
+
         await MainActor.run {
             isLoading = true
             errorText = ""
@@ -2438,18 +2500,15 @@ private struct AuthEntrySheet: View {
         }
 
         do {
-            let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
             if isSignUp {
-                let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
-                let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
                 _ = try await client.signUpWithEmail(
                     email: normalizedEmail,
-                    password: password,
+                    password: normalizedPassword,
                     username: normalizedUsername.isEmpty ? nil : normalizedUsername,
                     displayName: normalizedDisplayName.isEmpty ? nil : normalizedDisplayName
                 )
             } else {
-                _ = try await client.signInWithEmail(email: normalizedEmail, password: password)
+                _ = try await client.signInWithEmail(email: normalizedEmail, password: normalizedPassword)
             }
             await MainActor.run {
                 onAuthenticated()
@@ -2460,6 +2519,70 @@ private struct AuthEntrySheet: View {
                 errorText = error.localizedDescription
             }
         }
+    }
+
+    private func validateAuthInput(email: String, password: String, username: String, displayName: String, isSignUp: Bool) -> String? {
+        let emailPattern = #"^[A-Z0-9a-z._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$"#
+        if email.range(of: emailPattern, options: .regularExpression) == nil {
+            return "Email format is invalid. Example: name@example.com"
+        }
+        if password.isEmpty {
+            return "Password is required."
+        }
+        guard isSignUp else { return nil }
+
+        if password.contains(where: \.isWhitespace) {
+            return "Password must not include spaces."
+        }
+        if password.count < 10 {
+            return "Password must be at least 10 characters."
+        }
+        if password.count > 72 {
+            return "Password must be 72 characters or less."
+        }
+        let uppercaseSet = CharacterSet.uppercaseLetters
+        let lowercaseSet = CharacterSet.lowercaseLetters
+        let numberSet = CharacterSet.decimalDigits
+        let symbolSet = CharacterSet.punctuationCharacters.union(.symbols)
+        let hasUppercase = password.rangeOfCharacter(from: uppercaseSet) != nil
+        let hasLowercase = password.rangeOfCharacter(from: lowercaseSet) != nil
+        let hasNumber = password.rangeOfCharacter(from: numberSet) != nil
+        let hasSymbol = password.rangeOfCharacter(from: symbolSet) != nil
+        if !hasUppercase || !hasLowercase || !hasNumber || !hasSymbol {
+            return "Password must include uppercase/lowercase letters, a number, and a symbol."
+        }
+        if !username.isEmpty {
+            if username.count < 3 || username.count > 40 {
+                return "Username must be 3-40 characters."
+            }
+            let allowedUsernameChars = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+            if username.rangeOfCharacter(from: allowedUsernameChars.inverted) != nil {
+                return "Username can only include letters, numbers, and underscore (_)."
+            }
+        }
+        if displayName.count > 30 {
+            return "Display name must be 30 characters or less."
+        }
+        return nil
+    }
+
+    private func generateRandomPassword(length: Int = 16) -> String {
+        let upper = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        let lower = Array("abcdefghijklmnopqrstuvwxyz")
+        let digits = Array("0123456789")
+        let symbols = Array("!@#$%^&*()-_=+[]{}<>?/|")
+        let all = upper + lower + digits + symbols
+
+        var chars: [Character] = [
+            upper.randomElement()!,
+            lower.randomElement()!,
+            digits.randomElement()!,
+            symbols.randomElement()!
+        ]
+        while chars.count < max(length, 10) {
+            chars.append(all.randomElement()!)
+        }
+        return String(chars.shuffled())
     }
 
     private func continueOAuth(provider: String) async {
