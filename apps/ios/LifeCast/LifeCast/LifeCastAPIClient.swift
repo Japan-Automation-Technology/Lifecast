@@ -61,6 +61,9 @@ struct MyVideo: Decodable, Identifiable {
     let file_name: String
     let playback_url: String?
     let thumbnail_url: String?
+    let play_count: Int?
+    let watch_completed_count: Int?
+    let watch_time_total_ms: Int?
     let created_at: String
 
     var id: UUID { video_id }
@@ -199,6 +202,34 @@ struct CreateVideoCommentResult: Decodable {
 struct CommentEngagementResult: Decodable {
     let likes: Int
     let is_liked_by_current_user: Bool
+}
+
+struct AnalyticsEventAttributes: Encodable {
+    let video_id: String
+    let project_id: String?
+    let watch_duration_ms: Int?
+    let video_duration_ms: Int?
+}
+
+struct AnalyticsEventPayload: Encodable {
+    let event_name: String
+    let event_id: String
+    let event_time: String
+    let user_id: String?
+    let anonymous_id: String?
+    let session_id: String
+    let client_platform: String
+    let app_version: String
+    let attributes: AnalyticsEventAttributes
+}
+
+struct AnalyticsIngestRequest: Encodable {
+    let events: [AnalyticsEventPayload]
+}
+
+struct AnalyticsIngestResult: Decodable {
+    let accepted: Int
+    let rejected: Int
 }
 
 enum CreatorNetworkTab: String, CaseIterable {
@@ -351,6 +382,7 @@ struct UploadProjectImageResult: Decodable {
 }
 
 struct UpdateMyProfileRequest: Encodable {
+    let username: String?
     let display_name: String?
     let bio: String?
     let avatar_url: String?
@@ -437,9 +469,11 @@ final class LifeCastAPIClient {
     private static let actingUserIdKey = "lifecast.acting_user_id"
     private static let accessTokenKey = "lifecast.auth.access_token"
     private static let refreshTokenKey = "lifecast.auth.refresh_token"
+    private static let analyticsAnonymousIdKey = "lifecast.analytics.anonymous_id"
 
     private let baseURL: URL
     private let session: URLSession
+    private let analyticsSessionId = UUID().uuidString
     private var actingUserId: UUID?
     private var accessToken: String?
     private var refreshToken: String?
@@ -479,6 +513,27 @@ final class LifeCastAPIClient {
     private static func loadPersistedActingUserId() -> UUID? {
         guard let raw = UserDefaults.standard.string(forKey: Self.actingUserIdKey) else { return nil }
         return UUID(uuidString: raw)
+    }
+
+    private func analyticsAnonymousId() -> String {
+        if let existing = UserDefaults.standard.string(forKey: Self.analyticsAnonymousIdKey), !existing.isEmpty {
+            return existing
+        }
+        let generated = "anon-\(UUID().uuidString.lowercased())"
+        UserDefaults.standard.set(generated, forKey: Self.analyticsAnonymousIdKey)
+        return generated
+    }
+
+    private func analyticsAppVersion() -> String {
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String
+        if let short, let build, !short.isEmpty, !build.isEmpty {
+            return "\(short)+\(build)"
+        }
+        if let short, !short.isEmpty {
+            return short
+        }
+        return "ios-unknown"
     }
 
     private func applyAuthHeaders(_ request: inout URLRequest) {
@@ -1254,11 +1309,11 @@ final class LifeCastAPIClient {
         return result.image_url
     }
 
-    func updateMyProfile(displayName: String?, bio: String?, avatarURL: String?) async throws -> MyProfileResult {
+    func updateMyProfile(username: String?, displayName: String?, bio: String?, avatarURL: String?) async throws -> MyProfileResult {
         try await send(
             path: "/v1/me/profile",
             method: "PATCH",
-            body: UpdateMyProfileRequest(display_name: displayName, bio: bio, avatar_url: avatarURL),
+            body: UpdateMyProfileRequest(username: username, display_name: displayName, bio: bio, avatar_url: avatarURL),
             idempotencyKey: "ios-profile-update-\(UUID().uuidString)"
         )
     }
@@ -1313,6 +1368,81 @@ final class LifeCastAPIClient {
         let fileName = http.value(forHTTPHeaderField: "X-LifeCast-File-Name") ?? "video.mov"
         let contentType = http.value(forHTTPHeaderField: "Content-Type") ?? "video/quicktime"
         return DevSampleVideo(data: data, fileName: fileName, contentType: contentType)
+    }
+
+    @discardableResult
+    func ingestAnalyticsEvents(_ events: [AnalyticsEventPayload]) async throws -> AnalyticsIngestResult {
+        guard !events.isEmpty else {
+            return AnalyticsIngestResult(accepted: 0, rejected: 0)
+        }
+        return try await send(
+            path: "/v1/events/ingest",
+            method: "POST",
+            body: AnalyticsIngestRequest(events: events),
+            idempotencyKey: nil
+        )
+    }
+
+    func trackVideoPlayStarted(videoId: UUID, projectId: UUID?) async {
+        let payload = AnalyticsEventPayload(
+            event_name: "video_play_started",
+            event_id: UUID().uuidString,
+            event_time: ISO8601DateFormatter().string(from: Date()),
+            user_id: actingUserId?.uuidString,
+            anonymous_id: actingUserId == nil ? analyticsAnonymousId() : nil,
+            session_id: analyticsSessionId,
+            client_platform: "ios",
+            app_version: analyticsAppVersion(),
+            attributes: AnalyticsEventAttributes(
+                video_id: videoId.uuidString,
+                project_id: projectId?.uuidString,
+                watch_duration_ms: nil,
+                video_duration_ms: nil
+            )
+        )
+        _ = try? await ingestAnalyticsEvents([payload])
+    }
+
+    func trackVideoWatchProgress(videoId: UUID, watchDurationMs: Int, videoDurationMs: Int, projectId: UUID?) async {
+        guard watchDurationMs > 0, videoDurationMs > 0 else { return }
+        let payload = AnalyticsEventPayload(
+            event_name: "video_watch_progress",
+            event_id: UUID().uuidString,
+            event_time: ISO8601DateFormatter().string(from: Date()),
+            user_id: actingUserId?.uuidString,
+            anonymous_id: actingUserId == nil ? analyticsAnonymousId() : nil,
+            session_id: analyticsSessionId,
+            client_platform: "ios",
+            app_version: analyticsAppVersion(),
+            attributes: AnalyticsEventAttributes(
+                video_id: videoId.uuidString,
+                project_id: projectId?.uuidString,
+                watch_duration_ms: watchDurationMs,
+                video_duration_ms: videoDurationMs
+            )
+        )
+        _ = try? await ingestAnalyticsEvents([payload])
+    }
+
+    func trackVideoWatchCompleted(videoId: UUID, projectId: UUID, watchDurationMs: Int, videoDurationMs: Int) async {
+        guard watchDurationMs > 0, videoDurationMs > 0 else { return }
+        let payload = AnalyticsEventPayload(
+            event_name: "video_watch_completed",
+            event_id: UUID().uuidString,
+            event_time: ISO8601DateFormatter().string(from: Date()),
+            user_id: actingUserId?.uuidString,
+            anonymous_id: actingUserId == nil ? analyticsAnonymousId() : nil,
+            session_id: analyticsSessionId,
+            client_platform: "ios",
+            app_version: analyticsAppVersion(),
+            attributes: AnalyticsEventAttributes(
+                video_id: videoId.uuidString,
+                project_id: projectId.uuidString,
+                watch_duration_ms: watchDurationMs,
+                video_duration_ms: videoDurationMs
+            )
+        )
+        _ = try? await ingestAnalyticsEvents([payload])
     }
 
     func sha256Hex(of data: Data) -> String {

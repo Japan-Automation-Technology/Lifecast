@@ -51,6 +51,11 @@ struct SupportFlowDemoView: View {
     @State private var pendingCommentBody = ""
     @State private var commentsSubmitting = false
     @State private var showFeedActions = false
+    @State private var trackedHomeVideoId: UUID?
+    @State private var trackedHomeProjectId: UUID?
+    @State private var trackedHomeDurationMs = 0
+    @State private var trackedHomeMaxWatchMs = 0
+    @State private var trackedHomeDidComplete = false
 
     @State private var errorText = ""
     @State private var isKeyboardVisible = false
@@ -228,6 +233,7 @@ struct SupportFlowDemoView: View {
         }
         .onChange(of: selectedTab) { _, newValue in
             if newValue == 3 {
+                transitionHomeTrackedVideo(to: nil, projectId: nil)
                 setHomeFeedEdgeBoosting(false)
                 homeFeedPlayer?.pause()
                 homeFeedPlayer = nil
@@ -243,6 +249,7 @@ struct SupportFlowDemoView: View {
                     await refreshFeedProjectsFromAPI()
                 }
             } else {
+                transitionHomeTrackedVideo(to: nil, projectId: nil)
                 setHomeFeedEdgeBoosting(false)
                 homeFeedPlayer?.pause()
                 homeFeedPlayer = nil
@@ -290,6 +297,18 @@ struct SupportFlowDemoView: View {
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { note in
             guard let endedItem = note.object as? AVPlayerItem else { return }
             guard let current = homeFeedPlayer, current.currentItem === endedItem else { return }
+            trackedHomeDidComplete = true
+            trackedHomeMaxWatchMs = max(trackedHomeMaxWatchMs, trackedHomeDurationMs)
+            if let videoId = trackedHomeVideoId, let projectId = trackedHomeProjectId, trackedHomeDurationMs > 0 {
+                Task {
+                    await client.trackVideoWatchCompleted(
+                        videoId: videoId,
+                        projectId: projectId,
+                        watchDurationMs: trackedHomeDurationMs,
+                        videoDurationMs: trackedHomeDurationMs
+                    )
+                }
+            }
             current.seek(to: .zero)
             if selectedTab == 0 && !showFeedProjectPanel {
                 current.play()
@@ -363,6 +382,7 @@ struct SupportFlowDemoView: View {
         }
         .onDisappear {
             isHomeFeedVisible = false
+            flushHomeTrackedPlaybackProgress()
             homeFeedPlayer?.pause()
         }
     }
@@ -455,6 +475,25 @@ struct SupportFlowDemoView: View {
             VStack(spacing: 8) {
                 HStack(alignment: .bottom) {
                     VStack(alignment: .leading, spacing: 10) {
+                        Button {
+                            if project.isSupportedByCurrentUser { return }
+                            Task {
+                                await presentSupportFlow(for: project)
+                            }
+                        } label: {
+                            Text(project.isSupportedByCurrentUser ? "Supported" : "Support")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(project.isSupportedByCurrentUser ? Color.black.opacity(0.9) : Color.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                                        .fill(project.isSupportedByCurrentUser ? Color.white.opacity(0.72) : Color.green.opacity(0.92))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(project.isSupportedByCurrentUser ? "Supported" : "Support")
+
                         Button("@\(project.username)") {
                             if project.creatorId == myProfile?.creator_user_id {
                                 selectedTab = 3
@@ -630,16 +669,24 @@ struct SupportFlowDemoView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    Task {
-                        await presentSupportFlow(
-                            for: project,
-                            prefetchedDetail: cachedDetail,
-                            preferredPlanId: tappedPlan?.id,
-                            startAtConfirm: tappedPlan != nil
-                        )
-                    }
-                }
+                .gesture(
+                    TapGesture(count: 2)
+                        .onEnded {
+                            Task {
+                                await likeOnDoubleTap(for: project)
+                            }
+                        }
+                        .exclusively(before: TapGesture(count: 1).onEnded {
+                            Task {
+                                await presentSupportFlow(
+                                    for: project,
+                                    prefetchedDetail: cachedDetail,
+                                    preferredPlanId: tappedPlan?.id,
+                                    startAtConfirm: tappedPlan != nil
+                                )
+                            }
+                        })
+                )
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
@@ -835,21 +882,6 @@ struct SupportFlowDemoView: View {
 
     private func rightRail(project: FeedProjectSummary) -> some View {
         VStack(spacing: 16) {
-            Button {
-                if project.isSupportedByCurrentUser { return }
-                Task {
-                    await presentSupportFlow(for: project)
-                }
-            } label: {
-                Image(systemName: project.isSupportedByCurrentUser ? "checkmark" : "suit.heart.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .frame(width: 40, height: 40)
-                    .background(project.isSupportedByCurrentUser ? Color.green.opacity(0.9) : Color.pink.opacity(0.9))
-                    .foregroundStyle(.white)
-                    .clipShape(Circle())
-            }
-            .accessibilityLabel(project.isSupportedByCurrentUser ? "Supported" : "Support")
-
             metricButton(
                 icon: project.isLikedByCurrentUser ? "heart.fill" : "heart",
                 value: project.likes,
@@ -1873,6 +1905,7 @@ struct SupportFlowDemoView: View {
 
     private func syncHomeFeedPlayer() {
         guard selectedTab == 0, isHomeFeedVisible else {
+            transitionHomeTrackedVideo(to: nil, projectId: nil)
             setHomeFeedEdgeBoosting(false)
             homeFeedPlayer?.pause()
             homeFeedPlayer = nil
@@ -1884,6 +1917,7 @@ struct SupportFlowDemoView: View {
         }
 
         guard !feedProjects.isEmpty else {
+            transitionHomeTrackedVideo(to: nil, projectId: nil)
             setHomeFeedEdgeBoosting(false)
             homeFeedPlayer?.pause()
             homeFeedPlayer = nil
@@ -1898,6 +1932,7 @@ struct SupportFlowDemoView: View {
 
         let project = feedProjects[max(0, min(currentFeedIndex, feedProjects.count - 1))]
         guard let playbackURL = project.playbackURL, let url = URL(string: playbackURL) else {
+            transitionHomeTrackedVideo(to: nil, projectId: nil)
             setHomeFeedEdgeBoosting(false)
             homeFeedPlayer?.pause()
             homeFeedPlayer = nil
@@ -1905,6 +1940,7 @@ struct SupportFlowDemoView: View {
             homeFeedPlaybackProgress = 0
             return
         }
+        transitionHomeTrackedVideo(to: project.videoId, projectId: project.id)
 
         let player: AVPlayer
         if let cached = homeFeedPlayerCache[url] {
@@ -1951,6 +1987,14 @@ struct SupportFlowDemoView: View {
                     homeFeedPlaybackProgress = 0
                 }
                 return
+            }
+            let durationMs = duration * 1000
+            if durationMs.isFinite, durationMs >= 0 {
+                trackedHomeDurationMs = max(0, Int(durationMs))
+            }
+            let currentMs = player.currentTime().seconds * 1000
+            if currentMs.isFinite, currentMs >= 0 {
+                trackedHomeMaxWatchMs = max(trackedHomeMaxWatchMs, Int(currentMs))
             }
             if !isHomeFeedScrubbing {
                 homeFeedPlaybackProgress = min(max(player.currentTime().seconds / duration, 0), 1)
@@ -2026,6 +2070,35 @@ struct SupportFlowDemoView: View {
         for key in stale {
             homeFeedPlayerCache[key]?.pause()
             homeFeedPlayerCache.removeValue(forKey: key)
+        }
+    }
+
+    private func transitionHomeTrackedVideo(to videoId: UUID?, projectId: UUID?) {
+        guard trackedHomeVideoId != videoId else { return }
+        flushHomeTrackedPlaybackProgress()
+        trackedHomeVideoId = videoId
+        trackedHomeProjectId = projectId
+        trackedHomeDurationMs = 0
+        trackedHomeMaxWatchMs = 0
+        trackedHomeDidComplete = false
+        guard let videoId else { return }
+        Task {
+            await client.trackVideoPlayStarted(videoId: videoId, projectId: projectId)
+        }
+    }
+
+    private func flushHomeTrackedPlaybackProgress() {
+        guard !trackedHomeDidComplete else { return }
+        guard let videoId = trackedHomeVideoId else { return }
+        let clampedWatchMs = max(0, min(trackedHomeMaxWatchMs, trackedHomeDurationMs))
+        guard clampedWatchMs > 0, trackedHomeDurationMs > 0 else { return }
+        Task {
+            await client.trackVideoWatchProgress(
+                videoId: videoId,
+                watchDurationMs: clampedWatchMs,
+                videoDurationMs: trackedHomeDurationMs,
+                projectId: trackedHomeProjectId
+            )
         }
     }
 

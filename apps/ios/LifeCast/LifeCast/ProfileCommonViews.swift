@@ -215,6 +215,7 @@ struct SupportedProjectsListView: View {
     let errorText: String
     let emptyText: String
     let onRefresh: () -> Void
+    var onTapProject: ((SupportedProjectRow) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -253,94 +254,99 @@ struct SupportedProjectsListView: View {
         let creatorName = trimmedCreatorDisplayName.isEmpty ? "@\(row.creator_username)" : trimmedCreatorDisplayName
         let supportAmountText = "\(row.amount_minor.formatted()) \(row.currency)"
 
-        return VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .bottomLeading) {
-                if let raw = row.project_image_url,
-                   let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .empty:
-                            Rectangle().fill(Color.secondary.opacity(0.12))
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        case .failure:
-                            Rectangle().fill(Color.secondary.opacity(0.12))
-                        @unknown default:
-                            Rectangle().fill(Color.secondary.opacity(0.12))
+        return Button {
+            onTapProject?(row)
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack(alignment: .bottomLeading) {
+                    if let raw = row.project_image_url,
+                       let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .empty:
+                                Rectangle().fill(Color.secondary.opacity(0.12))
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                            case .failure:
+                                Rectangle().fill(Color.secondary.opacity(0.12))
+                            @unknown default:
+                                Rectangle().fill(Color.secondary.opacity(0.12))
+                            }
                         }
+                    } else {
+                        LinearGradient(
+                            colors: [Color.secondary.opacity(0.22), Color.secondary.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     }
-                } else {
+
                     LinearGradient(
-                        colors: [Color.secondary.opacity(0.22), Color.secondary.opacity(0.08)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                        colors: [Color.black.opacity(0.0), Color.black.opacity(0.36)],
+                        startPoint: .center,
+                        endPoint: .bottom
                     )
-                }
 
-                LinearGradient(
-                    colors: [Color.black.opacity(0.0), Color.black.opacity(0.36)],
-                    startPoint: .center,
-                    endPoint: .bottom
-                )
-
-                HStack {
-                    Text("\(percent)% funded")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.38))
-                        .clipShape(Capsule())
-                    Spacer()
-                    Text("You: \(supportAmountText)")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.38))
-                        .clipShape(Capsule())
+                    HStack {
+                        Text("\(percent)% funded")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.38))
+                            .clipShape(Capsule())
+                        Spacer()
+                        Text("You: \(supportAmountText)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.38))
+                            .clipShape(Capsule())
+                    }
+                    .padding(10)
                 }
-                .padding(10)
+                .frame(maxWidth: .infinity)
+                .frame(height: 146)
+                .clipped()
+
+                VStack(alignment: .leading, spacing: 9) {
+                    Text(row.project_title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.crop.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(creatorName)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(formatSupportDate(row.supported_at))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ProgressView(value: progress)
+                        .tint(fundingProgressTint(Double(funded) / Double(goal)))
+                    HStack {
+                        Text("\(funded.formatted()) / \(goal.formatted()) \(row.project_currency)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(row.project_supporter_count) supporters")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 146)
-            .clipped()
-
-            VStack(alignment: .leading, spacing: 9) {
-                Text(row.project_title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
-
-                HStack(spacing: 6) {
-                    Image(systemName: "person.crop.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(creatorName)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(formatSupportDate(row.supported_at))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                ProgressView(value: progress)
-                    .tint(fundingProgressTint(Double(funded) / Double(goal)))
-                HStack {
-                    Text("\(funded.formatted()) / \(goal.formatted()) \(row.project_currency)")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(row.project_supporter_count) supporters")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
         }
+        .buttonStyle(.plain)
         .background(Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(

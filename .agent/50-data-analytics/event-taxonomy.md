@@ -7,6 +7,10 @@ Canonical funnel events:
 - `checkout_page_reached`
 - `payment_succeeded`
 
+Additional watch-quality events:
+- `video_play_started` (non-completion play count source)
+- `video_watch_progress` (watch-time capture when not completed)
+
 Minimum event payload guidance:
 - `user_id` (or anonymous/session identifier where applicable)
 - `project_id`
@@ -21,4 +25,4 @@ Integrity rules:
 - Any schema change requires versioning note in decision log.
 - Backend should validate critical event shape for analytics reliability.
 
-Last updated: 2026-02-12
+Last updated: 2026-02-21

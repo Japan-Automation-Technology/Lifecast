@@ -48,11 +48,12 @@ const profileImageUploadBody = z.object({
 
 const updateMyProfileBody = z
   .object({
+    username: z.string().max(40).optional(),
     display_name: z.string().max(30).optional(),
     bio: z.string().max(160).optional(),
     avatar_url: z.string().url().max(2048).optional().nullable(),
   })
-  .refine((value) => value.display_name !== undefined || value.bio !== undefined || value.avatar_url !== undefined, {
+  .refine((value) => value.username !== undefined || value.display_name !== undefined || value.bio !== undefined || value.avatar_url !== undefined, {
     message: "At least one field must be provided",
   });
 
@@ -1683,6 +1684,16 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       return reply.code(503).send(fail("SERVICE_UNAVAILABLE", "Database is not configured"));
     }
 
+    const username = body.data.username === undefined ? undefined : body.data.username.trim();
+    if (username !== undefined) {
+      if (username.length < 3 || username.length > 40) {
+        return reply.code(400).send(fail("VALIDATION_ERROR", "username must be 3-40 chars"));
+      }
+      if (!/^[A-Za-z0-9_]+$/.test(username)) {
+        return reply.code(400).send(fail("VALIDATION_ERROR", "username must contain only letters, numbers, and underscore"));
+      }
+    }
+
     const displayName =
       body.data.display_name === undefined ? undefined : body.data.display_name.trim() === "" ? null : body.data.display_name.trim();
     const bio = body.data.bio === undefined ? undefined : body.data.bio.trim() === "" ? null : body.data.bio.trim();
@@ -1700,12 +1711,17 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       await client.query("begin");
 
       const current = await client.query<{
+        username: string;
         display_name: string | null;
         bio: string | null;
         avatar_url: string | null;
       }>(
         `
-        select display_name, bio, avatar_url
+        select
+          coalesce(username, 'user_' || left(id::text, 8)) as username,
+          display_name,
+          bio,
+          avatar_url
         from users
         where id = $1
         limit 1
@@ -1717,6 +1733,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "User not found"));
       }
 
+      const nextUsername = username === undefined ? current.rows[0].username : username;
       const nextDisplayName = displayName === undefined ? current.rows[0].display_name : displayName;
       const nextBio = bio === undefined ? current.rows[0].bio : bio;
       const nextAvatarUrl = avatarUrl === undefined ? current.rows[0].avatar_url : avatarUrl;
@@ -1725,37 +1742,37 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         `
         update users
         set
-          display_name = $2,
-          bio = $3,
-          avatar_url = $4,
+          username = $2,
+          display_name = $3,
+          bio = $4,
+          avatar_url = $5,
           updated_at = now()
         where id = $1
       `,
-        [profileUserId, nextDisplayName, nextBio, nextAvatarUrl],
+        [profileUserId, nextUsername, nextDisplayName, nextBio, nextAvatarUrl],
       );
 
       await client.query(
         `
         insert into creator_profiles (creator_user_id, username, display_name, bio, avatar_url, created_at, updated_at)
-        select
-          u.id,
-          coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)),
+        values (
+          $1,
           $2,
           $3,
           $4,
+          $5,
           now(),
           now()
-        from users u
-        left join creator_profiles cp on cp.creator_user_id = u.id
-        where u.id = $1
+        )
         on conflict (creator_user_id)
         do update set
+          username = excluded.username,
           display_name = excluded.display_name,
           bio = excluded.bio,
           avatar_url = excluded.avatar_url,
           updated_at = now()
       `,
-        [profileUserId, nextDisplayName, nextBio, nextAvatarUrl],
+        [profileUserId, nextUsername, nextDisplayName, nextBio, nextAvatarUrl],
       );
 
       const profileResult = await client.query<{
@@ -1790,6 +1807,10 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       );
     } catch (error) {
       await client.query("rollback");
+      const pgError = error as { code?: string };
+      if (pgError.code === "23505") {
+        return reply.code(409).send(fail("STATE_CONFLICT", "username is already taken"));
+      }
       throw error;
     } finally {
       client.release();

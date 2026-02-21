@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-02-21
+- Event contract v1 expanded with watch-quality events (`video_play_started`, `video_watch_progress`) as backward-compatible additions.
+- iOS feed playback now emits play-started, watch-progress, and watch-completed events for ranking/analytics signals.
+- Creator video list API (`GET /v1/videos/mine`) now includes per-video watch aggregates (`play_count`, `watch_completed_count`, `watch_time_total_ms`) for profile UI and ranking diagnostics.
+
 ## 2026-02-12
 - Product positioned as purchase-style crowdfunding with short-video-first UX.
 - Initial category focus fixed to toC creative process-heavy projects (game/hardware priority).

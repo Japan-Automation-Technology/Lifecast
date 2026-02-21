@@ -426,6 +426,7 @@ struct CreatorPublicPageView: View {
     @State private var supportedProjects: [SupportedProjectRow] = []
     @State private var supportedProjectsLoading = false
     @State private var supportedProjectsError = ""
+    @State private var selectedCreatorRoute: CreatorRoute? = nil
 
     init(
         client: LifeCastAPIClient,
@@ -524,6 +525,13 @@ struct CreatorPublicPageView: View {
                                     emptyText: "No supported projects yet",
                                     onRefresh: {
                                         Task { await loadSupportedProjects() }
+                                    },
+                                    onTapProject: { row in
+                                        if row.creator_user_id == creatorId {
+                                            selectedIndex = 0
+                                        } else {
+                                            selectedCreatorRoute = CreatorRoute(id: row.creator_user_id)
+                                        }
                                     }
                                 )
                             }
@@ -590,6 +598,14 @@ struct CreatorPublicPageView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        .navigationDestination(item: $selectedCreatorRoute) { route in
+            CreatorPublicPageView(
+                client: client,
+                creatorId: route.id,
+                onRequireAuth: onRequireAuth,
+                onSupportTap: onSupportTap
+            )
         }
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -732,6 +748,9 @@ struct CreatorPublicPageView: View {
                 file_name: video.file_name,
                 playback_url: video.playback_url,
                 thumbnail_url: video.thumbnail_url,
+                play_count: nil,
+                watch_completed_count: nil,
+                watch_time_total_ms: nil,
                 created_at: video.created_at
             )
         }

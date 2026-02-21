@@ -67,7 +67,7 @@ async function swipe(sessionId, fromX, fromY, toX, toY, duration = 240) {
   });
 }
 
-async function tap(sessionId, x, y) {
+async function doubleTap(sessionId, x, y) {
   await http('POST', `${APPIUM_URL}/session/${sessionId}/actions`, {
     actions: [{
       type: 'pointer',
@@ -76,7 +76,12 @@ async function tap(sessionId, x, y) {
       actions: [
         { type: 'pointerMove', duration: 0, x, y },
         { type: 'pointerDown', button: 0 },
-        { type: 'pause', duration: 45 },
+        { type: 'pause', duration: 35 },
+        { type: 'pointerUp', button: 0 },
+        { type: 'pause', duration: 70 },
+        { type: 'pointerMove', duration: 0, x, y },
+        { type: 'pointerDown', button: 0 },
+        { type: 'pause', duration: 35 },
         { type: 'pointerUp', button: 0 },
       ],
     }],
@@ -85,39 +90,6 @@ async function tap(sessionId, x, y) {
 
 async function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function hasVisible(source, label) {
-  return source.includes(`name=\"${label}\"`) && source.includes('visible="true"');
-}
-
-async function ensurePanelClosed(sessionId) {
-  for (let i = 0; i < 3; i += 1) {
-    const src = await sourceText(sessionId);
-    if (!src.includes('Project Overview') && !src.includes('Plan 1 /')) return;
-    await swipe(sessionId, 70, 360, 330, 360, 220);
-    await wait(700);
-  }
-}
-
-async function ensureOverviewVisible(sessionId) {
-  for (let i = 0; i < 4; i += 1) {
-    const src = await sourceText(sessionId);
-    if (hasVisible(src, 'Project Overview')) return true;
-    await swipe(sessionId, 70, 360, 330, 360, 220);
-    await wait(700);
-  }
-  return false;
-}
-
-async function closeSupportSheetIfOpen(sessionId) {
-  const closeButton =
-    (await maybeFindElement(sessionId, 'accessibility id', 'Close')) ||
-    (await maybeFindElement(sessionId, '-ios predicate string', 'type == "XCUIElementTypeButton" AND (name == "Close" OR label == "Close")'));
-  if (closeButton) {
-    await click(sessionId, closeButton);
-    await wait(800);
-  }
 }
 
 async function ensureAuthenticated(sessionId) {
@@ -182,14 +154,12 @@ async function signUpIfNeeded(sessionId) {
 async function main() {
   await fs.mkdir(OUT_DIR, { recursive: true });
   const ts = Date.now();
-  const overviewShot = path.join(OUT_DIR, `appium-ios-home-panel-tap-overview-${ts}.png`);
-  const planShot = path.join(OUT_DIR, `appium-ios-home-panel-tap-plan-${ts}.png`);
-  const failShot = path.join(OUT_DIR, `appium-ios-home-panel-tap-fail-${ts}.png`);
-  const failSource = path.join(OUT_DIR, `appium-ios-home-panel-tap-fail-${ts}.xml`);
+  const shotPath = path.join(OUT_DIR, `appium-ios-home-panel-doubletap-like-${ts}.png`);
+  const failShot = path.join(OUT_DIR, `appium-ios-home-panel-doubletap-like-fail-${ts}.png`);
+  const failSource = path.join(OUT_DIR, `appium-ios-home-panel-doubletap-like-fail-${ts}.xml`);
 
   const caps = JSON.parse(await fs.readFile(CAPS_PATH, 'utf8'));
   caps['appium:noReset'] = true;
-
   const created = await http('POST', `${APPIUM_URL}/session`, { capabilities: { alwaysMatch: caps, firstMatch: [{}] } });
   const sessionId = created?.value?.sessionId || created?.sessionId;
   if (!sessionId) throw new Error(`Failed to create session: ${JSON.stringify(created)}`);
@@ -205,78 +175,54 @@ async function main() {
 
     await ensureAuthenticated(sessionId);
 
-    await ensurePanelClosed(sessionId);
-
     await swipe(sessionId, 330, 360, 70, 360, 220);
     await wait(900);
 
-    const isOverviewVisible = await ensureOverviewVisible(sessionId);
     let src = await sourceText(sessionId);
-    if (!isOverviewVisible || !src.includes('Project Overview')) {
+    if (!src.includes('Project Overview')) {
       await screenshot(sessionId, failShot);
       await fs.writeFile(failSource, src, 'utf8');
-      throw new Error(`Project panel overview not visible. source=${failSource} screenshot=${failShot}`);
+      throw new Error(`Project panel not open. source=${failSource} screenshot=${failShot}`);
     }
 
-    // Overview body area tap (image/text region)
-    await tap(sessionId, 190, 320);
+    const beforeLiked = src.includes('name="heart.fill"') || src.includes('label="heart.fill"');
+
+    await doubleTap(sessionId, 190, 320);
     await wait(1200);
     src = await sourceText(sessionId);
     if (await signUpIfNeeded(sessionId)) {
-      await wait(400);
-      await tap(sessionId, 190, 320);
+      await swipe(sessionId, 330, 360, 70, 360, 220);
+      await wait(900);
+      src = await sourceText(sessionId);
+      if (!src.includes('Project Overview')) {
+        await screenshot(sessionId, failShot);
+        await fs.writeFile(failSource, src, 'utf8');
+        throw new Error(`Project panel not open after auth. source=${failSource} screenshot=${failShot}`);
+      }
+      await doubleTap(sessionId, 190, 320);
       await wait(1200);
       src = await sourceText(sessionId);
     }
 
-    if (!(src.includes('1. Select plan') || src.includes('2. Confirm'))) {
-      await screenshot(sessionId, failShot);
-      await fs.writeFile(failSource, src, 'utf8');
-      throw new Error(`Overview body tap did not open support sheet. source=${failSource} screenshot=${failShot}`);
-    }
-
-    await screenshot(sessionId, overviewShot);
-    await closeSupportSheetIfOpen(sessionId);
-
-    // Move to first plan page and tap plan body area
-    await swipe(sessionId, 330, 360, 70, 360, 260);
-    await wait(900);
-    src = await sourceText(sessionId);
     if (src.includes('1. Select plan') || src.includes('2. Confirm')) {
       await screenshot(sessionId, failShot);
       await fs.writeFile(failSource, src, 'utf8');
-      throw new Error(`Swipe should not open support sheet. source=${failSource} screenshot=${failShot}`);
+      throw new Error(`Double tap should not open support sheet. source=${failSource} screenshot=${failShot}`);
     }
-    if (!src.includes('Plan 1 /') && !src.includes('Plan 2 /')) {
+
+    const afterLiked = src.includes('name="heart.fill"') || src.includes('label="heart.fill"');
+    if (afterLiked === beforeLiked) {
       await screenshot(sessionId, failShot);
       await fs.writeFile(failSource, src, 'utf8');
-      throw new Error(`Plan page not visible. source=${failSource} screenshot=${failShot}`);
+      throw new Error(`Like state did not toggle after double tap. source=${failSource} screenshot=${failShot}`);
     }
 
-    await tap(sessionId, 190, 410);
-    await wait(1200);
-    src = await sourceText(sessionId);
-    if (await signUpIfNeeded(sessionId)) {
-      await wait(400);
-      await tap(sessionId, 190, 410);
-      await wait(1200);
-      src = await sourceText(sessionId);
-    }
-
-    if (!src.includes('2. Confirm')) {
-      await screenshot(sessionId, failShot);
-      await fs.writeFile(failSource, src, 'utf8');
-      throw new Error(`Plan body tap did not open confirm step. source=${failSource} screenshot=${failShot}`);
-    }
-
-    await screenshot(sessionId, planShot);
-
+    await screenshot(sessionId, shotPath);
     console.log(JSON.stringify({
       session_id: sessionId,
-      overview_body_tap_opened_support_sheet: true,
-      plan_body_tap_opened_confirm_sheet: true,
-      overview_screenshot: overviewShot,
-      plan_screenshot: planShot,
+      double_tap_toggled_like: true,
+      did_not_open_support_sheet: true,
+      screenshot: shotPath,
     }, null, 2));
   } finally {
     try { await http('DELETE', `${APPIUM_URL}/session/${sessionId}`); } catch {}

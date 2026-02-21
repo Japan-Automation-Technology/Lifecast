@@ -40,6 +40,9 @@ export interface CreatorVideoRecord {
   fileName: string;
   playbackUrl?: string;
   thumbnailUrl?: string;
+  playCount: number;
+  watchCompletedCount: number;
+  watchTimeTotalMs: number;
   createdAt: string;
 }
 

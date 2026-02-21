@@ -10,6 +10,8 @@ const REQUIRED_FIELDS = [
 ] as const;
 
 const EVENT_ATTRIBUTES: Record<string, string[]> = {
+  video_play_started: ["video_id"],
+  video_watch_progress: ["video_id", "watch_duration_ms", "video_duration_ms"],
   video_watch_completed: ["video_id", "project_id", "watch_duration_ms", "video_duration_ms"],
   support_button_tapped: ["video_id", "project_id"],
   plan_selected: ["project_id", "plan_id", "plan_price_minor", "currency"],

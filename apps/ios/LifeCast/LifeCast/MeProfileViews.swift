@@ -29,6 +29,7 @@ struct MeTabView: View {
     @State private var localProjectEditDiscardNonce = 0
     @State private var pendingMeAction: PendingMeAction?
     @State private var showDiscardProjectEditDialog = false
+    @State private var selectedCreatorRoute: CreatorRoute? = nil
     
     private var currentUsername: String {
         myProfile?.username ?? "lifecast_maker"
@@ -108,6 +109,9 @@ struct MeTabView: View {
                                             emptyText: "No supported projects yet",
                                             onRefresh: {
                                                 Task { await loadMySupportedProjects() }
+                                            },
+                                            onTapProject: { row in
+                                                selectedCreatorRoute = CreatorRoute(id: row.creator_user_id)
                                             }
                                         )
                                     }
@@ -199,6 +203,13 @@ struct MeTabView: View {
                         onRefreshVideos()
                         onProjectChanged()
                     }
+                )
+            }
+            .navigationDestination(item: $selectedCreatorRoute) { route in
+                CreatorPublicPageView(
+                    client: client,
+                    creatorId: route.id,
+                    onSupportTap: { _ in }
                 )
             }
             .sheet(isPresented: $showEditProfile) {
@@ -832,6 +843,7 @@ struct EditProfileView: View {
     let onSaved: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var username: String
     @State private var displayName: String
     @State private var bio: String
     @State private var avatarURL: String?
@@ -844,6 +856,7 @@ struct EditProfileView: View {
         self.client = client
         self.profile = profile
         self.onSaved = onSaved
+        _username = State(initialValue: profile?.username ?? "")
         _displayName = State(initialValue: profile?.display_name ?? "")
         _bio = State(initialValue: profile?.bio ?? "")
         _avatarURL = State(initialValue: profile?.avatar_url)
@@ -861,6 +874,9 @@ struct EditProfileView: View {
                     PhotosPicker(selection: $avatarPickerItem, matching: .images, photoLibrary: .shared()) {
                         Label(avatarSelection == nil ? "Select Profile Image" : "Change Profile Image", systemImage: "photo")
                     }
+                    TextField("Username", text: $username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
                     TextField("Display name", text: $displayName)
                     TextField("Bio", text: $bio, axis: .vertical)
                         .lineLimit(3...5)
@@ -967,8 +983,16 @@ struct EditProfileView: View {
                 )
             }
 
+            let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedBio = bio.trimmingCharacters(in: .whitespacesAndNewlines)
+            if normalizedUsername.count < 3 || normalizedUsername.count > 40 {
+                throw NSError(domain: "LifeCastProfile", code: 400, userInfo: [NSLocalizedDescriptionKey: "Username must be 3-40 characters"])
+            }
+            let allowedUsernameChars = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+            if normalizedUsername.rangeOfCharacter(from: allowedUsernameChars.inverted) != nil {
+                throw NSError(domain: "LifeCastProfile", code: 400, userInfo: [NSLocalizedDescriptionKey: "Username can only include letters, numbers, and underscore (_)."])
+            }
             if normalizedDisplayName.count > 30 {
                 throw NSError(domain: "LifeCastProfile", code: 400, userInfo: [NSLocalizedDescriptionKey: "Display name must be 30 characters or less"])
             }
@@ -977,6 +1001,7 @@ struct EditProfileView: View {
             }
 
             _ = try await client.updateMyProfile(
+                username: normalizedUsername,
                 displayName: normalizedDisplayName.isEmpty ? nil : normalizedDisplayName,
                 bio: normalizedBio.isEmpty ? nil : normalizedBio,
                 avatarURL: nextAvatarURL

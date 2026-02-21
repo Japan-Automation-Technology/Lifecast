@@ -29,6 +29,12 @@ Canonical funnel events:
 5. `payment_succeeded`
 
 Event-specific required attributes:
+- `video_play_started`
+  - `video_id`
+- `video_watch_progress`
+  - `video_id`
+  - `watch_duration_ms`
+  - `video_duration_ms`
 - `video_watch_completed`
   - `video_id`
   - `project_id`
@@ -64,4 +70,4 @@ Quality SLAs:
 - Late-arrival threshold for funnel reporting: <= 15 minutes p95.
 - Schema mismatch alert should fire within 5 minutes of first invalid event burst.
 
-Last updated: 2026-02-12
+Last updated: 2026-02-21

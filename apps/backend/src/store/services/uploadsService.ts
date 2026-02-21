@@ -482,6 +482,9 @@ export class UploadsService {
         thumbnail_url: string | null;
         upload_session_id: string;
         provider_upload_id: string | null;
+        play_count: string | number;
+        watch_completed_count: string | number;
+        watch_time_total_ms: string | number;
         created_at: string | Date;
       }>(
         `
@@ -492,9 +495,27 @@ export class UploadsService {
           va.thumbnail_url,
           va.upload_session_id,
           vus.provider_upload_id,
+          coalesce(vm.play_count, 0)::bigint as play_count,
+          coalesce(vm.watch_completed_count, 0)::bigint as watch_completed_count,
+          coalesce(vm.watch_time_total_ms, 0)::bigint as watch_time_total_ms,
           va.created_at
         from video_assets va
         join video_upload_sessions vus on vus.id = va.upload_session_id
+        left join lateral (
+          select
+            count(*) filter (where ae.event_name = 'video_play_started') as play_count,
+            count(*) filter (where ae.event_name = 'video_watch_completed') as watch_completed_count,
+            sum(
+              case
+                when ae.event_name in ('video_watch_progress', 'video_watch_completed')
+                  and (ae.attributes->>'watch_duration_ms') ~ '^[0-9]+$'
+                then (ae.attributes->>'watch_duration_ms')::bigint
+                else 0
+              end
+            ) as watch_time_total_ms
+          from analytics_events ae
+          where ae.attributes->>'video_id' = va.video_id::text
+        ) vm on true
         where va.creator_user_id = $1
           and va.status = 'ready'
         order by va.created_at desc
@@ -528,6 +549,9 @@ export class UploadsService {
         fileName: row.file_name,
         playbackUrl: `${publicBaseUrl}/v1/videos/${row.video_id}/playback`,
         thumbnailUrl: `${publicBaseUrl}/v1/videos/${row.video_id}/thumbnail`,
+        playCount: Number(row.play_count ?? 0),
+        watchCompletedCount: Number(row.watch_completed_count ?? 0),
+        watchTimeTotalMs: Number(row.watch_time_total_ms ?? 0),
         createdAt: toIso(row.created_at),
       })) satisfies CreatorVideoRecord[];
     } finally {

@@ -66,6 +66,19 @@ struct PostedVideosListView: View {
                                     startPoint: .top,
                                     endPoint: .bottom
                                 )
+                                HStack(spacing: 4) {
+                                    Image(systemName: "play.fill")
+                                        .font(.system(size: 11, weight: .semibold))
+                                    Text("\(video.play_count ?? 0)")
+                                        .font(.caption2.weight(.semibold))
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.black.opacity(0.45))
+                                .clipShape(Capsule())
+                                .padding(8)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                             }
                             .frame(maxWidth: .infinity)
                             .aspectRatio(1, contentMode: .fit)
@@ -157,6 +170,11 @@ struct CreatorPostedFeedView: View {
     @State private var commentsSubmitting = false
     @State private var selectedCreatorRoute: CreatorRoute?
     @State private var creatorProfileOverride: CreatorPublicProfile?
+    @State private var trackedVideoId: UUID?
+    @State private var trackedProjectId: UUID?
+    @State private var trackedDurationMs = 0
+    @State private var trackedMaxWatchMs = 0
+    @State private var trackedDidComplete = false
 
     init(
         videos: [MyVideo],
@@ -300,16 +318,34 @@ struct CreatorPostedFeedView: View {
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { note in
             guard let endedItem = note.object as? AVPlayerItem else { return }
             guard let current = player, current.currentItem === endedItem else { return }
+            trackedDidComplete = true
+            trackedMaxWatchMs = max(trackedMaxWatchMs, trackedDurationMs)
+            if let videoId = trackedVideoId, trackedDurationMs > 0 {
+                Task {
+                    await client.trackVideoWatchProgress(
+                        videoId: videoId,
+                        watchDurationMs: trackedDurationMs,
+                        videoDurationMs: trackedDurationMs,
+                        projectId: trackedProjectId
+                    )
+                }
+            }
             current.seek(to: .zero)
             if !showFeedProjectPanel {
                 current.play()
             }
         }
         .onDisappear {
+            flushTrackedPlaybackProgress()
             setPostedFeedEdgeBoosting(false)
             player?.pause()
             detachPostedFeedPlayerObserver()
             player = nil
+            trackedVideoId = nil
+            trackedProjectId = nil
+            trackedDurationMs = 0
+            trackedMaxWatchMs = 0
+            trackedDidComplete = false
             for prepared in postedFeedPlayerCache.values {
                 prepared.pause()
             }
@@ -983,6 +1019,7 @@ struct CreatorPostedFeedView: View {
 
     private func syncPlayerForCurrentIndex() {
         guard !feedVideos.isEmpty else {
+            transitionTrackedVideo(to: nil, projectId: nil)
             setPostedFeedEdgeBoosting(false)
             player?.pause()
             detachPostedFeedPlayerObserver()
@@ -999,6 +1036,7 @@ struct CreatorPostedFeedView: View {
             return
         }
         guard let playbackUrl = feedVideos[currentIndex].playback_url, let url = URL(string: playbackUrl) else {
+            transitionTrackedVideo(to: nil, projectId: nil)
             setPostedFeedEdgeBoosting(false)
             player?.pause()
             detachPostedFeedPlayerObserver()
@@ -1006,6 +1044,7 @@ struct CreatorPostedFeedView: View {
             postedFeedPlaybackProgress = 0
             return
         }
+        transitionTrackedVideo(to: feedVideos[currentIndex].video_id, projectId: isCurrentUserVideo ? nil : projectContext.id)
 
         let targetPlayer: AVPlayer
         if let cached = postedFeedPlayerCache[url] {
@@ -1052,6 +1091,14 @@ struct CreatorPostedFeedView: View {
                     postedFeedPlaybackProgress = 0
                 }
                 return
+            }
+            let durationMs = duration * 1000
+            if durationMs.isFinite, durationMs >= 0 {
+                trackedDurationMs = max(0, Int(durationMs))
+            }
+            let currentMs = targetPlayer.currentTime().seconds * 1000
+            if currentMs.isFinite, currentMs >= 0 {
+                trackedMaxWatchMs = max(trackedMaxWatchMs, Int(currentMs))
             }
             if !isPostedFeedScrubbing {
                 postedFeedPlaybackProgress = min(max(targetPlayer.currentTime().seconds / duration, 0), 1)
@@ -1143,6 +1190,35 @@ struct CreatorPostedFeedView: View {
         for key in stale {
             postedFeedPlayerCache[key]?.pause()
             postedFeedPlayerCache.removeValue(forKey: key)
+        }
+    }
+
+    private func transitionTrackedVideo(to videoId: UUID?, projectId: UUID?) {
+        guard trackedVideoId != videoId else { return }
+        flushTrackedPlaybackProgress()
+        trackedVideoId = videoId
+        trackedProjectId = projectId
+        trackedDurationMs = 0
+        trackedMaxWatchMs = 0
+        trackedDidComplete = false
+        guard let videoId else { return }
+        Task {
+            await client.trackVideoPlayStarted(videoId: videoId, projectId: projectId)
+        }
+    }
+
+    private func flushTrackedPlaybackProgress() {
+        guard !trackedDidComplete else { return }
+        guard let videoId = trackedVideoId else { return }
+        let clampedWatchMs = max(0, min(trackedMaxWatchMs, trackedDurationMs))
+        guard clampedWatchMs > 0, trackedDurationMs > 0 else { return }
+        Task {
+            await client.trackVideoWatchProgress(
+                videoId: videoId,
+                watchDurationMs: clampedWatchMs,
+                videoDurationMs: trackedDurationMs,
+                projectId: trackedProjectId
+            )
         }
     }
 
