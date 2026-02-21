@@ -13,6 +13,8 @@ struct MeTabView: View {
     let onRefreshVideos: () -> Void
     let onProjectChanged: () -> Void
     let onOpenAuth: () -> Void
+    let onProjectEditUnsavedChanged: (Bool) -> Void
+    let projectEditDiscardRequest: Int
 
     @State private var selectedIndex = 0
     @State private var showNetwork = false
@@ -22,6 +24,10 @@ struct MeTabView: View {
     @State private var supportedProjects: [SupportedProjectRow] = []
     @State private var supportedProjectsLoading = false
     @State private var supportedProjectsError = ""
+    @State private var hasUnsavedProjectEdits = false
+    @State private var localProjectEditDiscardNonce = 0
+    @State private var pendingMeAction: PendingMeAction?
+    @State private var showDiscardProjectEditDialog = false
     
     private var currentUsername: String {
         myProfile?.username ?? "lifecast_maker"
@@ -79,7 +85,12 @@ struct MeTabView: View {
                                     if selectedIndex == 0 {
                                         ProjectPageView(
                                             client: client,
-                                            onProjectChanged: onProjectChanged
+                                            onProjectChanged: onProjectChanged,
+                                            discardSignal: localProjectEditDiscardNonce,
+                                            onUnsavedChangesChanged: { hasUnsaved in
+                                                hasUnsavedProjectEdits = hasUnsaved
+                                                onProjectEditUnsavedChanged(hasUnsaved)
+                                            }
                                         )
                                     } else if selectedIndex == 1 {
                                         PostedVideosListView(
@@ -102,15 +113,8 @@ struct MeTabView: View {
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             } header: {
-                                ProfileTabIconStrip(selectedIndex: $selectedIndex, style: .fullWidthUnderline)
+                                ProfileTabIconStrip(selectedIndex: profileSectionBinding, style: .fullWidthUnderline)
                                     .background(Color.white)
-                                    .onChange(of: selectedIndex) { _, newValue in
-                                        if newValue == 1 {
-                                            onRefreshVideos()
-                                        } else if newValue == 2 {
-                                            Task { await loadMySupportedProjects() }
-                                        }
-                                    }
                             }
                         }
                         .frame(maxWidth: .infinity)
@@ -159,6 +163,12 @@ struct MeTabView: View {
                 onRefreshVideos()
                 await loadMySupportedProjects()
             }
+            .onChange(of: isAuthenticated) { _, newValue in
+                if !newValue {
+                    hasUnsavedProjectEdits = false
+                    onProjectEditUnsavedChanged(false)
+                }
+            }
             .navigationDestination(isPresented: $showNetwork) {
                 if let profile = myProfile {
                     CreatorNetworkView(
@@ -201,6 +211,20 @@ struct MeTabView: View {
                 mePinnedHeader
             }
         }
+        .confirmationDialog("Discard changes?", isPresented: $showDiscardProjectEditDialog, titleVisibility: .visible) {
+            Button("Discard", role: .destructive) {
+                discardProjectEditsAndContinue()
+            }
+            Button("Cancel", role: .cancel) {
+                pendingMeAction = nil
+            }
+        } message: {
+            Text("Your project edits are not saved.")
+        }
+        .onChange(of: projectEditDiscardRequest) { _, _ in
+            localProjectEditDiscardNonce += 1
+            hasUnsavedProjectEdits = false
+        }
     }
 
     private var mePinnedHeader: some View {
@@ -214,7 +238,7 @@ struct MeTabView: View {
             HStack {
                 Spacer()
                 Button {
-                    showUserSwitcher = true
+                    requestMeAction(.openUserSwitcher)
                 } label: {
                     Image(systemName: "line.3.horizontal")
                         .font(.system(size: 22, weight: .semibold))
@@ -230,6 +254,53 @@ struct MeTabView: View {
         .padding(.top, 4)
         .padding(.bottom, 2)
         .background(Color.white)
+    }
+
+    private var profileSectionBinding: Binding<Int> {
+        Binding(
+            get: { selectedIndex },
+            set: { newValue in
+                requestMeAction(.switchSection(newValue))
+            }
+        )
+    }
+
+    private func requestMeAction(_ action: PendingMeAction) {
+        if hasUnsavedProjectEdits {
+            pendingMeAction = action
+            showDiscardProjectEditDialog = true
+            return
+        }
+        applyMeAction(action)
+    }
+
+    private func discardProjectEditsAndContinue() {
+        localProjectEditDiscardNonce += 1
+        hasUnsavedProjectEdits = false
+        onProjectEditUnsavedChanged(false)
+        guard let pendingMeAction else { return }
+        self.pendingMeAction = nil
+        applyMeAction(pendingMeAction)
+    }
+
+    private func applyMeAction(_ action: PendingMeAction) {
+        switch action {
+        case .openUserSwitcher:
+            showUserSwitcher = true
+        case .switchSection(let index):
+            guard selectedIndex != index else { return }
+            selectedIndex = index
+            if index == 1 {
+                onRefreshVideos()
+            } else if index == 2 {
+                Task { await loadMySupportedProjects() }
+            }
+        }
+    }
+
+    private enum PendingMeAction {
+        case switchSection(Int)
+        case openUserSwitcher
     }
 
     private func loadMySupportedProjects() async {
@@ -664,6 +735,8 @@ struct EditProfileView: View {
 struct ProjectPageView: View {
     let client: LifeCastAPIClient
     let onProjectChanged: () -> Void
+    let discardSignal: Int
+    let onUnsavedChangesChanged: (Bool) -> Void
 
     @State private var myProject: MyProjectResult?
     @State private var projectHistory: [MyProjectResult] = []
@@ -686,114 +759,135 @@ struct ProjectPageView: View {
     @State private var planImagePickerItems: [UUID: PhotosPickerItem] = [:]
     @State private var selectedPlanImages: [UUID: SelectedProjectImage] = [:]
     @State private var showEndConfirm = false
-    @State private var showEditProjectSheet = false
+    @State private var isEditingProjectInline = false
+    @State private var projectEditHasChanges = false
     @State private var projectCreateInFlight = false
     @State private var projectCreateStatusText = ""
     @State private var hasLoadedProjectsOnce = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if !hasLoadedProjectsOnce {
-                ProgressView("Loading project...")
-                    .font(.caption)
-            } else if let myProject {
-                projectDetailsView(project: myProject)
-                if myProject.status == "stopped" {
-                    Text("Ended project. Refund policy: full refund.")
+        ZStack(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 12) {
+                if !hasLoadedProjectsOnce {
+                    ProgressView("Loading project...")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                } else if let myProject {
+                    if isEditingProjectInline && canEditProject(myProject) {
+                        ProjectInlineEditView(
+                            client: client,
+                            project: myProject,
+                            onCancel: {
+                                isEditingProjectInline = false
+                                projectEditHasChanges = false
+                            },
+                            onSaved: {
+                                Task {
+                                    await loadMyProjects()
+                                    await MainActor.run {
+                                        isEditingProjectInline = false
+                                        projectEditHasChanges = false
+                                        onProjectChanged()
+                                    }
+                                }
+                            },
+                            onDirtyChange: { hasChanges in
+                                projectEditHasChanges = hasChanges
+                            }
+                        )
+                    } else {
+                        projectDetailsView(project: myProject)
+                        if myProject.status == "stopped" {
+                            Text("Ended project. Refund policy: full refund.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
 
-                if myProject.status == "active" || myProject.status == "draft" {
-                    if myProject.support_count_total == 0 {
-                        Button("Delete Project", role: .destructive) {
-                            Task {
-                                await deleteProject(projectId: myProject.id)
+                        if myProject.status == "active" || myProject.status == "draft" {
+                            if myProject.support_count_total == 0 {
+                                Button("Delete Project", role: .destructive) {
+                                    Task {
+                                        await deleteProject(projectId: myProject.id)
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                            } else {
+                                Button("End Project", role: .destructive) {
+                                    showEndConfirm = true
+                                }
+                                .buttonStyle(.bordered)
                             }
                         }
-                        .buttonStyle(.bordered)
-                    } else {
-                        Button("End Project", role: .destructive) {
-                            showEndConfirm = true
-                        }
-                        .buttonStyle(.bordered)
                     }
+                    if myProject.status == "stopped" || myProject.status == "failed" || myProject.status == "succeeded" {
+                        Divider().padding(.vertical, 4)
+                        createProjectSection(buttonTitle: "Create New Project")
+                    }
+                } else {
+                    createProjectSection(buttonTitle: "Create Project")
                 }
-                if myProject.status == "stopped" || myProject.status == "failed" || myProject.status == "succeeded" {
-                    Divider().padding(.vertical, 4)
-                    createProjectSection(buttonTitle: "Create New Project")
-                }
-            } else {
-                createProjectSection(buttonTitle: "Create Project")
-            }
 
-            if !projectHistory.isEmpty {
-                Divider().padding(.top, 8)
-                Text("Past projects")
-                    .font(.subheadline.weight(.semibold))
-                ForEach(projectHistory, id: \.id) { project in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(project.title)
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Text(project.status.uppercased())
-                                .font(.caption2.bold())
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.secondary.opacity(0.15))
-                                .clipShape(Capsule())
-                        }
-                        Text("Goal: \(project.goal_amount_minor) \(project.currency)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if let category = project.category, !category.isEmpty {
-                            Text("Category: \(category)")
+                if !projectHistory.isEmpty {
+                    Divider().padding(.top, 8)
+                    Text("Past projects")
+                        .font(.subheadline.weight(.semibold))
+                    ForEach(projectHistory, id: \.id) { project in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(project.title)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(project.status.uppercased())
+                                    .font(.caption2.bold())
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.secondary.opacity(0.15))
+                                    .clipShape(Capsule())
+                            }
+                            Text("Goal: \(project.goal_amount_minor) \(project.currency)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let category = project.category, !category.isEmpty {
+                                Text("Category: \(category)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("Created: \(project.created_at)")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
-                        Text("Created: \(project.created_at)")
-                            .font(.caption2)
+                        .padding(10)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+
+                if !projectErrorText.isEmpty {
+                    Text(projectErrorText)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                if projectCreateInFlight {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ProgressView()
+                        Text(projectCreateStatusText.isEmpty ? "Creating project..." : projectCreateStatusText)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    .padding(10)
-                    .background(Color.secondary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
             }
+            .padding(16)
 
-            if !projectErrorText.isEmpty {
-                Text(projectErrorText)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            if projectCreateInFlight {
-                VStack(alignment: .leading, spacing: 8) {
-                    ProgressView()
-                    Text(projectCreateStatusText.isEmpty ? "Creating project..." : projectCreateStatusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
         }
-        .padding(16)
+        .background(
+            ProjectEditDismissKeyboardTapView {
+                guard isEditingProjectInline else { return }
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
+        )
         .task {
             await loadMyProjects()
-        }
-        .sheet(isPresented: $showEditProjectSheet) {
-            if let current = myProject {
-                ProjectEditSheetView(
-                    client: client,
-                    project: current,
-                    onSaved: {
-                        Task {
-                            await loadMyProjects()
-                            onProjectChanged()
-                        }
-                    }
-                )
-            }
+            publishUnsavedState()
         }
         .alert("End this project?", isPresented: $showEndConfirm) {
             Button("Cancel", role: .cancel) {}
@@ -811,6 +905,23 @@ struct ProjectPageView: View {
                 await loadProjectCovers(from: newValue)
             }
         }
+        .onChange(of: isEditingProjectInline) { _, _ in
+            publishUnsavedState()
+        }
+        .onChange(of: projectEditHasChanges) { _, _ in
+            publishUnsavedState()
+        }
+        .onChange(of: discardSignal) { _, _ in
+            if isEditingProjectInline {
+                isEditingProjectInline = false
+                projectEditHasChanges = false
+            }
+            publishUnsavedState()
+        }
+    }
+
+    private func publishUnsavedState() {
+        onUnsavedChangesChanged(isEditingProjectInline && projectEditHasChanges)
     }
 
     private func canEditProject(_ project: MyProjectResult) -> Bool {
@@ -1001,7 +1112,7 @@ struct ProjectPageView: View {
         ProfileProjectDetailView(
             project: project,
             headerActionTitle: canEditProject(project) ? "Edit" : nil,
-            onTapHeaderAction: canEditProject(project) ? { showEditProjectSheet = true } : nil
+            onTapHeaderAction: canEditProject(project) ? { isEditingProjectInline = true } : nil
         )
     }
 
@@ -1269,32 +1380,55 @@ struct ProjectPageView: View {
     }
 }
 
-struct ProjectEditSheetView: View {
+struct ProjectInlineEditView: View {
     let client: LifeCastAPIClient
     let project: MyProjectResult
+    let onCancel: () -> Void
     let onSaved: () -> Void
+    let onDirtyChange: (Bool) -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @State private var subtitleText: String
     @State private var descriptionText: String
     @State private var urlDraft = ""
     @State private var urls: [String]
     @State private var coverPickerItems: [PhotosPickerItem] = []
-    @State private var coverSelections: [SelectedProjectImage] = []
+    @State private var projectImages: [EditableProjectImage]
     @State private var planDrafts: [EditablePlanDraft]
-    @State private var planPickerItems: [UUID: PhotosPickerItem] = [:]
     @State private var selectedPlanImages: [UUID: SelectedProjectImage] = [:]
+    @State private var planImagePickerTargetId: UUID?
+    @State private var isPlanImagePickerPresented = false
     @State private var saving = false
     @State private var errorText = ""
     @FocusState private var focusedField: EditField?
+    private let initialSnapshot: EditSnapshot
 
-    init(client: LifeCastAPIClient, project: MyProjectResult, onSaved: @escaping () -> Void) {
+    init(
+        client: LifeCastAPIClient,
+        project: MyProjectResult,
+        onCancel: @escaping () -> Void,
+        onSaved: @escaping () -> Void,
+        onDirtyChange: @escaping (Bool) -> Void
+    ) {
         self.client = client
         self.project = project
+        self.onCancel = onCancel
         self.onSaved = onSaved
+        self.onDirtyChange = onDirtyChange
         _subtitleText = State(initialValue: project.subtitle ?? "")
         _descriptionText = State(initialValue: project.description ?? "")
         _urls = State(initialValue: project.urls ?? [])
+        var initialImages: [EditableProjectImage] = []
+        if let imageUrls = project.image_urls, !imageUrls.isEmpty {
+            for raw in imageUrls {
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    initialImages.append(EditableProjectImage(existingURL: trimmed))
+                }
+            }
+        } else if let raw = project.image_url?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+            initialImages.append(EditableProjectImage(existingURL: raw))
+        }
+        _projectImages = State(initialValue: initialImages)
         _planDrafts = State(
             initialValue: (project.plans ?? []).map {
                 EditablePlanDraft(
@@ -1307,135 +1441,222 @@ struct ProjectEditSheetView: View {
                 )
             }
         )
+        self.initialSnapshot = EditSnapshot(
+            subtitle: project.subtitle ?? "",
+            description: project.description ?? "",
+            urls: project.urls ?? [],
+            projectImageURLs: initialImages.compactMap(\.existingURL),
+            planDrafts: (project.plans ?? []).map {
+                EditablePlanSnapshot(
+                    id: $0.id,
+                    isExisting: true,
+                    name: $0.name,
+                    priceMinorText: String($0.price_minor),
+                    rewardSummary: $0.reward_summary,
+                    description: $0.description ?? "",
+                    currency: $0.currency
+                )
+            },
+            selectedPlanImageIds: []
+        )
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text(project.title)
-                        .font(.headline)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Edit Project")
+                    .font(.headline)
+                Spacer()
+                Button("Cancel") {
+                    onCancel()
+                }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.secondary.opacity(0.12))
+                .clipShape(Capsule())
+                .buttonStyle(.plain)
+            }
 
-                    Group {
-                        Text("Subtitle")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        TextField("", text: $subtitleText)
-                            .textFieldStyle(.roundedBorder)
-                            .focused($focusedField, equals: .subtitle)
+            Text(project.title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Group {
+                Text("Subtitle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                TextField("", text: $subtitleText)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focusedField, equals: .subtitle)
+            }
+
+            Group {
+                Text("Project Images")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                PhotosPicker(selection: $coverPickerItems, maxSelectionCount: 5, matching: .images, photoLibrary: .shared()) {
+                    Label("Add Project Images", systemImage: "plus")
+                }
+                .buttonStyle(.bordered)
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        focusedField = nil
                     }
-
-                    Group {
-                        Text("Description")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        TextField("", text: $descriptionText, axis: .vertical)
-                            .textFieldStyle(.roundedBorder)
-                            .focused($focusedField, equals: .description)
-                    }
-
-                    Group {
-                        Text("Project Images")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        PhotosPicker(selection: $coverPickerItems, maxSelectionCount: 5, matching: .images, photoLibrary: .shared()) {
-                            Label(coverSelections.isEmpty ? "Select Project Images" : "Change Project Images", systemImage: "photo")
-                        }
-                        .buttonStyle(.bordered)
-                        if !coverSelections.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 8) {
-                                    ForEach(Array(coverSelections.enumerated()), id: \.offset) { _, selection in
-                                        if let uiImage = UIImage(data: selection.data) {
-                                            Image(uiImage: uiImage)
-                                                .resizable()
-                                                .scaledToFill()
-                                                .frame(width: 92, height: 92)
-                                                .clipped()
-                                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        }
+                )
+                if projectImages.isEmpty {
+                    Text("At least one image is required.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(projectImages) { image in
+                                ZStack(alignment: .topTrailing) {
+                                    imageThumbnail(image)
+                                        .frame(width: 92, height: 92)
+                                        .clipped()
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    Button {
+                                        removeProjectImage(image.id)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 18))
+                                            .foregroundStyle(projectImages.count <= 1 ? .gray : .white, .black.opacity(0.65))
                                     }
+                                    .disabled(projectImages.count <= 1)
+                                    .offset(x: 6, y: -6)
                                 }
                             }
                         }
                     }
+                }
+            }
 
-                    Group {
-                        Text("URLs")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        HStack {
-                            TextField("", text: $urlDraft)
-                                .textFieldStyle(.roundedBorder)
-                                .keyboardType(.URL)
-                                .textInputAutocapitalization(.never)
-                                .focused($focusedField, equals: .urlDraft)
-                            Button("Add") { addURL() }
-                                .buttonStyle(.bordered)
-                                .disabled(urls.count >= 10)
-                        }
-                        ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
-                            HStack {
-                                Text(url)
-                                    .font(.caption)
-                                    .lineLimit(1)
-                                Spacer()
-                                Button("Remove", role: .destructive) {
-                                    urls.remove(at: index)
-                                }
-                                .font(.caption)
-                            }
-                        }
-                    }
+            Group {
+                Text("Description")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                TextField("", text: $descriptionText, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focusedField, equals: .description)
+            }
 
-                    Text("Plans")
-                        .font(.subheadline.weight(.semibold))
-                    ForEach(Array(planDrafts.indices), id: \.self) { index in
-                        planEditCard(index: index)
-                    }
-                    Button("Add new plan") {
-                        planDrafts.append(
-                            EditablePlanDraft(
-                                existingPlanId: nil,
-                                name: "",
-                                priceMinorText: "",
-                                rewardSummary: "",
-                                description: "",
-                                currency: project.currency
-                            )
-                        )
-                    }
-                    .buttonStyle(.bordered)
-
-                    if !errorText.isEmpty {
-                        Text(errorText)
+            Group {
+                Text("URLs")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                HStack {
+                    TextField("", text: $urlDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .focused($focusedField, equals: .urlDraft)
+                    Button("Add") { addURL() }
+                        .buttonStyle(.bordered)
+                        .disabled(urls.count >= 10)
+                }
+                ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
+                    HStack {
+                        Text(url)
                             .font(.caption)
-                            .foregroundStyle(.red)
+                            .lineLimit(1)
+                        Spacer()
+                        Button("Remove", role: .destructive) {
+                            urls.remove(at: index)
+                        }
+                        .font(.caption)
                     }
+                }
+            }
 
-                    Button(saving ? "Saving..." : "Save Changes") {
-                        Task { await saveChanges() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(saving)
-                }
-                .padding(16)
+            Text("Plans")
+                .font(.subheadline.weight(.semibold))
+            ForEach(Array(planDrafts.indices), id: \.self) { index in
+                planEditCard(index: index)
             }
-            .scrollDismissesKeyboard(.interactively)
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    focusedField = nil
-                }
-            )
-            .navigationTitle("Edit Project")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Close") { dismiss() }
-                }
+            Button("Add new plan") {
+                planDrafts.append(
+                    EditablePlanDraft(
+                        existingPlanId: nil,
+                        name: "",
+                        priceMinorText: "",
+                        rewardSummary: "",
+                        description: "",
+                        currency: project.currency
+                    )
+                )
             }
-            .onChange(of: coverPickerItems) { _, newValue in
-                Task { await loadProjectCovers(from: newValue) }
+            .buttonStyle(.bordered)
+
+            if !errorText.isEmpty {
+                Text(errorText)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            Button(saving ? "Saving..." : "Save Changes") {
+                Task { await saveChanges() }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(saving)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .padding(14)
+        .background(Color.secondary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+        )
+        .background(
+            ProjectEditDismissKeyboardTapView {
+                focusedField = nil
+            }
+        )
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                focusedField = nil
+            }
+        )
+        .scrollDismissesKeyboard(.interactively)
+        .onChange(of: coverPickerItems) { _, newValue in
+            Task { await loadProjectCovers(from: newValue) }
+        }
+        .onAppear {
+            onDirtyChange(hasUnsavedChanges)
+        }
+        .onChange(of: subtitleText) { _, _ in
+            onDirtyChange(hasUnsavedChanges)
+        }
+        .onChange(of: descriptionText) { _, _ in
+            onDirtyChange(hasUnsavedChanges)
+        }
+        .onChange(of: urls) { _, _ in
+            onDirtyChange(hasUnsavedChanges)
+        }
+        .onChange(of: projectImages.map { image in
+            "\(image.id.uuidString)|\(image.existingURL ?? "")|\(image.selectedImage == nil ? "0" : "1")"
+        }) { _, _ in
+            onDirtyChange(hasUnsavedChanges)
+        }
+        .onChange(of: planDrafts.map { draft in
+            "\(draft.id.uuidString)|\(draft.isExisting)|\(draft.name)|\(draft.priceMinorText)|\(draft.rewardSummary)|\(draft.description)|\(draft.currency)"
+        }) { _, _ in
+            onDirtyChange(hasUnsavedChanges)
+        }
+        .onChange(of: selectedPlanImages.keys.map(\.uuidString).sorted()) { _, _ in
+            onDirtyChange(hasUnsavedChanges)
+        }
+        .sheet(isPresented: $isPlanImagePickerPresented) {
+            SingleImagePicker { selected in
+                guard let selected, let targetId = planImagePickerTargetId else { return }
+                selectedPlanImages[targetId] = selected
+                planImagePickerTargetId = nil
+                isPlanImagePickerPresented = false
+                focusedField = nil
+                onDirtyChange(hasUnsavedChanges)
             }
         }
     }
@@ -1469,18 +1690,16 @@ struct ProjectEditSheetView: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($focusedField, equals: .planDescription(draft.id))
 
-            PhotosPicker(selection: planPickerBinding(for: draft.id), matching: .images, photoLibrary: .shared()) {
-                Label(selectedPlanImages[draft.id] == nil ? "Select Plan Image" : "Change Plan Image", systemImage: "photo.on.rectangle")
-            }
-            .buttonStyle(.bordered)
             if let selected = selectedPlanImages[draft.id], let uiImage = UIImage(data: selected.data) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFill()
-                    .frame(height: 110)
                     .frame(maxWidth: .infinity)
+                    .frame(height: 110)
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             } else if let existingPlanId = draft.existingPlanId,
                       let existing = project.plans?.first(where: { $0.id == existingPlanId }),
                       let raw = existing.image_url,
@@ -1497,17 +1716,36 @@ struct ProjectEditSheetView: View {
                         Rectangle().fill(Color.secondary.opacity(0.15))
                     }
                 }
-                .frame(height: 110)
                 .frame(maxWidth: .infinity)
+                .frame(height: 110)
                 .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
+            Button {
+                focusedField = nil
+                planImagePickerTargetId = draft.id
+                DispatchQueue.main.async {
+                    isPlanImagePickerPresented = true
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Label(selectedPlanImages[draft.id] == nil ? "Select Plan Image" : "Change Plan Image", systemImage: "photo.on.rectangle")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.accentColor.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("project-inline-plan-image-picker")
 
             if !draft.isExisting {
                 Button("Remove new plan", role: .destructive) {
                     let planId = planDrafts[index].id
                     planDrafts.remove(at: index)
-                    planPickerItems[planId] = nil
                     selectedPlanImages[planId] = nil
                 }
                 .font(.caption)
@@ -1536,6 +1774,28 @@ struct ProjectEditSheetView: View {
         errorText = ""
     }
 
+    private var hasUnsavedChanges: Bool {
+        let currentSnapshot = EditSnapshot(
+            subtitle: subtitleText,
+            description: descriptionText,
+            urls: urls,
+            projectImageURLs: projectImages.compactMap(\.existingURL),
+            planDrafts: planDrafts.map {
+                EditablePlanSnapshot(
+                    id: $0.id,
+                    isExisting: $0.isExisting,
+                    name: $0.name,
+                    priceMinorText: $0.priceMinorText,
+                    rewardSummary: $0.rewardSummary,
+                    description: $0.description,
+                    currency: $0.currency
+                )
+            },
+            selectedPlanImageIds: selectedPlanImages.keys.map(\.uuidString)
+        )
+        return currentSnapshot != initialSnapshot
+    }
+
     private func normalizeURLString(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -1546,50 +1806,27 @@ struct ProjectEditSheetView: View {
         return components.url?.absoluteString
     }
 
-    private func planPickerBinding(for localPlanId: UUID) -> Binding<PhotosPickerItem?> {
-        Binding(
-            get: { planPickerItems[localPlanId] },
-            set: { newValue in
-                planPickerItems[localPlanId] = newValue
-                guard let newValue else {
-                    selectedPlanImages[localPlanId] = nil
-                    return
-                }
-                Task { await loadPlanImage(from: newValue, localPlanId: localPlanId) }
-            }
-        )
-    }
-
     private func loadProjectCovers(from pickerItems: [PhotosPickerItem]) async {
         if pickerItems.isEmpty {
-            await MainActor.run { coverSelections = [] }
             return
         }
         do {
-            var nextSelections: [SelectedProjectImage] = []
-            for pickerItem in pickerItems.prefix(5) {
+            var additions: [EditableProjectImage] = []
+            let room = max(0, 5 - projectImages.count)
+            for pickerItem in pickerItems.prefix(room) {
                 guard let data = try await pickerItem.loadTransferable(type: Data.self) else { continue }
                 let fileName = pickerItem.itemIdentifier.map { "\($0).jpg" } ?? "project-cover.jpg"
                 let contentType = pickerItem.supportedContentTypes.first?.preferredMIMEType ?? UTType.jpeg.preferredMIMEType ?? "image/jpeg"
-                nextSelections.append(SelectedProjectImage(data: data, fileName: fileName, contentType: contentType))
+                let selected = SelectedProjectImage(data: data, fileName: fileName, contentType: contentType)
+                additions.append(EditableProjectImage(existingURL: nil, selectedImage: selected))
             }
-            await MainActor.run { coverSelections = nextSelections }
-        } catch {
-            await MainActor.run { coverSelections = [] }
-        }
-    }
-
-    private func loadPlanImage(from pickerItem: PhotosPickerItem, localPlanId: UUID) async {
-        do {
-            guard let data = try await pickerItem.loadTransferable(type: Data.self) else { return }
-            let fileName = pickerItem.itemIdentifier.map { "\($0).jpg" } ?? "plan-image.jpg"
-            let contentType = pickerItem.supportedContentTypes.first?.preferredMIMEType ?? UTType.jpeg.preferredMIMEType ?? "image/jpeg"
             await MainActor.run {
-                selectedPlanImages[localPlanId] = SelectedProjectImage(data: data, fileName: fileName, contentType: contentType)
+                projectImages.append(contentsOf: additions)
+                coverPickerItems = []
             }
         } catch {
             await MainActor.run {
-                selectedPlanImages[localPlanId] = nil
+                coverPickerItems = []
             }
         }
     }
@@ -1612,10 +1849,22 @@ struct ProjectEditSheetView: View {
                 return normalized
             }
 
+            guard !projectImages.isEmpty else {
+                throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "At least one project image is required"])
+            }
+
             var coverUrls: [String] = []
-            for cover in coverSelections.prefix(5) {
-                let uploaded = try await client.uploadProjectImage(data: cover.data, fileName: cover.fileName, contentType: cover.contentType)
-                coverUrls.append(uploaded)
+            for image in projectImages.prefix(5) {
+                if let existingURL = image.existingURL {
+                    coverUrls.append(existingURL)
+                } else if let selected = image.selectedImage {
+                    let uploaded = try await client.uploadProjectImage(
+                        data: selected.data,
+                        fileName: selected.fileName,
+                        contentType: selected.contentType
+                    )
+                    coverUrls.append(uploaded)
+                }
             }
 
             var uploadedPlanImageMap: [UUID: String] = [:]
@@ -1694,8 +1943,8 @@ struct ProjectEditSheetView: View {
                 plans: planPayloads.isEmpty ? nil : planPayloads
             )
             await MainActor.run {
+                onDirtyChange(false)
                 onSaved()
-                dismiss()
             }
         } catch {
             await MainActor.run {
@@ -1726,6 +1975,41 @@ struct ProjectEditSheetView: View {
         var isExisting: Bool { existingPlanId != nil }
     }
 
+    private struct EditablePlanSnapshot: Equatable {
+        let id: UUID
+        let isExisting: Bool
+        let name: String
+        let priceMinorText: String
+        let rewardSummary: String
+        let description: String
+        let currency: String
+    }
+
+    private struct EditSnapshot: Equatable {
+        let subtitle: String
+        let description: String
+        let urls: [String]
+        let projectImageURLs: [String]
+        let planDrafts: [EditablePlanSnapshot]
+        let selectedPlanImageIds: [String]
+
+        init(
+            subtitle: String,
+            description: String,
+            urls: [String],
+            projectImageURLs: [String],
+            planDrafts: [EditablePlanSnapshot],
+            selectedPlanImageIds: [String]
+        ) {
+            self.subtitle = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.description = description.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.urls = urls.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            self.projectImageURLs = projectImageURLs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            self.planDrafts = planDrafts
+            self.selectedPlanImageIds = selectedPlanImageIds.sorted()
+        }
+    }
+
     private enum EditField: Hashable {
         case subtitle
         case description
@@ -1734,5 +2018,141 @@ struct ProjectEditSheetView: View {
         case planPrice(UUID)
         case planReward(UUID)
         case planDescription(UUID)
+    }
+
+    @ViewBuilder
+    private func imageThumbnail(_ image: EditableProjectImage) -> some View {
+        if let selected = image.selectedImage, let uiImage = UIImage(data: selected.data) {
+            Image(uiImage: uiImage)
+                .resizable()
+                .scaledToFill()
+        } else if let raw = image.existingURL, let url = URL(string: raw) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .empty:
+                    Rectangle().fill(Color.secondary.opacity(0.15))
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .failure:
+                    Rectangle().fill(Color.secondary.opacity(0.15))
+                @unknown default:
+                    Rectangle().fill(Color.secondary.opacity(0.15))
+                }
+            }
+        } else {
+            Rectangle().fill(Color.secondary.opacity(0.15))
+        }
+    }
+
+    private func removeProjectImage(_ id: UUID) {
+        guard projectImages.count > 1 else {
+            errorText = "At least one image must remain"
+            return
+        }
+        projectImages.removeAll { $0.id == id }
+    }
+
+    private struct EditableProjectImage: Identifiable {
+        let id: UUID
+        var existingURL: String?
+        var selectedImage: SelectedProjectImage?
+
+        init(existingURL: String?, selectedImage: SelectedProjectImage? = nil) {
+            self.id = UUID()
+            self.existingURL = existingURL
+            self.selectedImage = selectedImage
+        }
+    }
+}
+
+private struct SingleImagePicker: UIViewControllerRepresentable {
+    let onComplete: (SelectedProjectImage?) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onComplete: onComplete)
+    }
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var configuration = PHPickerConfiguration(photoLibrary: .shared())
+        configuration.filter = .images
+        configuration.selectionLimit = 1
+        let picker = PHPickerViewController(configuration: configuration)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        private let onComplete: (SelectedProjectImage?) -> Void
+
+        init(onComplete: @escaping (SelectedProjectImage?) -> Void) {
+            self.onComplete = onComplete
+        }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            guard let first = results.first else {
+                picker.dismiss(animated: true) {
+                    self.onComplete(nil)
+                }
+                return
+            }
+
+            let provider = first.itemProvider
+            let contentType = provider.registeredTypeIdentifiers.first.flatMap { UTType($0)?.preferredMIMEType } ?? "image/jpeg"
+            let fileName = provider.suggestedName.map { "\($0).jpg" } ?? "plan-image.jpg"
+
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                DispatchQueue.main.async {
+                    picker.dismiss(animated: true) {
+                        guard let data else {
+                            self.onComplete(nil)
+                            return
+                        }
+                        self.onComplete(SelectedProjectImage(data: data, fileName: fileName, contentType: contentType))
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct ProjectEditDismissKeyboardTapView: UIViewRepresentable {
+    let onTap: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onTap: onTap)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap))
+        tap.cancelsTouchesInView = false
+        tap.delegate = context.coordinator
+        view.addGestureRecognizer(tap)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private let onTap: () -> Void
+
+        init(onTap: @escaping () -> Void) {
+            self.onTap = onTap
+        }
+
+        @objc func handleTap() {
+            onTap()
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            if touch.view is UIControl {
+                return false
+            }
+            return true
+        }
     }
 }

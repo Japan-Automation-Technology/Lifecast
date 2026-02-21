@@ -1025,6 +1025,7 @@ export class HybridStore {
     title: string;
     subtitle: string | null;
     imageUrl: string | null;
+    imageUrls: string[];
     category: string | null;
     location: string | null;
     goalAmountMinor: number;
@@ -1050,7 +1051,7 @@ export class HybridStore {
     projectId: string;
     subtitle?: string | null;
     description?: string | null;
-    imageUrl?: string | null;
+    imageUrls?: string[];
     urls?: string[];
     plans?: Array<{
       id?: string;

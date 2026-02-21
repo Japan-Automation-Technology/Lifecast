@@ -86,6 +86,7 @@ struct MyProjectResult: Decodable {
     let title: String
     let subtitle: String?
     let image_url: String?
+    let image_urls: [String]?
     let category: String?
     let location: String?
     let status: String

@@ -114,6 +114,7 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     }[];
     subtitle: string | null;
     imageUrl: string | null;
+    imageUrls: string[];
     category: string | null;
     location: string | null;
     description: string | null;
@@ -128,6 +129,7 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     title: project.title,
     subtitle: project.subtitle,
     image_url: project.imageUrl,
+    image_urls: project.imageUrls,
     category: project.category,
     location: project.location,
     status: project.status,
@@ -275,6 +277,7 @@ export async function registerProjectRoutes(app: FastifyInstance) {
       title: body.data.title,
       subtitle: body.data.subtitle?.trim() || null,
       imageUrl: primaryImageUrl,
+      imageUrls: body.data.image_urls ?? (primaryImageUrl ? [primaryImageUrl] : []),
       category: body.data.category?.trim() || null,
       location: body.data.location?.trim() || null,
       goalAmountMinor,
@@ -328,13 +331,14 @@ export async function registerProjectRoutes(app: FastifyInstance) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid project payload"));
     }
 
-    const mergedImageUrl = body.data.image_urls?.[0] ?? body.data.image_url;
+    const mergedImageUrls = body.data.image_urls
+      ?? (body.data.image_url ? [body.data.image_url] : undefined);
     const updated = await store.updateProjectForCreator({
       creatorUserId,
       projectId,
       subtitle: body.data.subtitle === undefined ? undefined : body.data.subtitle?.trim() ?? null,
       description: body.data.description === undefined ? undefined : body.data.description?.trim() ?? null,
-      imageUrl: mergedImageUrl === undefined ? undefined : mergedImageUrl?.trim() ?? null,
+      imageUrls: mergedImageUrls?.map((v) => v.trim()).filter((v) => v.length > 0),
       urls: body.data.urls,
       plans: body.data.plans?.map((plan) => ({
         id: plan.id,

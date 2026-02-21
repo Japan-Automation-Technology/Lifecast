@@ -16,6 +16,7 @@ export class InMemoryStore {
     title: string;
     subtitle: string | null;
     imageUrl: string | null;
+    imageUrls: string[];
     category: string | null;
     location: string | null;
     status: string;
@@ -129,6 +130,7 @@ export class InMemoryStore {
     title: string;
     subtitle: string | null;
     imageUrl: string | null;
+    imageUrls: string[];
     category: string | null;
     location: string | null;
     goalAmountMinor: number;
@@ -164,7 +166,8 @@ export class InMemoryStore {
       creatorUserId: input.creatorUserId,
       title: input.title,
       subtitle: input.subtitle,
-      imageUrl: input.imageUrl,
+      imageUrl: input.imageUrls[0] ?? input.imageUrl,
+      imageUrls: input.imageUrls,
       category: input.category,
       location: input.location,
       status: "active",
@@ -190,7 +193,7 @@ export class InMemoryStore {
     projectId: string;
     subtitle?: string | null;
     description?: string | null;
-    imageUrl?: string | null;
+    imageUrls?: string[];
     urls?: string[];
     plans?: Array<{
       id?: string;
@@ -244,7 +247,10 @@ export class InMemoryStore {
       ...existing,
       subtitle: input.subtitle === undefined ? existing.subtitle : input.subtitle,
       description: input.description === undefined ? existing.description : input.description,
-      imageUrl: input.imageUrl === undefined ? existing.imageUrl : input.imageUrl,
+      imageUrls: input.imageUrls === undefined ? existing.imageUrls : input.imageUrls,
+      imageUrl: input.imageUrls === undefined
+        ? existing.imageUrl
+        : (input.imageUrls[0] ?? existing.imageUrl),
       urls: input.urls === undefined ? existing.urls : input.urls,
       plans: nextPlans,
       minimumPlan: nextPlans[0] ?? null,

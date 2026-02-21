@@ -22,6 +22,8 @@
     "smoke:ios:create-upload": "LIFECAST_ALLOW_CREATE_UPLOAD_SMOKE=1 node scripts/appium/ios-smoke.mjs",
     "smoke:ios:upload-profile": "node scripts/appium/ios-upload-profile-screens.mjs",
     "smoke:ios:posted-feed": "node scripts/appium/ios-posted-feed-navigation.mjs",
+    "smoke:ios:project-plan-image": "node scripts/appium/ios-project-plan-image-picker.mjs",
+    "smoke:ios:project-edit-keyboard-dismiss": "node scripts/appium/ios-project-edit-keyboard-dismiss.mjs",
     "dev:backend:worker:video-maintenance": "pnpm --filter @lifecast/backend dev:worker:video-maintenance"
   }
 }

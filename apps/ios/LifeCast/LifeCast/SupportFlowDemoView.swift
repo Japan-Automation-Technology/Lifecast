@@ -51,6 +51,15 @@ struct SupportFlowDemoView: View {
     @State private var showFeedActions = false
 
     @State private var errorText = ""
+    @State private var isKeyboardVisible = false
+    @State private var meHasUnsavedProjectEdits = false
+    @State private var meProjectEditDiscardRequest = 0
+    @State private var pendingAppTabAfterDiscard: Int?
+    @State private var showDiscardProjectEditDialog = false
+
+    private var bottomBarInset: CGFloat {
+        isKeyboardVisible ? 0 : appBottomBarHeight
+    }
 
     private var realPlans: [SupportPlan] {
         guard let target = supportTargetProject ?? liveSupportProject else { return [] }
@@ -92,7 +101,7 @@ struct SupportFlowDemoView: View {
                 supportStep = .planSelect
                 showSupportFlow = true
             })
-                .safeAreaPadding(.bottom, appBottomBarHeight)
+                .safeAreaPadding(.bottom, bottomBarInset)
                 .tabItem { Image(systemName: "magnifyingglass") }
                 .tag(1)
 
@@ -105,7 +114,7 @@ struct SupportFlowDemoView: View {
             }, onOpenAuth: {
                 showAuthSheet = true
             })
-                .safeAreaPadding(.bottom, appBottomBarHeight)
+                .safeAreaPadding(.bottom, bottomBarInset)
                 .tabItem { Image(systemName: "plus.square.fill") }
                 .tag(2)
 
@@ -133,16 +142,22 @@ struct SupportFlowDemoView: View {
                 },
                 onOpenAuth: {
                     showAuthSheet = true
-                }
+                },
+                onProjectEditUnsavedChanged: { hasUnsaved in
+                    meHasUnsavedProjectEdits = hasUnsaved
+                },
+                projectEditDiscardRequest: meProjectEditDiscardRequest
             )
-            .safeAreaPadding(.bottom, appBottomBarHeight)
+            .safeAreaPadding(.bottom, bottomBarInset)
             .tabItem { Image(systemName: "person.fill") }
             .tag(3)
         }
         .toolbar(.hidden, for: .tabBar)
         .background(Color.black.ignoresSafeArea())
         .overlay(alignment: .bottom) {
-            appBottomBar
+            if !isKeyboardVisible {
+                appBottomBar
+            }
         }
         .sheet(isPresented: $showComments) {
             commentsSheet
@@ -162,6 +177,20 @@ struct SupportFlowDemoView: View {
                 errorText = "Thanks. We received your report."
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog("Discard changes?", isPresented: $showDiscardProjectEditDialog, titleVisibility: .visible) {
+            Button("Discard", role: .destructive) {
+                guard let nextTab = pendingAppTabAfterDiscard else { return }
+                pendingAppTabAfterDiscard = nil
+                meHasUnsavedProjectEdits = false
+                meProjectEditDiscardRequest += 1
+                selectedTab = nextTab
+            }
+            Button("Cancel", role: .cancel) {
+                pendingAppTabAfterDiscard = nil
+            }
+        } message: {
+            Text("Your project edits are not saved.")
         }
         .sheet(isPresented: $showSupportFlow, onDismiss: handleSupportFlowDismiss) {
             supportFlowSheet
@@ -218,6 +247,15 @@ struct SupportFlowDemoView: View {
                 await refreshMyVideos()
                 await refreshLiveSupportProject()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            isKeyboardVisible = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isKeyboardVisible = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+            isKeyboardVisible = false
         }
         .onChange(of: currentFeedIndex) { _, _ in
             syncHomeFeedPlayer()
@@ -454,7 +492,7 @@ struct SupportFlowDemoView: View {
 
     private func bottomTabButton(icon: String, tab: Int) -> some View {
         Button {
-            selectedTab = tab
+            requestAppTabSelection(tab)
         } label: {
             Image(systemName: icon)
                 .font(.system(size: 22, weight: .semibold))
@@ -463,6 +501,16 @@ struct SupportFlowDemoView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private func requestAppTabSelection(_ tab: Int) {
+        guard selectedTab != tab else { return }
+        if selectedTab == 3 && meHasUnsavedProjectEdits && tab != 3 {
+            pendingAppTabAfterDiscard = tab
+            showDiscardProjectEditDialog = true
+            return
+        }
+        selectedTab = tab
     }
 
     private func feedVideoLayer(project: FeedProjectSummary, useLivePlayer: Bool) -> some View {

@@ -96,7 +96,21 @@ struct ProfileTabIconStrip: View {
             .background(selectedIndex == index && !isFullWidthUnderline ? Color.white : Color.clear)
             .clipShape(Capsule())
         }
+        .accessibilityIdentifier(tabAccessibilityIdentifier(index: index))
         .buttonStyle(.plain)
+    }
+
+    private func tabAccessibilityIdentifier(index: Int) -> String {
+        switch index {
+        case 0:
+            return "profile-tab-project"
+        case 1:
+            return "profile-tab-posts"
+        case 2:
+            return "profile-tab-support"
+        default:
+            return "profile-tab-\(index)"
+        }
     }
 }
 
@@ -295,16 +309,13 @@ struct ProfileProjectDetailView: View {
     private var progressPercent: Int { Int(progressRatio * 100.0) }
 
     private var galleryURLs: [String] {
-        var urls: [String] = []
+        if let images = project.image_urls, !images.isEmpty {
+            return images.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        }
         if let cover = project.image_url?.trimmingCharacters(in: .whitespacesAndNewlines), !cover.isEmpty {
-            urls.append(cover)
+            return [cover]
         }
-        for plan in project.plans ?? [] {
-            if let url = plan.image_url?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty, !urls.contains(url) {
-                urls.append(url)
-            }
-        }
-        return urls
+        return []
     }
 
     var body: some View {
@@ -317,6 +328,7 @@ struct ProfileProjectDetailView: View {
                     Button(headerActionTitle) {
                         onTapHeaderAction()
                     }
+                    .accessibilityIdentifier("profile-project-header-action")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)

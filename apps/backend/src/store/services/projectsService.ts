@@ -20,6 +20,7 @@ export class ProjectsService {
         title: string;
         subtitle: string | null;
         cover_image_url: string | null;
+        project_image_urls: unknown;
         category: string | null;
         location: string | null;
         status: string;
@@ -40,6 +41,7 @@ export class ProjectsService {
           title,
           subtitle,
           cover_image_url,
+          project_image_urls,
           category,
           location,
           status,
@@ -109,6 +111,7 @@ export class ProjectsService {
         title: row.title,
         subtitle: row.subtitle,
         imageUrl: row.cover_image_url,
+        imageUrls: Array.isArray(row.project_image_urls) ? (row.project_image_urls as string[]) : [],
         category: row.category,
         location: row.location,
         status: row.status,
@@ -142,6 +145,7 @@ export class ProjectsService {
         title: string;
         subtitle: string | null;
         cover_image_url: string | null;
+        project_image_urls: unknown;
         category: string | null;
         location: string | null;
         status: string;
@@ -162,6 +166,7 @@ export class ProjectsService {
           title,
           subtitle,
           cover_image_url,
+          project_image_urls,
           category,
           location,
           status,
@@ -231,6 +236,7 @@ export class ProjectsService {
           title: row.title,
           subtitle: row.subtitle,
           imageUrl: row.cover_image_url,
+          imageUrls: Array.isArray(row.project_image_urls) ? (row.project_image_urls as string[]) : [],
           category: row.category,
           location: row.location,
           status: row.status,
@@ -259,6 +265,7 @@ export class ProjectsService {
     title: string;
     subtitle: string | null;
     imageUrl: string | null;
+    imageUrls: string[];
     category: string | null;
     location: string | null;
     goalAmountMinor: number;
@@ -296,16 +303,17 @@ export class ProjectsService {
       await client.query(
         `
         insert into projects (
-          id, creator_user_id, title, subtitle, cover_image_url, category, location, status, goal_amount_minor, currency, duration_days, deadline_at, description, external_urls, created_at, updated_at
+          id, creator_user_id, title, subtitle, cover_image_url, project_image_urls, category, location, status, goal_amount_minor, currency, duration_days, deadline_at, description, external_urls, created_at, updated_at
         )
-        values ($1, $2, $3, $4, $5, $6, $7, 'active', $8, $9, $10, $11, $12, $13::jsonb, now(), now())
+        values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, 'active', $9, $10, $11, $12, $13, $14::jsonb, now(), now())
       `,
         [
           projectId,
           input.creatorUserId,
           input.title,
           input.subtitle,
-          input.imageUrl,
+          input.imageUrls[0] ?? input.imageUrl,
+          JSON.stringify(input.imageUrls),
           input.category,
           input.location,
           input.goalAmountMinor,
@@ -354,7 +362,8 @@ export class ProjectsService {
         creatorUserId: input.creatorUserId,
         title: input.title,
         subtitle: input.subtitle,
-        imageUrl: input.imageUrl,
+        imageUrl: input.imageUrls[0] ?? input.imageUrl,
+        imageUrls: input.imageUrls,
         category: input.category,
         location: input.location,
         status: "active",
@@ -388,7 +397,7 @@ export class ProjectsService {
     projectId: string;
     subtitle?: string | null;
     description?: string | null;
-    imageUrl?: string | null;
+    imageUrls?: string[];
     urls?: string[];
     plans?: Array<{
       id?: string;
@@ -414,9 +423,10 @@ export class ProjectsService {
         subtitle: string | null;
         description: string | null;
         cover_image_url: string | null;
+        project_image_urls: unknown;
         external_urls: unknown;
       }>(
-        `select id, creator_user_id, status, subtitle, description, cover_image_url, external_urls from projects where id = $1 limit 1`,
+        `select id, creator_user_id, status, subtitle, description, cover_image_url, project_image_urls, external_urls from projects where id = $1 limit 1`,
         [input.projectId],
       );
       if ((existing.rowCount ?? 0) === 0) {
@@ -435,7 +445,11 @@ export class ProjectsService {
       const current = existing.rows[0];
       const mergedSubtitle = input.subtitle === undefined ? current.subtitle : input.subtitle;
       const mergedDescription = input.description === undefined ? current.description : input.description;
-      const mergedImageUrl = input.imageUrl === undefined ? current.cover_image_url : input.imageUrl;
+      const currentImageUrls = Array.isArray(current.project_image_urls)
+        ? (current.project_image_urls as string[]).filter((v) => typeof v === "string")
+        : (current.cover_image_url ? [current.cover_image_url] : []);
+      const mergedImageUrls = input.imageUrls === undefined ? currentImageUrls : input.imageUrls;
+      const mergedCoverImageUrl = mergedImageUrls[0] ?? current.cover_image_url;
       const currentUrls = Array.isArray(current.external_urls)
         ? (current.external_urls as string[]).filter((v) => typeof v === "string")
         : [];
@@ -447,11 +461,20 @@ export class ProjectsService {
         set subtitle = $3,
             description = $4,
             cover_image_url = $5,
-            external_urls = $6::jsonb,
+            project_image_urls = $6::jsonb,
+            external_urls = $7::jsonb,
             updated_at = now()
         where id = $1 and creator_user_id = $2
       `,
-        [input.projectId, input.creatorUserId, mergedSubtitle, mergedDescription, mergedImageUrl, JSON.stringify(mergedUrls)],
+        [
+          input.projectId,
+          input.creatorUserId,
+          mergedSubtitle,
+          mergedDescription,
+          mergedCoverImageUrl,
+          JSON.stringify(mergedImageUrls),
+          JSON.stringify(mergedUrls),
+        ],
       );
 
       if (input.plans && input.plans.length > 0) {
