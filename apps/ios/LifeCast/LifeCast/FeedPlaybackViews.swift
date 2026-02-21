@@ -235,6 +235,7 @@ struct CreatorPostedFeedView: View {
                     }
                 )
                 .accessibilityIdentifier("posted-feed-view")
+                .ignoresSafeArea(edges: .top)
             }
 
             VStack {
@@ -267,26 +268,11 @@ struct CreatorPostedFeedView: View {
         .sheet(isPresented: $showComments) {
             commentsSheet
         }
-        .confirmationDialog("Share", isPresented: $showShare, titleVisibility: .visible) {
-            Button("Export video") {}
-            Button("Copy link") {}
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Choose one action")
+        .sheet(isPresented: $showShare) {
+            shareActionsSheet
         }
-        .confirmationDialog("Video actions", isPresented: $showActions, titleVisibility: .visible) {
-            Button("Insights (Coming Soon)") {}
-            if isCurrentUserVideo {
-                Button("Delete video", role: .destructive) {
-                    Task {
-                        await deleteCurrentVideo()
-                    }
-                }
-            } else {
-                Button("Not interested") {}
-                Button("Report", role: .destructive) {}
-            }
-            Button("Cancel", role: .cancel) {}
+        .sheet(isPresented: $showActions) {
+            videoActionsSheet
         }
         .overlay(alignment: .top) {
             if !deleteErrorText.isEmpty {
@@ -483,35 +469,38 @@ struct CreatorPostedFeedView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
 
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Button("@\(project.username)") {
-                        if isCurrentUserVideo {
-                            dismiss()
-                        } else {
-                            selectedCreatorRoute = CreatorRoute(id: project.creatorId)
+            VStack(spacing: 8) {
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        projectPrimaryAction(project: project)
+                        Button("@\(project.username)") {
+                            if isCurrentUserVideo {
+                                dismiss()
+                            } else {
+                                selectedCreatorRoute = CreatorRoute(id: project.creatorId)
+                            }
                         }
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .buttonStyle(.plain)
+
+                        Text(project.caption)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.9))
+
+                        fundingMeta(project: project)
                     }
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .buttonStyle(.plain)
 
-                    Text(project.caption)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.9))
-                        .lineLimit(2)
+                    Spacer(minLength: 12)
 
-                    fundingMeta(project: project)
-                    FeedPageIndicatorDots(
-                        currentIndex: showFeedProjectPanel ? (clampedFeedPanelPageIndex(for: project) + 1) : 0,
-                        totalCount: feedPanelPageCount(for: project) + 1
-                    )
-                        .frame(maxWidth: .infinity, alignment: .center)
+                    rightRail(project: project)
                 }
 
-                Spacer(minLength: 12)
-
-                rightRail(project: project)
+                FeedPageIndicatorDots(
+                    currentIndex: showFeedProjectPanel ? (clampedFeedPanelPageIndex(for: project) + 1) : 0,
+                    totalCount: feedPanelPageCount(for: project) + 1
+                )
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, appBottomBarHeight - 14)
@@ -595,11 +584,11 @@ struct CreatorPostedFeedView: View {
                 }
             ) { idx in
                 VStack(alignment: .leading, spacing: 12) {
-                    panelPageHeader(currentPage: idx, plansCount: plans.count, totalCount: feedPanelPageCount(for: project))
+                    FeedPanelPageHeaderView(currentPage: idx, plansCount: plans.count, totalCount: feedPanelPageCount(for: project))
                     if idx == 0 {
-                        projectOverviewPanelContent(project: project, detail: cachedDetail, isLoading: isLoading)
+                        FeedProjectOverviewPanelContentView(project: project, detail: cachedDetail, isLoading: isLoading)
                     } else {
-                        planPanelContent(plan: plans[idx - 1])
+                        FeedPlanPanelContentView(plan: plans[idx - 1])
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -613,178 +602,13 @@ struct CreatorPostedFeedView: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.top, 132)
+        .padding(.top, feedPanelTopPadding)
         .padding(.bottom, 18)
         .frame(width: width, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(Color.black.opacity(0.86))
     }
 
-    private func panelPageHeader(currentPage: Int, plansCount: Int, totalCount: Int) -> some View {
-        HStack {
-            Text(currentPage == 0 ? "Project Overview" : "Plan \(currentPage) / \(plansCount)")
-                .font(.headline)
-                .foregroundStyle(.white)
-            Spacer()
-            Text("\(currentPage + 1) / \(totalCount)")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.82))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.white.opacity(0.14))
-                .clipShape(Capsule())
-        }
-    }
-
-    @ViewBuilder
-    private func projectOverviewPanelContent(project: FeedProjectSummary, detail: MyProjectResult?, isLoading: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let detail {
-                projectOverviewImage(detail: detail, fallbackThumbnailURL: project.thumbnailURL)
-                Text(detail.title)
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                if let subtitle = detail.subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.9))
-                }
-                Text((detail.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (detail.description ?? "") : "-")
-                    .font(.footnote)
-                    .foregroundStyle(.white)
-                    .padding(.top, 4)
-                Text("Funded: \(formatJPY(detail.funded_amount_minor)) / \(formatJPY(detail.goal_amount_minor))")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Supporters: \(detail.supporter_count)")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Period: \(formatProjectCreatedDate(from: detail.created_at)) ~ \(formatDeliveryDate(from: detail.deadline_at))")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Status: \(detail.status)")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-            } else if isLoading {
-                ProgressView("Loading project...")
-                    .tint(.white)
-                    .foregroundStyle(.white.opacity(0.82))
-            } else {
-                if let thumbnail = project.thumbnailURL, let url = URL(string: thumbnail) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .empty:
-                            Rectangle().fill(Color.secondary.opacity(0.12))
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        case .failure:
-                            Rectangle().fill(Color.secondary.opacity(0.12))
-                        @unknown default:
-                            Rectangle().fill(Color.secondary.opacity(0.12))
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 172)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                Text(project.caption)
-                    .font(.footnote)
-                    .foregroundStyle(.white)
-                Text("-")
-                    .font(.footnote)
-                    .foregroundStyle(.white)
-                    .padding(.top, 4)
-                Text("Funded: \(formatJPY(project.fundedAmountMinor))")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Supporters: -")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Period: -")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.88))
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func planPanelContent(plan: ProjectPlanResult) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let raw = plan.image_url, let url = URL(string: raw) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .empty:
-                        Rectangle().fill(Color.secondary.opacity(0.12))
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    case .failure:
-                        Rectangle().fill(Color.secondary.opacity(0.12))
-                    @unknown default:
-                        Rectangle().fill(Color.secondary.opacity(0.12))
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 148)
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            Text(plan.name)
-                .font(.headline)
-                .foregroundStyle(.white)
-            Text("\(plan.price_minor.formatted()) \(plan.currency)")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.green)
-            Text(plan.reward_summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : plan.reward_summary)
-                .font(.subheadline)
-                .foregroundStyle(.white)
-            Text((plan.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (plan.description ?? "") : "-")
-                .font(.footnote)
-                .foregroundStyle(.white.opacity(0.84))
-                .padding(.top, 4)
-        }
-    }
-
-    @ViewBuilder
-    private func projectOverviewImage(detail: MyProjectResult, fallbackThumbnailURL: String?) -> some View {
-        let detailImage = (detail.image_urls?.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
-            ?? detail.image_url
-        if let raw = detailImage, let url = URL(string: raw) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .empty:
-                    Rectangle().fill(Color.secondary.opacity(0.12))
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .failure:
-                    Rectangle().fill(Color.secondary.opacity(0.12))
-                @unknown default:
-                    Rectangle().fill(Color.secondary.opacity(0.12))
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 172)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        } else if let thumb = fallbackThumbnailURL, let url = URL(string: thumb) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .empty:
-                    Rectangle().fill(Color.secondary.opacity(0.12))
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .failure:
-                    Rectangle().fill(Color.secondary.opacity(0.12))
-                @unknown default:
-                    Rectangle().fill(Color.secondary.opacity(0.12))
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 172)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-    }
 
     private func feedPanelPageCount(for project: FeedProjectSummary) -> Int {
         1 + (feedProjectDetailsById[project.id]?.plans?.count ?? 0)
@@ -796,16 +620,7 @@ struct CreatorPostedFeedView: View {
 
     private func rightRail(project: FeedProjectSummary) -> some View {
         VStack(spacing: 16) {
-            if !isCurrentUserVideo {
-                Image(systemName: project.isSupportedByCurrentUser ? "checkmark" : "suit.heart.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .frame(width: 40, height: 40)
-                    .background(project.isSupportedByCurrentUser ? Color.green.opacity(0.9) : Color.pink.opacity(0.9))
-                    .foregroundStyle(.white)
-                    .clipShape(Circle())
-            }
-
-            metricButton(
+            FeedMetricButton(
                 icon: project.isLikedByCurrentUser ? "heart.fill" : "heart",
                 value: project.likes,
                 isActive: project.isLikedByCurrentUser
@@ -822,12 +637,12 @@ struct CreatorPostedFeedView: View {
                     await loadCommentsForCurrentVideo()
                 }
             } label: {
-                metricView(icon: "text.bubble.fill", value: project.comments)
+                FeedMetricView(icon: "text.bubble.fill", value: project.comments)
             }
             Button {
                 showShare = true
             } label: {
-                metricView(icon: "square.and.arrow.up.fill", value: 0, labelOverride: "Share")
+                FeedMetricView(icon: "square.and.arrow.up.fill", value: 0, labelOverride: "Share")
             }
             Button {
                 showActions = true
@@ -844,81 +659,28 @@ struct CreatorPostedFeedView: View {
                     selectedCreatorRoute = CreatorRoute(id: project.creatorId)
                 }
             } label: {
-                feedCreatorAvatar(urlString: project.creatorAvatarURL, username: project.username)
+                FeedCreatorAvatarView(urlString: project.creatorAvatarURL, username: project.username)
             }
             .buttonStyle(.plain)
         }
         .foregroundStyle(.white)
     }
 
-    private func feedCreatorAvatar(urlString: String?, username: String) -> some View {
-        let normalized = urlString?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let validURL = (normalized?.isEmpty == false) ? URL(string: normalized ?? "") : nil
-        return Group {
-            if let url = validURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    default:
-                        Circle().fill(Color.white.opacity(0.2))
-                    }
-                }
-            } else {
-                Circle().fill(Color.white.opacity(0.2))
+    private func projectPrimaryAction(project: FeedProjectSummary) -> some View {
+        let isNeutralState = isCurrentUserVideo
+        return FeedPrimaryActionButton(
+            title: isNeutralState ? "Project" : (project.isSupportedByCurrentUser ? "Supported" : "Support"),
+            isChecked: project.isSupportedByCurrentUser,
+            isNeutral: isNeutralState
+        ) {
+            if !showFeedProjectPanel {
+                openPostedFeedProjectPanel(for: project)
             }
-        }
-        .frame(width: 38, height: 38)
-        .overlay {
-            if validURL == nil {
-                Text(String(username.prefix(1)).uppercased())
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
-            }
-        }
-        .clipShape(Circle())
-    }
-
-    private func metricButton(icon: String, value: Int, isActive: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            metricView(icon: icon, value: value)
-        }
-        .foregroundStyle(isActive ? Color.pink : Color.white)
-    }
-
-    private func metricView(icon: String, value: Int, labelOverride: String? = nil) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.title2)
-            Text(labelOverride ?? shortCount(value))
-                .font(.caption)
         }
     }
 
     private func fundingMeta(project: FeedProjectSummary) -> some View {
-        let percentRaw = Double(project.fundedAmountMinor) / Double(project.goalAmountMinor)
-        let percent = Int(percentRaw * 100)
-
-        return VStack(alignment: .leading, spacing: 6) {
-            Text("\(project.remainingDays)d left · From \(formatJPY(project.minPlanPriceMinor))")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.9))
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.white.opacity(0.2))
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(fundingProgressTint(percentRaw))
-                        .frame(width: geo.size.width * CGFloat(min(percentRaw, 1)))
-                }
-            }
-            .frame(height: 10)
-
-            Text("\(percent)% (\(formatJPY(project.fundedAmountMinor)) / \(formatJPY(project.goalAmountMinor)))")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.85))
-        }
-        .frame(maxWidth: 280)
+        FeedFundingMetaView(project: project)
     }
 
     private var sortedComments: [FeedComment] {
@@ -1319,12 +1081,133 @@ struct CreatorPostedFeedView: View {
         }
     }
 
+    private var videoActionsSheet: some View {
+        VStack(spacing: 12) {
+            Capsule()
+                .fill(Color.secondary.opacity(0.45))
+                .frame(width: 56, height: 5)
+                .padding(.top, 8)
+
+            Text("Video actions")
+                .font(.headline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+
+            if isCurrentUserVideo {
+                FeedActionSheetRow(
+                    icon: "chart.bar.xaxis",
+                    title: "Insights",
+                    subtitle: "Coming soon"
+                ) {
+                    showActions = false
+                }
+                FeedActionSheetRow(
+                    icon: "trash",
+                    title: "Delete video",
+                    subtitle: "This action cannot be undone",
+                    destructive: true
+                ) {
+                    showActions = false
+                    Task {
+                        await deleteCurrentVideo()
+                    }
+                }
+            } else {
+                FeedActionSheetRow(icon: "eye.slash", title: "Not interested") {
+                    showActions = false
+                }
+                FeedActionSheetRow(icon: "flag", title: "Report", destructive: true) {
+                    showActions = false
+                }
+            }
+
+            Button("Cancel") {
+                showActions = false
+            }
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.white.opacity(0.72))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.top, 4)
+            .padding(.horizontal, 16)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.bottom, 12)
+        .presentationDetents([.height(isCurrentUserVideo ? 320 : 300)])
+        .presentationDragIndicator(.hidden)
+        .presentationBackground(.ultraThinMaterial)
+    }
+
+    private var shareActionsSheet: some View {
+        VStack(spacing: 12) {
+            Capsule()
+                .fill(Color.secondary.opacity(0.45))
+                .frame(width: 56, height: 5)
+                .padding(.top, 8)
+
+            Text("Share")
+                .font(.headline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+
+            FeedActionSheetRow(icon: "link", title: "Copy link") {
+                showShare = false
+            }
+
+            Button("Cancel") {
+                showShare = false
+            }
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.white.opacity(0.72))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.top, 4)
+            .padding(.horizontal, 16)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.bottom, 12)
+        .presentationDetents([.height(220)])
+        .presentationDragIndicator(.hidden)
+        .presentationBackground(.ultraThinMaterial)
+    }
+
     private func prefetchPostedFeedProjectDetails(around index: Int) async {
         guard !feedVideos.isEmpty else { return }
         let indices = [index - 1, index, index + 1].filter { $0 >= 0 && $0 < feedVideos.count }
-        for _ in indices {
-            await loadPostedFeedProjectDetail(for: currentProject, forceRefresh: false)
+        for idx in indices {
+            let videoId = feedVideos[idx].video_id
+            let context = resolvedProjectContext(for: videoId)
+            await loadPostedFeedProjectDetail(for: context, forceRefresh: false)
         }
+    }
+
+    private func resolvedProjectContext(for videoId: UUID) -> FeedProjectSummary {
+        let resolvedCreatorId = isCurrentUserVideo ? (creatorProfileOverride?.creator_user_id ?? projectContext.creatorId) : projectContext.creatorId
+        let resolvedUsername = isCurrentUserVideo ? (creatorProfileOverride?.username ?? projectContext.username) : projectContext.username
+        let resolvedAvatarURL = isCurrentUserVideo ? (creatorProfileOverride?.avatar_url ?? projectContext.creatorAvatarURL) : projectContext.creatorAvatarURL
+        let engagement = engagementByVideoId[videoId]
+        return FeedProjectSummary(
+            id: projectContext.id,
+            creatorId: resolvedCreatorId,
+            username: resolvedUsername,
+            creatorAvatarURL: resolvedAvatarURL,
+            caption: projectContext.caption,
+            videoId: videoId,
+            playbackURL: projectContext.playbackURL,
+            thumbnailURL: projectContext.thumbnailURL,
+            minPlanPriceMinor: projectContext.minPlanPriceMinor,
+            goalAmountMinor: projectContext.goalAmountMinor,
+            fundedAmountMinor: projectContext.fundedAmountMinor,
+            remainingDays: projectContext.remainingDays,
+            likes: engagement?.likes ?? projectContext.likes,
+            comments: engagement?.comments ?? projectContext.comments,
+            isLikedByCurrentUser: engagement?.is_liked_by_current_user ?? projectContext.isLikedByCurrentUser,
+            isSupportedByCurrentUser: projectContext.isSupportedByCurrentUser
+        )
     }
 
     private func deleteCurrentVideo() async {
@@ -1544,45 +1427,6 @@ struct CreatorPostedFeedView: View {
         guard let index = list.firstIndex(where: { $0.id == updated.id }) else { return }
         list[index] = updated
         commentsByVideoId[videoId] = list
-    }
-
-    private func formatJPY(_ amountMinor: Int) -> String {
-        NumberFormatterProvider.jpy.string(from: NSNumber(value: Double(amountMinor))) ?? "JPY \(amountMinor)"
-    }
-
-    private func shortCount(_ value: Int) -> String {
-        if value >= 1000 {
-            return String(format: "%.1fK", Double(value) / 1000.0)
-        }
-        return "\(value)"
-    }
-
-    private func formatDeliveryDate(from iso8601: String) -> String {
-        if let date = parseISO8601Date(iso8601) {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .none
-            return formatter.string(from: date)
-        }
-        return iso8601
-    }
-
-    private func formatProjectCreatedDate(from iso8601: String) -> String {
-        if let date = parseISO8601Date(iso8601) {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .none
-            return formatter.string(from: date)
-        }
-        return iso8601
-    }
-
-    private func parseISO8601Date(_ value: String) -> Date? {
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = parser.date(from: value) { return date }
-        parser.formatOptions = [.withInternetDateTime]
-        return parser.date(from: value)
     }
 
     private var postedFeedCommentBar: some View {

@@ -3,6 +3,7 @@ import AVFoundation
 import UIKit
 
 let appBottomBarHeight: CGFloat = 50
+let feedPanelTopPadding: CGFloat = 132
 
 enum FeedSwipeAction {
     case openPanel
@@ -112,6 +113,411 @@ struct FeedPageIndicatorDots: View {
             }
         }
     }
+}
+
+struct FeedPrimaryActionButton: View {
+    let title: String
+    let isChecked: Bool
+    let isNeutral: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if !isNeutral && isChecked {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                }
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .fill(backgroundColor)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+
+    private var foregroundColor: Color {
+        if isNeutral || isChecked {
+            return Color.black.opacity(0.9)
+        }
+        return Color.white
+    }
+
+    private var backgroundColor: Color {
+        if isNeutral || isChecked {
+            return Color.white.opacity(0.72)
+        }
+        return Color.green.opacity(0.92)
+    }
+}
+
+struct FeedMetricButton: View {
+    let icon: String
+    let value: Int
+    let isActive: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            FeedMetricView(icon: icon, value: value)
+        }
+        .foregroundStyle(isActive ? Color.pink : Color.white)
+    }
+}
+
+struct FeedMetricView: View {
+    let icon: String
+    let value: Int
+    let labelOverride: String?
+
+    init(icon: String, value: Int, labelOverride: String? = nil) {
+        self.icon = icon
+        self.value = value
+        self.labelOverride = labelOverride
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.title2)
+            Text(labelOverride ?? feedShortCount(value))
+                .font(.caption)
+        }
+    }
+}
+
+struct FeedCreatorAvatarView: View {
+    let urlString: String?
+    let username: String
+
+    var body: some View {
+        let normalized = urlString?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let validURL = (normalized?.isEmpty == false) ? URL(string: normalized ?? "") : nil
+        return Group {
+            if let url = validURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    default:
+                        Circle().fill(Color.white.opacity(0.2))
+                    }
+                }
+            } else {
+                Circle().fill(Color.white.opacity(0.2))
+            }
+        }
+        .frame(width: 38, height: 38)
+        .overlay {
+            if validURL == nil {
+                Text(String(username.prefix(1)).uppercased())
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .clipShape(Circle())
+    }
+}
+
+struct FeedFundingMetaView: View {
+    let project: FeedProjectSummary
+
+    var body: some View {
+        let percentRaw = Double(project.fundedAmountMinor) / Double(project.goalAmountMinor)
+        let percent = Int(percentRaw * 100)
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("\(project.remainingDays)d left · From \(feedFormatJPY(project.minPlanPriceMinor))")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.9))
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.white.opacity(0.2))
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(fundingProgressTint(percentRaw))
+                        .frame(width: geo.size.width * CGFloat(min(percentRaw, 1)))
+                }
+            }
+            .frame(height: 10)
+
+            Text("\(percent)% (\(feedFormatJPY(project.fundedAmountMinor)) / \(feedFormatJPY(project.goalAmountMinor)))")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.85))
+        }
+        .frame(maxWidth: 280)
+    }
+}
+
+struct FeedPanelPageHeaderView: View {
+    let currentPage: Int
+    let plansCount: Int
+    let totalCount: Int
+
+    var body: some View {
+        HStack {
+            Text(currentPage == 0 ? "Project Overview" : "Plan \(currentPage) / \(plansCount)")
+                .font(.headline)
+                .foregroundStyle(.white)
+            Spacer()
+            Text("\(currentPage + 1) / \(totalCount)")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.82))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.white.opacity(0.14))
+                .clipShape(Capsule())
+        }
+    }
+}
+
+struct FeedProjectOverviewPanelContentView: View {
+    let project: FeedProjectSummary
+    let detail: MyProjectResult?
+    let isLoading: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let detail {
+                FeedProjectOverviewImageView(detail: detail, fallbackThumbnailURL: project.thumbnailURL)
+                Text(detail.title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                if let subtitle = detail.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+                Text((detail.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (detail.description ?? "") : "-")
+                    .font(.footnote)
+                    .foregroundStyle(.white)
+                    .padding(.top, 4)
+                Text("Funded: \(feedFormatJPY(detail.funded_amount_minor)) / \(feedFormatJPY(detail.goal_amount_minor))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Supporters: \(detail.supporter_count)")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Period: \(feedFormatDate(detail.created_at)) ~ \(feedFormatDate(detail.deadline_at))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Status: \(detail.status)")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.88))
+            } else if isLoading {
+                ProgressView("Loading project...")
+                    .tint(.white)
+                    .foregroundStyle(.white.opacity(0.82))
+            } else {
+                if let thumbnail = project.thumbnailURL, let url = URL(string: thumbnail) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .empty:
+                            Rectangle().fill(Color.secondary.opacity(0.12))
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        case .failure:
+                            Rectangle().fill(Color.secondary.opacity(0.12))
+                        @unknown default:
+                            Rectangle().fill(Color.secondary.opacity(0.12))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 172)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                Text(project.caption)
+                    .font(.footnote)
+                    .foregroundStyle(.white)
+                Text("-")
+                    .font(.footnote)
+                    .foregroundStyle(.white)
+                    .padding(.top, 4)
+                Text("Funded: \(feedFormatJPY(project.fundedAmountMinor))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Supporters: -")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Period: -")
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.88))
+            }
+        }
+    }
+}
+
+struct FeedPlanPanelContentView: View {
+    let plan: ProjectPlanResult
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let raw = plan.image_url, let url = URL(string: raw) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        Rectangle().fill(Color.secondary.opacity(0.12))
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        Rectangle().fill(Color.secondary.opacity(0.12))
+                    @unknown default:
+                        Rectangle().fill(Color.secondary.opacity(0.12))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 148)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            Text(plan.name)
+                .font(.headline)
+                .foregroundStyle(.white)
+            Text("\(plan.price_minor.formatted()) \(plan.currency)")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.green)
+            Text(plan.reward_summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : plan.reward_summary)
+                .font(.subheadline)
+                .foregroundStyle(.white)
+            Text((plan.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (plan.description ?? "") : "-")
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.84))
+                .padding(.top, 4)
+        }
+    }
+}
+
+struct FeedProjectOverviewImageView: View {
+    let detail: MyProjectResult
+    let fallbackThumbnailURL: String?
+
+    var body: some View {
+        let detailImage = (detail.image_urls?.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+            ?? detail.image_url
+        if let raw = detailImage, let url = URL(string: raw) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .empty:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .failure:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                @unknown default:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 172)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        } else if let thumb = fallbackThumbnailURL, let url = URL(string: thumb) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .empty:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .failure:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                @unknown default:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 172)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+}
+
+struct FeedActionSheetRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String?
+    let destructive: Bool
+    let action: () -> Void
+
+    init(
+        icon: String,
+        title: String,
+        subtitle: String? = nil,
+        destructive: Bool = false,
+        action: @escaping () -> Void
+    ) {
+        self.icon = icon
+        self.title = title
+        self.subtitle = subtitle
+        self.destructive = destructive
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(destructive ? Color.red : Color.primary)
+                    .frame(width: 28, height: 28)
+                    .background((destructive ? Color.red : Color.primary).opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                VStack(alignment: .leading, spacing: subtitle == nil ? 0 : 2) {
+                    Text(title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(destructive ? Color.red : Color.primary)
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color.white.opacity(0.72))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 16)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+func feedFormatJPY(_ amountMinor: Int) -> String {
+    NumberFormatterProvider.jpy.string(from: NSNumber(value: Double(amountMinor))) ?? "JPY \(amountMinor)"
+}
+
+func feedShortCount(_ value: Int) -> String {
+    if value >= 1000 {
+        return String(format: "%.1fK", Double(value) / 1000.0)
+    }
+    return "\(value)"
+}
+
+func feedFormatDate(_ iso8601: String) -> String {
+    guard let date = feedParseISO8601Date(iso8601) else { return iso8601 }
+    let formatter = DateFormatter()
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .none
+    return formatter.string(from: date)
+}
+
+func feedParseISO8601Date(_ value: String) -> Date? {
+    let parser = ISO8601DateFormatter()
+    parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = parser.date(from: value) { return date }
+    parser.formatOptions = [.withInternetDateTime]
+    return parser.date(from: value)
 }
 
 struct InteractiveHorizontalPager<Page: View>: View {

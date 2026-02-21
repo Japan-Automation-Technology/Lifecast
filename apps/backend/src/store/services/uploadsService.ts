@@ -722,7 +722,7 @@ export class UploadsService {
       }
 
       const row = existing.rows[0];
-      if (row.creator_user_id !== creatorUserId) {
+      if (row.creator_user_id.toLowerCase() !== creatorUserId.toLowerCase()) {
         await client.query("rollback");
         return "forbidden" as const;
       }

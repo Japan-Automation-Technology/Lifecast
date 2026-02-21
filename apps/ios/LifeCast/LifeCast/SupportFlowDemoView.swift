@@ -202,21 +202,11 @@ struct SupportFlowDemoView: View {
         .sheet(isPresented: $showComments) {
             commentsSheet
         }
-        .confirmationDialog("Share", isPresented: $showShare, titleVisibility: .visible) {
-            Button("Export video") {}
-            Button("Copy link") {}
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Choose one action")
+        .sheet(isPresented: $showShare) {
+            homeShareActionsSheet
         }
-        .confirmationDialog("Video options", isPresented: $showFeedActions, titleVisibility: .visible) {
-            Button("Not recommend like this") {
-                errorText = "Preference saved."
-            }
-            Button("Report", role: .destructive) {
-                errorText = "Thanks. We received your report."
-            }
-            Button("Cancel", role: .cancel) {}
+        .sheet(isPresented: $showFeedActions) {
+            homeVideoOptionsSheet
         }
         .confirmationDialog("Discard changes?", isPresented: $showDiscardProjectEditDialog, titleVisibility: .visible) {
             Button("Discard", role: .destructive) {
@@ -499,30 +489,16 @@ struct SupportFlowDemoView: View {
             VStack(spacing: 8) {
                 HStack(alignment: .bottom) {
                     VStack(alignment: .leading, spacing: 10) {
-                        Button {
+                        FeedPrimaryActionButton(
+                            title: project.isSupportedByCurrentUser ? "Supported" : "Support",
+                            isChecked: project.isSupportedByCurrentUser,
+                            isNeutral: false
+                        ) {
                             if project.isSupportedByCurrentUser { return }
                             Task {
                                 await presentSupportFlow(for: project)
                             }
-                        } label: {
-                            HStack(spacing: 6) {
-                                if project.isSupportedByCurrentUser {
-                                    Image(systemName: "checkmark")
-                                        .font(.caption.weight(.bold))
-                                }
-                                Text(project.isSupportedByCurrentUser ? "Supported" : "Support")
-                                    .font(.subheadline.weight(.semibold))
-                            }
-                            .foregroundStyle(project.isSupportedByCurrentUser ? Color.black.opacity(0.9) : Color.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(
-                                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                                    .fill(project.isSupportedByCurrentUser ? Color.white.opacity(0.72) : Color.green.opacity(0.92))
-                            )
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(project.isSupportedByCurrentUser ? "Supported" : "Support")
 
                         Button("@\(project.username)") {
                             if project.creatorId == myProfile?.creator_user_id {
@@ -686,15 +662,15 @@ struct SupportFlowDemoView: View {
             ) { idx in
                 let tappedPlan = idx > 0 ? plans[idx - 1] : nil
                 VStack(alignment: .leading, spacing: 12) {
-                    panelPageHeader(
+                    FeedPanelPageHeaderView(
                         currentPage: idx,
                         plansCount: plans.count,
                         totalCount: homeFeedPanelPageCount(for: project)
                     )
                     if idx == 0 {
-                        homeProjectOverviewPanelContent(project: project, detail: cachedDetail, isLoading: isLoading)
+                        FeedProjectOverviewPanelContentView(project: project, detail: cachedDetail, isLoading: isLoading)
                     } else {
-                        homePlanPanelContent(plan: plans[idx - 1])
+                        FeedPlanPanelContentView(plan: plans[idx - 1])
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -728,7 +704,7 @@ struct SupportFlowDemoView: View {
 
         }
         .padding(.horizontal, 14)
-        .padding(.top, 132)
+        .padding(.top, feedPanelTopPadding)
         .padding(.bottom, 18)
         .frame(width: width, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .topLeading)
@@ -736,171 +712,6 @@ struct SupportFlowDemoView: View {
         .background(Color.black.opacity(0.86))
     }
 
-    private func panelPageHeader(currentPage: Int, plansCount: Int, totalCount: Int) -> some View {
-        HStack {
-            Text(currentPage == 0 ? "Project Overview" : "Plan \(currentPage) / \(plansCount)")
-                .font(.headline)
-                .foregroundStyle(.white)
-            Spacer()
-            Text("\(currentPage + 1) / \(totalCount)")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.82))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.white.opacity(0.14))
-                .clipShape(Capsule())
-        }
-    }
-
-    @ViewBuilder
-    private func homeProjectOverviewPanelContent(project: FeedProjectSummary, detail: MyProjectResult?, isLoading: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let detail {
-                homeOverviewImage(detail: detail, fallbackThumbnailURL: project.thumbnailURL)
-                Text(detail.title)
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                if let subtitle = detail.subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.9))
-                }
-                Text((detail.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (detail.description ?? "") : "-")
-                    .font(.footnote)
-                    .foregroundStyle(.white)
-                    .padding(.top, 4)
-                Text("Funded: \(formatJPY(detail.funded_amount_minor)) / \(formatJPY(detail.goal_amount_minor))")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Supporters: \(detail.supporter_count)")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Period: \(formatProjectCreatedDate(from: detail.created_at)) ~ \(formatDeliveryDate(from: detail.deadline_at))")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Status: \(detail.status)")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-            } else if isLoading {
-                ProgressView("Loading project...")
-                    .tint(.white)
-                    .foregroundStyle(.white.opacity(0.82))
-            } else {
-                if let thumbnail = project.thumbnailURL, let thumbnailURL = URL(string: thumbnail) {
-                    AsyncImage(url: thumbnailURL) { phase in
-                        switch phase {
-                        case .empty:
-                            Rectangle().fill(Color.secondary.opacity(0.12))
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        case .failure:
-                            Rectangle().fill(Color.secondary.opacity(0.12))
-                        @unknown default:
-                            Rectangle().fill(Color.secondary.opacity(0.12))
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 172)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                Text(project.caption)
-                    .font(.footnote)
-                    .foregroundStyle(.white)
-                Text("-")
-                    .font(.footnote)
-                    .foregroundStyle(.white)
-                    .padding(.top, 4)
-                Text("Funded: \(formatJPY(project.fundedAmountMinor))")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Supporters: -")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Period: -")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.88))
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func homePlanPanelContent(plan: ProjectPlanResult) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let raw = plan.image_url, let url = URL(string: raw) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .empty:
-                        Rectangle().fill(Color.secondary.opacity(0.12))
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    case .failure:
-                        Rectangle().fill(Color.secondary.opacity(0.12))
-                    @unknown default:
-                        Rectangle().fill(Color.secondary.opacity(0.12))
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 148)
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            Text(plan.name)
-                .font(.headline)
-                .foregroundStyle(.white)
-            Text("\(plan.price_minor.formatted()) \(plan.currency)")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.green)
-            Text(plan.reward_summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : plan.reward_summary)
-                .font(.subheadline)
-                .foregroundStyle(.white)
-            Text((plan.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (plan.description ?? "") : "-")
-                .font(.footnote)
-                .foregroundStyle(.white.opacity(0.84))
-                .padding(.top, 4)
-        }
-    }
-
-    @ViewBuilder
-    private func homeOverviewImage(detail: MyProjectResult, fallbackThumbnailURL: String?) -> some View {
-        let detailImage = (detail.image_urls?.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
-            ?? detail.image_url
-        if let raw = detailImage, let url = URL(string: raw) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .empty:
-                    Rectangle().fill(Color.secondary.opacity(0.12))
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .failure:
-                    Rectangle().fill(Color.secondary.opacity(0.12))
-                @unknown default:
-                    Rectangle().fill(Color.secondary.opacity(0.12))
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 172)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        } else if let thumb = fallbackThumbnailURL, let url = URL(string: thumb) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .empty:
-                    Rectangle().fill(Color.secondary.opacity(0.12))
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .failure:
-                    Rectangle().fill(Color.secondary.opacity(0.12))
-                @unknown default:
-                    Rectangle().fill(Color.secondary.opacity(0.12))
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 172)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-    }
 
     private func homeFeedPanelPageCount(for project: FeedProjectSummary) -> Int {
         1 + (feedProjectDetailsById[project.id]?.plans?.count ?? 0)
@@ -912,7 +723,7 @@ struct SupportFlowDemoView: View {
 
     private func rightRail(project: FeedProjectSummary) -> some View {
         VStack(spacing: 16) {
-            metricButton(
+            FeedMetricButton(
                 icon: project.isLikedByCurrentUser ? "heart.fill" : "heart",
                 value: project.likes,
                 isActive: project.isLikedByCurrentUser
@@ -929,12 +740,12 @@ struct SupportFlowDemoView: View {
                     await loadCommentsForCurrentVideo()
                 }
             } label: {
-                metricView(icon: "text.bubble.fill", value: project.comments)
+                FeedMetricView(icon: "text.bubble.fill", value: project.comments)
             }
             Button {
                 showShare = true
             } label: {
-                metricView(icon: "square.and.arrow.up.fill", value: 0, labelOverride: "Share")
+                FeedMetricView(icon: "square.and.arrow.up.fill", value: 0, labelOverride: "Share")
             }
             Button {
                 showFeedActions = true
@@ -950,80 +761,90 @@ struct SupportFlowDemoView: View {
                     selectedCreatorRoute = CreatorRoute(id: project.creatorId)
                 }
             } label: {
-                feedCreatorAvatar(urlString: project.creatorAvatarURL, username: project.username)
+                FeedCreatorAvatarView(urlString: project.creatorAvatarURL, username: project.username)
             }
             .buttonStyle(.plain)
         }
         .foregroundStyle(.white)
     }
 
-    private func feedCreatorAvatar(urlString: String?, username: String) -> some View {
-        Group {
-            if let avatar = urlString, let url = URL(string: avatar) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    default:
-                        Circle().fill(Color.white.opacity(0.2))
-                    }
-                }
-            } else {
-                Circle().fill(Color.white.opacity(0.2))
+    private var homeShareActionsSheet: some View {
+        VStack(spacing: 12) {
+            Capsule()
+                .fill(Color.secondary.opacity(0.45))
+                .frame(width: 56, height: 5)
+                .padding(.top, 8)
+
+            Text("Share")
+                .font(.headline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+
+            FeedActionSheetRow(icon: "link", title: "Copy link") {
+                showShare = false
             }
-        }
-        .frame(width: 38, height: 38)
-        .overlay {
-            if urlString == nil {
-                Text(String(username.prefix(1)).uppercased())
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
+
+            Button("Cancel") {
+                showShare = false
             }
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.white.opacity(0.72))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.top, 4)
+            .padding(.horizontal, 16)
+
+            Spacer(minLength: 0)
         }
-        .clipShape(Circle())
+        .padding(.bottom, 12)
+        .presentationDetents([.height(220)])
+        .presentationDragIndicator(.hidden)
+        .presentationBackground(.ultraThinMaterial)
     }
 
-    private func metricButton(icon: String, value: Int, isActive: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            metricView(icon: icon, value: value)
-        }
-        .foregroundStyle(isActive ? Color.pink : Color.white)
-    }
+    private var homeVideoOptionsSheet: some View {
+        VStack(spacing: 12) {
+            Capsule()
+                .fill(Color.secondary.opacity(0.45))
+                .frame(width: 56, height: 5)
+                .padding(.top, 8)
 
-    private func metricView(icon: String, value: Int, labelOverride: String? = nil) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.title2)
-            Text(labelOverride ?? shortCount(value))
-                .font(.caption)
+            Text("Video options")
+                .font(.headline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+
+            FeedActionSheetRow(icon: "eye.slash", title: "Not recommend like this") {
+                showFeedActions = false
+                errorText = "Preference saved."
+            }
+            FeedActionSheetRow(icon: "flag", title: "Report", destructive: true) {
+                showFeedActions = false
+                errorText = "Thanks. We received your report."
+            }
+
+            Button("Cancel") {
+                showFeedActions = false
+            }
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.white.opacity(0.72))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.top, 4)
+            .padding(.horizontal, 16)
+
+            Spacer(minLength: 0)
         }
+        .padding(.bottom, 12)
+        .presentationDetents([.height(300)])
+        .presentationDragIndicator(.hidden)
+        .presentationBackground(.ultraThinMaterial)
     }
 
     private func fundingMeta(project: FeedProjectSummary) -> some View {
-        let percentRaw = Double(project.fundedAmountMinor) / Double(project.goalAmountMinor)
-        let percent = Int(percentRaw * 100)
-
-        return VStack(alignment: .leading, spacing: 6) {
-            Text("\(project.remainingDays)d left · From \(formatJPY(project.minPlanPriceMinor))")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.9))
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.white.opacity(0.2))
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(fundingProgressTint(percentRaw))
-                        .frame(width: geo.size.width * CGFloat(min(percentRaw, 1)))
-                }
-            }
-            .frame(height: 10)
-
-            Text("\(percent)% (\(formatJPY(project.fundedAmountMinor)) / \(formatJPY(project.goalAmountMinor)))")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.85))
-
-        }
-        .frame(maxWidth: 280)
+        FeedFundingMetaView(project: project)
     }
 
     private var commentsSheet: some View {
@@ -1188,7 +1009,7 @@ struct SupportFlowDemoView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(plan.name)
                                 .font(.subheadline.bold())
-                            Text(formatJPY(plan.priceMinor))
+                            Text(feedFormatJPY(plan.priceMinor))
                                 .font(.subheadline)
                             Text(plan.rewardSummary)
                                 .font(.caption)
@@ -1210,12 +1031,12 @@ struct SupportFlowDemoView: View {
             Text("2. Confirm")
                 .font(.headline)
 
-            cardRow(title: "Goal", value: formatJPY((supportTargetProject ?? liveSupportProject)?.goal_amount_minor ?? 0))
-            cardRow(title: "Delivery", value: (supportTargetProject ?? liveSupportProject).map { formatDeliveryDate(from: $0.deadline_at) } ?? "-")
+            cardRow(title: "Goal", value: feedFormatJPY((supportTargetProject ?? liveSupportProject)?.goal_amount_minor ?? 0))
+            cardRow(title: "Delivery", value: (supportTargetProject ?? liveSupportProject).map { feedFormatDate($0.deadline_at) } ?? "-")
             cardRow(title: "Prototype", value: "Available")
 
             if let plan = selectedPlan {
-                cardRow(title: "Plan", value: "\(plan.name) / \(formatJPY(plan.priceMinor))")
+                cardRow(title: "Plan", value: "\(plan.name) / \(feedFormatJPY(plan.priceMinor))")
             }
 
             Button("Go to checkout") {
@@ -2221,40 +2042,6 @@ struct SupportFlowDemoView: View {
         }
     }
 
-    private func formatJPY(_ amountMinor: Int) -> String {
-        NumberFormatterProvider.jpy.string(from: NSNumber(value: Double(amountMinor))) ?? "JPY \(amountMinor)"
-    }
-
-    private func shortCount(_ value: Int) -> String {
-        if value >= 1000 {
-            return String(format: "%.1fK", Double(value) / 1000.0)
-        }
-        return "\(value)"
-    }
-
-    private func formatDeliveryDate(from iso8601: String) -> String {
-        guard let date = parseISO8601Date(iso8601) else { return iso8601 }
-        let out = DateFormatter()
-        out.dateStyle = .medium
-        out.timeStyle = .none
-        return out.string(from: date)
-    }
-
-    private func formatProjectCreatedDate(from iso8601: String) -> String {
-        guard let date = parseISO8601Date(iso8601) else { return iso8601 }
-        let out = DateFormatter()
-        out.dateStyle = .medium
-        out.timeStyle = .none
-        return out.string(from: date)
-    }
-
-    private func parseISO8601Date(_ value: String) -> Date? {
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = parser.date(from: value) { return date }
-        parser.formatOptions = [.withInternetDateTime]
-        return parser.date(from: value)
-    }
 }
 
 private extension Array {
