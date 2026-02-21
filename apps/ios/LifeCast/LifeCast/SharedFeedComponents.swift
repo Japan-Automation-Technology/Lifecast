@@ -148,7 +148,7 @@ struct InteractiveHorizontalPager<Page: View>: View {
                 }
             }
             .offset(x: (-CGFloat(currentIndex) * width) + dragTranslation)
-            .gesture(
+            .simultaneousGesture(
                 DragGesture(minimumDistance: 6)
                     .onChanged { value in
                         let dx = value.translation.width
@@ -214,7 +214,7 @@ struct InteractiveHorizontalPager<Page: View>: View {
                             isHorizontalDragging = false
                         }
                     }
-            )
+            , including: .gesture)
         }
         .clipped()
     }

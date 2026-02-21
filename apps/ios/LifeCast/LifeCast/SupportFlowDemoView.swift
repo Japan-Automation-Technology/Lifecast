@@ -615,8 +615,13 @@ struct SupportFlowDemoView: View {
                     homeFeedPanelDragOffsetX = max(0, dx)
                 }
             ) { idx in
+                let tappedPlan = idx > 0 ? plans[idx - 1] : nil
                 VStack(alignment: .leading, spacing: 12) {
-                    panelPageHeader(currentPage: idx, plansCount: plans.count, totalCount: homeFeedPanelPageCount(for: project))
+                    panelPageHeader(
+                        currentPage: idx,
+                        plansCount: plans.count,
+                        totalCount: homeFeedPanelPageCount(for: project)
+                    )
                     if idx == 0 {
                         homeProjectOverviewPanelContent(project: project, detail: cachedDetail, isLoading: isLoading)
                     } else {
@@ -624,6 +629,17 @@ struct SupportFlowDemoView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    Task {
+                        await presentSupportFlow(
+                            for: project,
+                            prefetchedDetail: cachedDetail,
+                            preferredPlanId: tappedPlan?.id,
+                            startAtConfirm: tappedPlan != nil
+                        )
+                    }
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
@@ -1404,13 +1420,38 @@ struct SupportFlowDemoView: View {
         syncHomeFeedPlayer()
     }
 
-    private func presentSupportFlow(for project: FeedProjectSummary) async {
+    private func presentSupportFlow(
+        for project: FeedProjectSummary,
+        prefetchedDetail: MyProjectResult? = nil,
+        preferredPlanId: UUID? = nil,
+        startAtConfirm: Bool = false
+    ) async {
         guard isAuthenticated else {
             await MainActor.run {
                 showAuthSheet = true
             }
             return
         }
+
+        if let detail = prefetchedDetail,
+           let plans = detail.plans,
+           !plans.isEmpty {
+            let chosen = plans.first(where: { $0.id == preferredPlanId }) ?? plans[0]
+            await MainActor.run {
+                supportEntryPoint = .feed
+                supportTargetProject = detail
+                selectedPlan = SupportPlan(
+                    id: chosen.id,
+                    name: chosen.name,
+                    priceMinor: chosen.price_minor,
+                    rewardSummary: chosen.reward_summary
+                )
+                supportStep = startAtConfirm ? .confirm : .planSelect
+                showSupportFlow = true
+            }
+            return
+        }
+
         do {
             let page = try await client.getCreatorPage(creatorUserId: project.creatorId)
             guard let target = page.project, let plans = target.plans, !plans.isEmpty else {
@@ -1422,13 +1463,14 @@ struct SupportFlowDemoView: View {
             await MainActor.run {
                 supportEntryPoint = .feed
                 supportTargetProject = target
+                let chosen = plans.first(where: { $0.id == preferredPlanId }) ?? plans[0]
                 selectedPlan = SupportPlan(
-                    id: plans[0].id,
-                    name: plans[0].name,
-                    priceMinor: plans[0].price_minor,
-                    rewardSummary: plans[0].reward_summary
+                    id: chosen.id,
+                    name: chosen.name,
+                    priceMinor: chosen.price_minor,
+                    rewardSummary: chosen.reward_summary
                 )
-                supportStep = .planSelect
+                supportStep = startAtConfirm ? .confirm : .planSelect
                 showSupportFlow = true
             }
         } catch {
