@@ -12,6 +12,8 @@ struct MeTabView: View {
     let onRefreshProfile: () -> Void
     let onRefreshVideos: () -> Void
     let onProjectChanged: () -> Void
+    let selectedIndexOverride: Int
+    let selectedIndexOverrideNonce: Int
     let onProjectEditUnsavedChanged: (Bool) -> Void
     let projectEditDiscardRequest: Int
 
@@ -214,6 +216,12 @@ struct MeTabView: View {
                     mePinnedHeader
                 }
             }
+        }
+        .onAppear {
+            selectedIndex = selectedIndexOverride
+        }
+        .onChange(of: selectedIndexOverrideNonce) { _, _ in
+            requestMeAction(.switchSection(selectedIndexOverride))
         }
         .confirmationDialog("Discard changes?", isPresented: $showDiscardProjectEditDialog, titleVisibility: .visible) {
             Button("Discard", role: .destructive) {

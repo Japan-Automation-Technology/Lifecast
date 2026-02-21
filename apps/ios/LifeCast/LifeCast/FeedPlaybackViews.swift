@@ -140,6 +140,8 @@ struct CreatorPostedFeedView: View {
     @State private var postedPauseIndicatorToken = UUID()
     @State private var isPostedFeedEdgeBoosting = false
     @State private var showFeedProjectPanel = false
+    @State private var feedPanelPageIndex = 0
+    @State private var postedFeedPanelDragOffsetX: CGFloat = 0
     @State private var feedProjectDetailsById: [UUID: MyProjectResult] = [:]
     @State private var feedProjectDetailLoadingIds: Set<UUID> = []
     @State private var feedProjectDetailErrorsById: [UUID: String] = [:]
@@ -187,6 +189,7 @@ struct CreatorPostedFeedView: View {
                     items: feedVideos,
                     currentIndex: $currentIndex,
                     verticalDragDisabled: false,
+                    allowHorizontalChildDrag: showFeedProjectPanel,
                     horizontalActionExclusionBottomInset: 28,
                     onWillMove: {
                         player?.pause()
@@ -194,6 +197,10 @@ struct CreatorPostedFeedView: View {
                     },
                     onDidMove: {
                         syncPlayerForCurrentIndex()
+                    },
+                    onHorizontalDragChanged: { dx in
+                        guard !showFeedProjectPanel else { return }
+                        postedFeedPanelDragOffsetX = min(0, dx)
                     },
                     onNonVerticalEnded: { value in
                         handlePostedFeedDragEnded(value, project: currentProject)
@@ -368,7 +375,11 @@ struct CreatorPostedFeedView: View {
 
     private func feedPage(video: MyVideo, project: FeedProjectSummary, useLivePlayer: Bool) -> some View {
         ZStack(alignment: .bottom) {
-            SlidingFeedPanelLayer(isPanelOpen: showFeedProjectPanel && useLivePlayer, cornerRadius: 0) {
+            SlidingFeedPanelLayer(
+                isPanelOpen: showFeedProjectPanel && useLivePlayer,
+                cornerRadius: 0,
+                dragOffsetX: useLivePlayer ? postedFeedPanelDragOffsetX : 0
+            ) {
                 feedVideoLayer(video: video, useLivePlayer: useLivePlayer)
             } panelLayer: { width in
                 feedProjectPanel(project: project, width: width)
@@ -379,8 +390,9 @@ struct CreatorPostedFeedView: View {
                 startPoint: .center,
                 endPoint: .bottom
             )
+            .opacity(showFeedProjectPanel ? 0.34 : 1.0)
 
-            if useLivePlayer {
+            if useLivePlayer && !showFeedProjectPanel {
                 GeometryReader { geo in
                     HStack(spacing: 0) {
                         Color.clear
@@ -392,9 +404,17 @@ struct CreatorPostedFeedView: View {
 
                         Color.clear
                             .contentShape(Rectangle())
-                            .onTapGesture {
-                                togglePostedFeedPlayback()
-                            }
+                            .gesture(
+                                TapGesture(count: 2)
+                                    .onEnded {
+                                        Task {
+                                            await likeOnDoubleTapInPostedFeed(project: project)
+                                        }
+                                    }
+                                    .exclusively(before: TapGesture(count: 1).onEnded {
+                                        togglePostedFeedPlayback()
+                                    })
+                            )
 
                         Color.clear
                             .frame(width: min(72, max(52, geo.size.width * 0.14)))
@@ -439,7 +459,10 @@ struct CreatorPostedFeedView: View {
                         .lineLimit(2)
 
                     fundingMeta(project: project)
-                    FeedPageIndicatorDots(currentIndex: showFeedProjectPanel ? 1 : 0, totalCount: 2)
+                    FeedPageIndicatorDots(
+                        currentIndex: showFeedProjectPanel ? (clampedFeedPanelPageIndex(for: project) + 1) : 0,
+                        totalCount: feedPanelPageCount(for: project) + 1
+                    )
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
 
@@ -506,13 +529,75 @@ struct CreatorPostedFeedView: View {
         let cachedDetail = feedProjectDetailsById[project.id]
         let isLoading = feedProjectDetailLoadingIds.contains(project.id)
         let errorText = feedProjectDetailErrorsById[project.id] ?? ""
+        let plans = cachedDetail?.plans ?? []
+        let pageCount = max(1, plans.count + 1)
+        let panelPageSelection = Binding<Int>(
+            get: { min(max(feedPanelPageIndex, 0), pageCount - 1) },
+            set: { feedPanelPageIndex = min(max($0, 0), pageCount - 1) }
+        )
 
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Project")
+            InteractiveHorizontalPager(
+                pageCount: pageCount,
+                currentIndex: panelPageSelection,
+                onSwipeBeyondLeadingEdge: {
+                    closePostedFeedProjectPanel()
+                },
+                onLeadingEdgeDragChanged: { dx in
+                    guard showFeedProjectPanel, feedPanelPageIndex == 0 else {
+                        postedFeedPanelDragOffsetX = 0
+                        return
+                    }
+                    postedFeedPanelDragOffsetX = max(0, dx)
+                }
+            ) { idx in
+                VStack(alignment: .leading, spacing: 12) {
+                    panelPageHeader(currentPage: idx, plansCount: plans.count, totalCount: feedPanelPageCount(for: project))
+                    if idx == 0 {
+                        projectOverviewPanelContent(project: project, detail: cachedDetail, isLoading: isLoading)
+                    } else {
+                        planPanelContent(plan: plans[idx - 1])
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+            if !errorText.isEmpty {
+                Text(errorText)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 132)
+        .padding(.bottom, 18)
+        .frame(width: width, alignment: .leading)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.black.opacity(0.86))
+    }
+
+    private func panelPageHeader(currentPage: Int, plansCount: Int, totalCount: Int) -> some View {
+        HStack {
+            Text(currentPage == 0 ? "Project Overview" : "Plan \(currentPage) / \(plansCount)")
                 .font(.headline)
                 .foregroundStyle(.white)
+            Spacer()
+            Text("\(currentPage + 1) / \(totalCount)")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.82))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.white.opacity(0.14))
+                .clipShape(Capsule())
+        }
+    }
 
-            if let detail = cachedDetail {
+    @ViewBuilder
+    private func projectOverviewPanelContent(project: FeedProjectSummary, detail: MyProjectResult?, isLoading: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let detail {
+                projectOverviewImage(detail: detail, fallbackThumbnailURL: project.thumbnailURL)
                 Text(detail.title)
                     .font(.headline)
                     .foregroundStyle(.white)
@@ -523,49 +608,165 @@ struct CreatorPostedFeedView: View {
                 }
                 Text("Goal: \(formatJPY(detail.goal_amount_minor))")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white.opacity(0.88))
                 Text("Funded: \(formatJPY(detail.funded_amount_minor)) / \(formatJPY(detail.goal_amount_minor))")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white.opacity(0.88))
                 Text("Supporters: \(detail.supporter_count)")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Created: \(formatProjectCreatedDate(from: detail.created_at))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.88))
                 Text("Deadline: \(formatDeliveryDate(from: detail.deadline_at))")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
-                if let description = detail.description, !description.isEmpty {
-                    Text(description)
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.9))
-                }
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Status: \(detail.status)")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Description")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text((detail.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (detail.description ?? "") : "-")
+                    .font(.footnote)
+                    .foregroundStyle(.white)
             } else if isLoading {
                 ProgressView("Loading project...")
                     .tint(.white)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white.opacity(0.82))
             } else {
+                if let thumbnail = project.thumbnailURL, let url = URL(string: thumbnail) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .empty:
+                            Rectangle().fill(Color.secondary.opacity(0.12))
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        case .failure:
+                            Rectangle().fill(Color.secondary.opacity(0.12))
+                        @unknown default:
+                            Rectangle().fill(Color.secondary.opacity(0.12))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 172)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
                 Text(project.caption)
                     .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.white)
                 Text("Goal: \(formatJPY(project.goalAmountMinor))")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white.opacity(0.88))
                 Text("Funded: \(formatJPY(project.fundedAmountMinor))")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
-            }
-
-            if !errorText.isEmpty {
-                Text(errorText)
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Supporters: -")
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Created: -")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Description")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text("-")
+                    .font(.footnote)
+                    .foregroundStyle(.white)
             }
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 18)
-        .frame(width: width, alignment: .leading)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.black.opacity(0.86))
+    }
+
+    @ViewBuilder
+    private func planPanelContent(plan: ProjectPlanResult) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let raw = plan.image_url, let url = URL(string: raw) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        Rectangle().fill(Color.secondary.opacity(0.12))
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        Rectangle().fill(Color.secondary.opacity(0.12))
+                    @unknown default:
+                        Rectangle().fill(Color.secondary.opacity(0.12))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 148)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            Text(plan.name)
+                .font(.headline)
+                .foregroundStyle(.white)
+            Text("\(plan.price_minor.formatted()) \(plan.currency)")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.green)
+            Text("Return summary")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.9))
+            Text(plan.reward_summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : plan.reward_summary)
+                .font(.subheadline)
+                .foregroundStyle(.white)
+            Text("Description")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.9))
+            Text((plan.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (plan.description ?? "") : "-")
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.84))
+        }
+    }
+
+    @ViewBuilder
+    private func projectOverviewImage(detail: MyProjectResult, fallbackThumbnailURL: String?) -> some View {
+        let detailImage = (detail.image_urls?.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+            ?? detail.image_url
+        if let raw = detailImage, let url = URL(string: raw) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .empty:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .failure:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                @unknown default:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 172)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        } else if let thumb = fallbackThumbnailURL, let url = URL(string: thumb) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .empty:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .failure:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                @unknown default:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 172)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private func feedPanelPageCount(for project: FeedProjectSummary) -> Int {
+        1 + (feedProjectDetailsById[project.id]?.plans?.count ?? 0)
+    }
+
+    private func clampedFeedPanelPageIndex(for project: FeedProjectSummary) -> Int {
+        min(max(feedPanelPageIndex, 0), max(feedPanelPageCount(for: project) - 1, 0))
     }
 
     private func rightRail(project: FeedProjectSummary) -> some View {
@@ -966,6 +1167,15 @@ struct CreatorPostedFeedView: View {
     private func handlePostedFeedDragEnded(_ value: DragGesture.Value, project: FeedProjectSummary) {
         let dx = value.translation.width
         let dy = value.translation.height
+        let threshold: CGFloat = 50
+
+        if showFeedProjectPanel, abs(dx) > abs(dy), abs(dx) > threshold {
+            if dx > 0, feedPanelPageIndex == 0 {
+                closePostedFeedProjectPanel()
+            }
+            return
+        }
+
         let action = resolveFeedSwipeAction(
             dx: dx,
             dy: dy,
@@ -991,6 +1201,8 @@ struct CreatorPostedFeedView: View {
     private func openPostedFeedProjectPanel(for project: FeedProjectSummary) {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
             showFeedProjectPanel = true
+            feedPanelPageIndex = 0
+            postedFeedPanelDragOffsetX = 0
         }
         player?.pause()
         Task {
@@ -1002,6 +1214,8 @@ struct CreatorPostedFeedView: View {
         guard showFeedProjectPanel else { return }
         withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
             showFeedProjectPanel = false
+            feedPanelPageIndex = 0
+            postedFeedPanelDragOffsetX = 0
         }
         syncPlayerForCurrentIndex()
     }
@@ -1009,6 +1223,7 @@ struct CreatorPostedFeedView: View {
     private func closePostedFeedProjectPanelForVerticalMove() {
         guard showFeedProjectPanel else { return }
         showFeedProjectPanel = false
+        postedFeedPanelDragOffsetX = 0
     }
 
     private func loadPostedFeedProjectDetail(for project: FeedProjectSummary, forceRefresh: Bool) async {
@@ -1109,6 +1324,36 @@ struct CreatorPostedFeedView: View {
             let updated = previous.is_liked_by_current_user
                 ? try await client.unlikeVideo(videoId: videoId)
                 : try await client.likeVideo(videoId: videoId)
+            await MainActor.run {
+                engagementByVideoId[videoId] = updated
+            }
+        } catch {
+            await MainActor.run {
+                engagementByVideoId[videoId] = previous
+                deleteErrorText = "Like failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func likeOnDoubleTapInPostedFeed(project: FeedProjectSummary) async {
+        guard let videoId = currentVideoId ?? project.videoId else { return }
+        let previous = engagementByVideoId[videoId] ?? VideoEngagementResult(
+            likes: project.likes,
+            comments: project.comments,
+            is_liked_by_current_user: project.isLikedByCurrentUser
+        )
+        guard !previous.is_liked_by_current_user else { return }
+
+        let optimistic = VideoEngagementResult(
+            likes: previous.likes + 1,
+            comments: previous.comments,
+            is_liked_by_current_user: true
+        )
+        await MainActor.run {
+            engagementByVideoId[videoId] = optimistic
+        }
+        do {
+            let updated = try await client.likeVideo(videoId: videoId)
             await MainActor.run {
                 engagementByVideoId[videoId] = updated
             }
@@ -1246,14 +1491,31 @@ struct CreatorPostedFeedView: View {
     }
 
     private func formatDeliveryDate(from iso8601: String) -> String {
-        let parser = ISO8601DateFormatter()
-        if let date = parser.date(from: iso8601) {
+        if let date = parseISO8601Date(iso8601) {
             let formatter = DateFormatter()
             formatter.dateStyle = .medium
             formatter.timeStyle = .none
             return formatter.string(from: date)
         }
         return iso8601
+    }
+
+    private func formatProjectCreatedDate(from iso8601: String) -> String {
+        if let date = parseISO8601Date(iso8601) {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+            return formatter.string(from: date)
+        }
+        return iso8601
+    }
+
+    private func parseISO8601Date(_ value: String) -> Date? {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = parser.date(from: value) { return date }
+        parser.formatOptions = [.withInternetDateTime]
+        return parser.date(from: value)
     }
 
     private var postedFeedCommentBar: some View {

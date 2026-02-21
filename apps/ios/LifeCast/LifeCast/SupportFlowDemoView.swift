@@ -21,6 +21,8 @@ struct SupportFlowDemoView: View {
     @State private var homePauseIndicatorToken = UUID()
     @State private var isHomeFeedEdgeBoosting = false
     @State private var showFeedProjectPanel = false
+    @State private var homeFeedPanelPageIndex = 0
+    @State private var homeFeedPanelDragOffsetX: CGFloat = 0
     @State private var feedProjectDetailsById: [UUID: MyProjectResult] = [:]
     @State private var feedProjectDetailLoadingIds: Set<UUID> = []
     @State private var feedProjectDetailErrorsById: [UUID: String] = [:]
@@ -54,6 +56,8 @@ struct SupportFlowDemoView: View {
     @State private var isKeyboardVisible = false
     @State private var meHasUnsavedProjectEdits = false
     @State private var meProjectEditDiscardRequest = 0
+    @State private var meTabSectionOverride = 0
+    @State private var meTabSectionOverrideNonce = 0
     @State private var pendingAppTabAfterDiscard: Int?
     @State private var showDiscardProjectEditDialog = false
 
@@ -116,7 +120,8 @@ struct SupportFlowDemoView: View {
                 Task {
                     await refreshMyVideos()
                 }
-            }, onOpenProjectTab: {
+                meTabSectionOverride = 1
+                meTabSectionOverrideNonce += 1
                 selectedTab = 3
             }, onOpenAuth: {
                 showAuthSheet = true
@@ -147,6 +152,8 @@ struct SupportFlowDemoView: View {
                         await refreshMyVideos()
                     }
                 },
+                selectedIndexOverride: meTabSectionOverride,
+                selectedIndexOverrideNonce: meTabSectionOverrideNonce,
                 onProjectEditUnsavedChanged: { hasUnsaved in
                     meHasUnsavedProjectEdits = hasUnsaved
                 },
@@ -300,6 +307,7 @@ struct SupportFlowDemoView: View {
                         items: feedProjects,
                         currentIndex: $currentFeedIndex,
                         verticalDragDisabled: false,
+                        allowHorizontalChildDrag: showFeedProjectPanel,
                         horizontalActionExclusionBottomInset: 28,
                         onWillMove: {
                             homeFeedPlayer?.pause()
@@ -307,6 +315,10 @@ struct SupportFlowDemoView: View {
                         },
                         onDidMove: {
                             syncHomeFeedPlayer()
+                        },
+                        onHorizontalDragChanged: { dx in
+                            guard !showFeedProjectPanel else { return }
+                            homeFeedPanelDragOffsetX = min(0, dx)
                         },
                         onNonVerticalEnded: { value in
                             guard let project = currentProject else { return }
@@ -374,7 +386,11 @@ struct SupportFlowDemoView: View {
 
     private func feedCard(project: FeedProjectSummary, useLivePlayer: Bool = true) -> some View {
         ZStack(alignment: .bottom) {
-            SlidingFeedPanelLayer(isPanelOpen: showFeedProjectPanel && useLivePlayer, cornerRadius: 0) {
+            SlidingFeedPanelLayer(
+                isPanelOpen: showFeedProjectPanel && useLivePlayer,
+                cornerRadius: 0,
+                dragOffsetX: useLivePlayer ? homeFeedPanelDragOffsetX : 0
+            ) {
                 feedVideoLayer(project: project, useLivePlayer: useLivePlayer)
             } panelLayer: { width in
                 feedProjectPanel(project: project, width: width)
@@ -386,8 +402,9 @@ struct SupportFlowDemoView: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
+            .opacity(showFeedProjectPanel ? 0.34 : 1.0)
 
-            if useLivePlayer {
+            if useLivePlayer && !showFeedProjectPanel {
                 GeometryReader { geo in
                     HStack(spacing: 0) {
                         Color.clear
@@ -399,9 +416,17 @@ struct SupportFlowDemoView: View {
 
                         Color.clear
                             .contentShape(Rectangle())
-                            .onTapGesture {
-                                toggleHomeFeedPlayback()
-                            }
+                            .gesture(
+                                TapGesture(count: 2)
+                                    .onEnded {
+                                        Task {
+                                            await likeOnDoubleTap(for: project)
+                                        }
+                                    }
+                                    .exclusively(before: TapGesture(count: 1).onEnded {
+                                        toggleHomeFeedPlayback()
+                                    })
+                            )
 
                         Color.clear
                             .frame(width: min(72, max(52, geo.size.width * 0.14)))
@@ -452,7 +477,10 @@ struct SupportFlowDemoView: View {
                     rightRail(project: project)
                 }
 
-                FeedPageIndicatorDots(currentIndex: showFeedProjectPanel ? 1 : 0, totalCount: 2)
+                FeedPageIndicatorDots(
+                    currentIndex: showFeedProjectPanel ? (clampedHomeFeedPanelPageIndex(for: project) + 1) : 0,
+                    totalCount: homeFeedPanelPageCount(for: project) + 1
+                )
                     .frame(maxWidth: .infinity, alignment: .center)
             }
             .padding(.horizontal, 16)
@@ -565,13 +593,77 @@ struct SupportFlowDemoView: View {
         let cachedDetail = feedProjectDetailsById[project.id]
         let isLoading = feedProjectDetailLoadingIds.contains(project.id)
         let errorText = feedProjectDetailErrorsById[project.id] ?? ""
+        let plans = cachedDetail?.plans ?? []
+        let pageCount = max(1, plans.count + 1)
+        let panelPageSelection = Binding<Int>(
+            get: { min(max(homeFeedPanelPageIndex, 0), pageCount - 1) },
+            set: { homeFeedPanelPageIndex = min(max($0, 0), pageCount - 1) }
+        )
 
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Project")
+            InteractiveHorizontalPager(
+                pageCount: pageCount,
+                currentIndex: panelPageSelection,
+                onSwipeBeyondLeadingEdge: {
+                    closeFeedProjectPanel()
+                },
+                onLeadingEdgeDragChanged: { dx in
+                    guard showFeedProjectPanel, homeFeedPanelPageIndex == 0 else {
+                        homeFeedPanelDragOffsetX = 0
+                        return
+                    }
+                    homeFeedPanelDragOffsetX = max(0, dx)
+                }
+            ) { idx in
+                VStack(alignment: .leading, spacing: 12) {
+                    panelPageHeader(currentPage: idx, plansCount: plans.count, totalCount: homeFeedPanelPageCount(for: project))
+                    if idx == 0 {
+                        homeProjectOverviewPanelContent(project: project, detail: cachedDetail, isLoading: isLoading)
+                    } else {
+                        homePlanPanelContent(plan: plans[idx - 1])
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+            if !errorText.isEmpty {
+                Text(errorText)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 132)
+        .padding(.bottom, 18)
+        .frame(width: width, alignment: .leading)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .contentShape(Rectangle())
+        .background(Color.black.opacity(0.86))
+    }
+
+    private func panelPageHeader(currentPage: Int, plansCount: Int, totalCount: Int) -> some View {
+        HStack {
+            Text(currentPage == 0 ? "Project Overview" : "Plan \(currentPage) / \(plansCount)")
                 .font(.headline)
                 .foregroundStyle(.white)
+            Spacer()
+            Text("\(currentPage + 1) / \(totalCount)")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.82))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.white.opacity(0.14))
+                .clipShape(Capsule())
+        }
+    }
 
-            if let detail = cachedDetail {
+    @ViewBuilder
+    private func homeProjectOverviewPanelContent(project: FeedProjectSummary, detail: MyProjectResult?, isLoading: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let detail {
+                homeOverviewImage(detail: detail, fallbackThumbnailURL: project.thumbnailURL)
                 Text(detail.title)
                     .font(.headline)
                     .foregroundStyle(.white)
@@ -582,51 +674,165 @@ struct SupportFlowDemoView: View {
                 }
                 Text("Goal: \(formatJPY(detail.goal_amount_minor))")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white.opacity(0.88))
                 Text("Funded: \(formatJPY(detail.funded_amount_minor)) / \(formatJPY(detail.goal_amount_minor))")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white.opacity(0.88))
                 Text("Supporters: \(detail.supporter_count)")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Created: \(formatProjectCreatedDate(from: detail.created_at))")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.88))
                 Text("Deadline: \(formatDeliveryDate(from: detail.deadline_at))")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
-                if let description = detail.description, !description.isEmpty {
-                    Text(description)
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.9))
-                }
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Status: \(detail.status)")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Description")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text((detail.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (detail.description ?? "") : "-")
+                    .font(.footnote)
+                    .foregroundStyle(.white)
             } else if isLoading {
                 ProgressView("Loading project...")
                     .tint(.white)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white.opacity(0.82))
             } else {
+                if let thumbnail = project.thumbnailURL, let thumbnailURL = URL(string: thumbnail) {
+                    AsyncImage(url: thumbnailURL) { phase in
+                        switch phase {
+                        case .empty:
+                            Rectangle().fill(Color.secondary.opacity(0.12))
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        case .failure:
+                            Rectangle().fill(Color.secondary.opacity(0.12))
+                        @unknown default:
+                            Rectangle().fill(Color.secondary.opacity(0.12))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 172)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
                 Text(project.caption)
                     .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.white)
                 Text("Goal: \(formatJPY(project.goalAmountMinor))")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white.opacity(0.88))
                 Text("Funded: \(formatJPY(project.fundedAmountMinor))")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
-            }
-
-            if !errorText.isEmpty {
-                Text(errorText)
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Supporters: -")
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Created: -")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.88))
+                Text("Description")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text("-")
+                    .font(.footnote)
+                    .foregroundStyle(.white)
             }
-
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 18)
-        .frame(width: width, alignment: .leading)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
-        .contentShape(Rectangle())
-        .background(Color.black.opacity(0.86))
+    }
+
+    @ViewBuilder
+    private func homePlanPanelContent(plan: ProjectPlanResult) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let raw = plan.image_url, let url = URL(string: raw) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        Rectangle().fill(Color.secondary.opacity(0.12))
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        Rectangle().fill(Color.secondary.opacity(0.12))
+                    @unknown default:
+                        Rectangle().fill(Color.secondary.opacity(0.12))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 148)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            Text(plan.name)
+                .font(.headline)
+                .foregroundStyle(.white)
+            Text("\(plan.price_minor.formatted()) \(plan.currency)")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.green)
+            Text("Return summary")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.9))
+            Text(plan.reward_summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : plan.reward_summary)
+                .font(.subheadline)
+                .foregroundStyle(.white)
+            Text("Description")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.9))
+            Text((plan.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (plan.description ?? "") : "-")
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.84))
+        }
+    }
+
+    @ViewBuilder
+    private func homeOverviewImage(detail: MyProjectResult, fallbackThumbnailURL: String?) -> some View {
+        let detailImage = (detail.image_urls?.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+            ?? detail.image_url
+        if let raw = detailImage, let url = URL(string: raw) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .empty:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .failure:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                @unknown default:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 172)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        } else if let thumb = fallbackThumbnailURL, let url = URL(string: thumb) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .empty:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .failure:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                @unknown default:
+                    Rectangle().fill(Color.secondary.opacity(0.12))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 172)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private func homeFeedPanelPageCount(for project: FeedProjectSummary) -> Int {
+        1 + (feedProjectDetailsById[project.id]?.plans?.count ?? 0)
+    }
+
+    private func clampedHomeFeedPanelPageIndex(for project: FeedProjectSummary) -> Int {
+        min(max(homeFeedPanelPageIndex, 0), max(homeFeedPanelPageCount(for: project) - 1, 0))
     }
 
     private func rightRail(project: FeedProjectSummary) -> some View {
@@ -1445,6 +1651,45 @@ struct SupportFlowDemoView: View {
         }
     }
 
+    private func likeOnDoubleTap(for project: FeedProjectSummary) async {
+        guard let videoId = project.videoId else { return }
+        guard isAuthenticated else {
+            await MainActor.run {
+                showAuthSheet = true
+            }
+            return
+        }
+
+        let latest = feedProjects.first(where: { $0.videoId == videoId }) ?? project
+        guard !latest.isLikedByCurrentUser else { return }
+
+        let previous = VideoEngagementResult(
+            likes: latest.likes,
+            comments: latest.comments,
+            is_liked_by_current_user: latest.isLikedByCurrentUser
+        )
+        let optimistic = VideoEngagementResult(
+            likes: previous.likes + 1,
+            comments: previous.comments,
+            is_liked_by_current_user: true
+        )
+
+        await MainActor.run {
+            applyVideoEngagement(videoId: videoId, engagement: optimistic)
+        }
+        do {
+            let updated = try await client.likeVideo(videoId: videoId)
+            await MainActor.run {
+                applyVideoEngagement(videoId: videoId, engagement: updated)
+            }
+        } catch {
+            await MainActor.run {
+                applyVideoEngagement(videoId: videoId, engagement: previous)
+                errorText = "Failed to update like: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func loadCommentsForCurrentVideo() async {
         guard let videoId = currentProject?.videoId else {
             await MainActor.run {
@@ -1763,6 +2008,15 @@ struct SupportFlowDemoView: View {
     private func handleHomeFeedDragEnded(_ value: DragGesture.Value, project: FeedProjectSummary) {
         let dx = value.translation.width
         let dy = value.translation.height
+        let threshold: CGFloat = 50
+
+        if showFeedProjectPanel, abs(dx) > abs(dy), abs(dx) > threshold {
+            if dx > 0, homeFeedPanelPageIndex == 0 {
+                closeFeedProjectPanel()
+            }
+            return
+        }
+
         let action = resolveFeedSwipeAction(
             dx: dx,
             dy: dy,
@@ -1788,6 +2042,8 @@ struct SupportFlowDemoView: View {
     private func openFeedProjectPanel(for project: FeedProjectSummary) {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
             showFeedProjectPanel = true
+            homeFeedPanelPageIndex = 0
+            homeFeedPanelDragOffsetX = 0
         }
         homeFeedPlayer?.pause()
         Task {
@@ -1799,6 +2055,8 @@ struct SupportFlowDemoView: View {
         guard showFeedProjectPanel else { return }
         withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
             showFeedProjectPanel = false
+            homeFeedPanelPageIndex = 0
+            homeFeedPanelDragOffsetX = 0
         }
         syncHomeFeedPlayer()
     }
@@ -1806,6 +2064,7 @@ struct SupportFlowDemoView: View {
     private func closeFeedProjectPanelForVerticalMove() {
         guard showFeedProjectPanel else { return }
         showFeedProjectPanel = false
+        homeFeedPanelDragOffsetX = 0
     }
 
     private func loadFeedProjectDetail(for project: FeedProjectSummary, forceRefresh: Bool) async {
@@ -1846,12 +2105,27 @@ struct SupportFlowDemoView: View {
     }
 
     private func formatDeliveryDate(from iso8601: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: iso8601) else { return iso8601 }
+        guard let date = parseISO8601Date(iso8601) else { return iso8601 }
         let out = DateFormatter()
-        out.locale = Locale(identifier: "en_US_POSIX")
-        out.dateFormat = "yyyy-MM"
+        out.dateStyle = .medium
+        out.timeStyle = .none
         return out.string(from: date)
+    }
+
+    private func formatProjectCreatedDate(from iso8601: String) -> String {
+        guard let date = parseISO8601Date(iso8601) else { return iso8601 }
+        let out = DateFormatter()
+        out.dateStyle = .medium
+        out.timeStyle = .none
+        return out.string(from: date)
+    }
+
+    private func parseISO8601Date(_ value: String) -> Date? {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = parser.date(from: value) { return date }
+        parser.formatOptions = [.withInternetDateTime]
+        return parser.date(from: value)
     }
 }
 

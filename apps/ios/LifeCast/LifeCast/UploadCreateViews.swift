@@ -1,43 +1,44 @@
 import PhotosUI
 import UniformTypeIdentifiers
+import AVKit
 import SwiftUI
 struct UploadCreateView: View {
     let client: LifeCastAPIClient
     let isAuthenticated: Bool
     let onUploadReady: () -> Void
-    let onOpenProjectTab: () -> Void
     let onOpenAuth: () -> Void
 
+    @State private var isVideoPickerPresented = false
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var selectedUploadVideo: SelectedUploadVideo?
+    @State private var previewURL: URL?
     @State private var myProject: MyProjectResult?
-    @State private var projectLoading = false
-    @State private var projectErrorText = ""
     @State private var state: UploadFlowState = .idle
     @State private var uploadProgress: Double = 0
     @State private var uploadSessionId: UUID?
     @State private var videoId: String?
     @State private var statusText = "Not started"
     @State private var errorText = ""
+    @State private var descriptionText = ""
+    @State private var tagsText = ""
+    @State private var linkText = ""
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Create")
-                    .font(.headline)
-
-                if !isAuthenticated {
-                    loggedOutSection
-                } else if let myProject {
-                    projectSummary(project: myProject)
-                    uploadSection
-                } else {
-                    projectRequiredSection
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    if !isAuthenticated {
+                        loggedOutSection
+                    } else {
+                        uploadMainSection
+                    }
+                    Spacer(minLength: 0)
                 }
-
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .padding(.bottom, 36)
             }
-            .padding(16)
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Create")
             .task {
                 await loadActiveProject()
@@ -47,6 +48,12 @@ struct UploadCreateView: View {
                     await loadSelectedVideo(from: newValue)
                 }
             }
+            .photosPicker(
+                isPresented: $isVideoPickerPresented,
+                selection: $selectedPickerItem,
+                matching: .videos,
+                photoLibrary: .shared()
+            )
         }
     }
 
@@ -64,71 +71,72 @@ struct UploadCreateView: View {
         }
     }
 
-    private var projectRequiredSection: some View {
+    private var uploadMainSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Project required")
+            Text("Upload")
                 .font(.subheadline.weight(.semibold))
-            Text("Create a project in Me > Project tab before uploading videos.")
+            Text("Pick a video, add details, then publish.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            Button("Open Project Tab") {
-                onOpenProjectTab()
-            }
-            .buttonStyle(.borderedProminent)
-
-            if projectLoading {
-                ProgressView("Checking project...")
-                    .font(.caption)
-            }
-
-            if !projectErrorText.isEmpty {
-                Text(projectErrorText)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-        }
-    }
-
-    private var uploadSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            PhotosPicker(
-                selection: $selectedPickerItem,
-                matching: .videos,
-                photoLibrary: .shared()
-            ) {
-                Label(selectedUploadVideo == nil ? "Select Video" : "Change Video", systemImage: "video.badge.plus")
+            Button("Choose Video") {
+                isVideoPickerPresented = true
             }
             .buttonStyle(.bordered)
+
+            if let previewURL {
+                VideoPlayer(player: AVPlayer(url: previewURL))
+                    .frame(height: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .allowsHitTesting(false)
+            }
 
             if let selectedUploadVideo {
                 Text("Selected: \(selectedUploadVideo.fileName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else {
-                Text("No video selected")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+
+                Text("Description")
+                    .font(.caption.weight(.semibold))
+                TextEditor(text: $descriptionText)
+                    .frame(minHeight: 88, maxHeight: 120)
+                    .padding(8)
+                    .background(Color.gray.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                TextField("Tags (comma separated)", text: $tagsText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .padding(.horizontal, 12)
+                    .frame(height: 42)
+                    .background(Color.gray.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                TextField("Link (optional)", text: $linkText)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                    .padding(.horizontal, 12)
+                    .frame(height: 42)
+                    .background(Color.gray.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                Button("Publish") {
+                    Task {
+                        await startUploadFlow()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(state == .uploading || state == .processing)
             }
 
-            statusPill
+            if state != .idle || !errorText.isEmpty {
+                statusPill
 
-            ProgressView(value: uploadProgress, total: 1)
-                .tint(state == .failed ? .red : .blue)
+                ProgressView(value: uploadProgress, total: 1)
+                    .tint(state == .failed ? .red : .blue)
 
-            Text(statusText)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            if let uploadSessionId {
-                Text("Session: \(uploadSessionId.uuidString)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let videoId {
-                Text("Video: \(videoId)")
-                    .font(.caption2)
+                Text(statusText)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
             }
 
@@ -138,42 +146,14 @@ struct UploadCreateView: View {
                     .foregroundStyle(.red)
             }
 
-            HStack {
-                Button("Start Upload") {
-                    Task {
-                        await startUploadFlow()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(state == .uploading || state == .processing)
-
-                Button("Retry") {
+            if state == .failed {
+                Button("Retry Last Upload") {
                     Task {
                         await retryOrResumeFlow()
                     }
                 }
-                .buttonStyle(.bordered)
-                .disabled(uploadSessionId == nil || (state != .failed && state != .processing))
-
-                Button("Reset") {
-                    reset()
-                }
-                .buttonStyle(.bordered)
-            }
-        }
-    }
-
-    private func projectSummary(project: MyProjectResult) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(project.title)
-                .font(.subheadline.weight(.semibold))
-            Text("Goal: \(project.goal_amount_minor) \(project.currency)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if let minimumPlan = project.minimum_plan {
-                Text("Min plan: \(minimumPlan.name) / \(minimumPlan.price_minor) \(minimumPlan.currency)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                .buttonStyle(.borderedProminent)
+                .disabled(uploadSessionId == nil)
             }
         }
     }
@@ -287,7 +267,9 @@ struct UploadCreateView: View {
 
                 if session.status == "ready" {
                     state = .ready
-                    statusText = "Upload ready for playback"
+                    statusText = "Upload complete. Opening Me > Posts..."
+                    selectedUploadVideo = nil
+                    selectedPickerItem = nil
                     onUploadReady()
                     return
                 }
@@ -382,13 +364,15 @@ struct UploadCreateView: View {
                     fileName: fileName,
                     contentType: contentType
                 )
+                previewURL = writePreviewFile(data: data, fileName: fileName)
                 state = .idle
-                statusText = "Ready to upload selected video"
+                statusText = "Ready to publish"
                 errorText = ""
             }
         } catch {
             await MainActor.run {
                 selectedUploadVideo = nil
+                previewURL = nil
                 state = .failed
                 statusText = "Video selection failed"
                 errorText = error.localizedDescription
@@ -405,24 +389,29 @@ struct UploadCreateView: View {
         guard isAuthenticated else {
             await MainActor.run {
                 myProject = nil
-                projectLoading = false
-                projectErrorText = ""
             }
             return
         }
-        projectLoading = true
-        defer { projectLoading = false }
         do {
             let project = try await client.getMyProject()
             await MainActor.run {
                 myProject = project
-                projectErrorText = ""
             }
         } catch {
             await MainActor.run {
                 myProject = nil
-                projectErrorText = ""
             }
+        }
+    }
+
+    private func writePreviewFile(data: Data, fileName: String) -> URL? {
+        let ext = (fileName as NSString).pathExtension.isEmpty ? "mov" : (fileName as NSString).pathExtension
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lifecast-preview-\(UUID().uuidString).\(ext)")
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
         }
     }
 

@@ -5,6 +5,7 @@ import path from 'node:path';
 const APPIUM_URL = process.env.LIFECAST_APPIUM_SERVER_URL || 'http://127.0.0.1:4723';
 const CAPS_PATH = process.env.LIFECAST_CAPABILITIES_CONFIG || path.join(process.env.HOME || '', '.codex/capabilities/lifecast-ios.json');
 const SCREENSHOT_PATH = process.env.LIFECAST_APPIUM_SCREENSHOT_PATH || '/Users/takeshi/Desktop/lifecast/.tmp/appium-ios-create.png';
+const SOURCE_PATH = process.env.LIFECAST_APPIUM_SOURCE_PATH || '/Users/takeshi/Desktop/lifecast/.tmp/appium-ios-create.xml';
 
 async function http(method, url, body) {
   const res = await fetch(url, {
@@ -31,12 +32,32 @@ async function findElement(sessionId, using, value) {
   return elementId;
 }
 
+async function maybeFindElement(sessionId, using, value) {
+  try {
+    return await findElement(sessionId, using, value);
+  } catch {
+    return null;
+  }
+}
+
 async function click(sessionId, elementId) {
   await http('POST', `${APPIUM_URL}/session/${sessionId}/element/${elementId}/click`, {});
 }
 
 async function pause(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+async function sourceText(sessionId) {
+  const out = await http('GET', `${APPIUM_URL}/session/${sessionId}/source`);
+  return String(out?.value || '');
+}
+
+async function saveScreenshot(sessionId, filePath) {
+  const shot = await http('GET', `${APPIUM_URL}/session/${sessionId}/screenshot`);
+  const b64 = shot?.value;
+  if (!b64) return;
+  await fs.writeFile(filePath, Buffer.from(b64, 'base64'));
 }
 
 async function main() {
@@ -66,23 +87,45 @@ async function main() {
   let failed = false;
   try {
     // Bottom tab: Create
-    const createTab = await findElement(sessionId, 'accessibility id', 'Create');
+    const createTab =
+      (await maybeFindElement(sessionId, 'accessibility id', 'Create')) ||
+      (await maybeFindElement(sessionId, 'accessibility id', 'plus.square.fill')) ||
+      (await maybeFindElement(
+        sessionId,
+        '-ios predicate string',
+        'type == "XCUIElementTypeButton" AND (name CONTAINS[c] "Create" OR label CONTAINS[c] "Create")',
+      ));
+    if (!createTab) {
+      throw new Error('Create tab not found');
+    }
     await click(sessionId, createTab);
-    await pause(800);
+    await pause(1200);
 
-    // Verify and tap Start Upload
-    const startUpload = await findElement(sessionId, 'accessibility id', 'Start Upload');
-    await click(sessionId, startUpload);
-    await pause(1800);
+    const chooseButton =
+      (await maybeFindElement(sessionId, 'accessibility id', 'Choose Video')) ||
+      (await maybeFindElement(
+        sessionId,
+        '-ios predicate string',
+        'type == "XCUIElementTypeButton" AND (name CONTAINS[c] "Choose Video" OR label CONTAINS[c] "Choose Video")',
+      ));
+    if (!chooseButton) {
+      await saveScreenshot(sessionId, SCREENSHOT_PATH);
+      throw new Error(`Choose Video button not found. screenshot=${SCREENSHOT_PATH}`);
+    }
+    await click(sessionId, chooseButton);
+    await pause(900);
 
-    // Verify expected state labels exist after interaction.
-    let stateLabel = 'UNKNOWN';
-    for (const candidate of ['CREATED', 'UPLOADING', 'PROCESSING', 'READY', 'FAILED']) {
-      try {
-        await findElement(sessionId, 'accessibility id', candidate);
-        stateLabel = candidate;
-        break;
-      } catch {}
+    const src = await sourceText(sessionId);
+    const pickerOpened =
+      src.includes('Private Access to Photos') ||
+      src.includes('Photo Library') ||
+      src.includes('Collections') ||
+      src.includes('Recents') ||
+      src.includes('Videos');
+    if (!pickerOpened) {
+      await fs.writeFile(SOURCE_PATH, src, 'utf8');
+      await saveScreenshot(sessionId, SCREENSHOT_PATH);
+      throw new Error(`Video picker did not open from Create tab. source=${SOURCE_PATH} screenshot=${SCREENSHOT_PATH}`);
     }
 
     const shot = await http('GET', `${APPIUM_URL}/session/${sessionId}/screenshot`);
@@ -97,8 +140,8 @@ async function main() {
       session_id: sessionId,
       assertions: {
         create_tab_opened: true,
-        start_upload_tapped: true,
-        observed_state_label: stateLabel,
+        choose_video_button_tapped: true,
+        video_picker_opened: true,
       },
       screenshot: SCREENSHOT_PATH,
     };
