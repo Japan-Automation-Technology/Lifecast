@@ -686,6 +686,7 @@ struct ProjectPageView: View {
     @State private var planImagePickerItems: [UUID: PhotosPickerItem] = [:]
     @State private var selectedPlanImages: [UUID: SelectedProjectImage] = [:]
     @State private var showEndConfirm = false
+    @State private var showEditProjectSheet = false
     @State private var projectCreateInFlight = false
     @State private var projectCreateStatusText = ""
     @State private var hasLoadedProjectsOnce = false
@@ -780,6 +781,20 @@ struct ProjectPageView: View {
         .task {
             await loadMyProjects()
         }
+        .sheet(isPresented: $showEditProjectSheet) {
+            if let current = myProject {
+                ProjectEditSheetView(
+                    client: client,
+                    project: current,
+                    onSaved: {
+                        Task {
+                            await loadMyProjects()
+                            onProjectChanged()
+                        }
+                    }
+                )
+            }
+        }
         .alert("End this project?", isPresented: $showEndConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("End Project", role: .destructive) {
@@ -796,6 +811,10 @@ struct ProjectPageView: View {
                 await loadProjectCovers(from: newValue)
             }
         }
+    }
+
+    private func canEditProject(_ project: MyProjectResult) -> Bool {
+        !["stopped", "failed", "succeeded"].contains(project.status)
     }
 
     private func createProjectSection(buttonTitle: String) -> some View {
@@ -979,7 +998,11 @@ struct ProjectPageView: View {
     }
 
     private func projectDetailsView(project: MyProjectResult) -> some View {
-        ProfileProjectDetailView(project: project)
+        ProfileProjectDetailView(
+            project: project,
+            headerActionTitle: canEditProject(project) ? "Edit" : nil,
+            onTapHeaderAction: canEditProject(project) ? { showEditProjectSheet = true } : nil
+        )
     }
 
     @ViewBuilder
@@ -1243,5 +1266,473 @@ struct ProjectPageView: View {
                 projectErrorText = (error as NSError).localizedDescription
             }
         }
+    }
+}
+
+struct ProjectEditSheetView: View {
+    let client: LifeCastAPIClient
+    let project: MyProjectResult
+    let onSaved: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var subtitleText: String
+    @State private var descriptionText: String
+    @State private var urlDraft = ""
+    @State private var urls: [String]
+    @State private var coverPickerItems: [PhotosPickerItem] = []
+    @State private var coverSelections: [SelectedProjectImage] = []
+    @State private var planDrafts: [EditablePlanDraft]
+    @State private var planPickerItems: [UUID: PhotosPickerItem] = [:]
+    @State private var selectedPlanImages: [UUID: SelectedProjectImage] = [:]
+    @State private var saving = false
+    @State private var errorText = ""
+    @FocusState private var focusedField: EditField?
+
+    init(client: LifeCastAPIClient, project: MyProjectResult, onSaved: @escaping () -> Void) {
+        self.client = client
+        self.project = project
+        self.onSaved = onSaved
+        _subtitleText = State(initialValue: project.subtitle ?? "")
+        _descriptionText = State(initialValue: project.description ?? "")
+        _urls = State(initialValue: project.urls ?? [])
+        _planDrafts = State(
+            initialValue: (project.plans ?? []).map {
+                EditablePlanDraft(
+                    existingPlanId: $0.id,
+                    name: $0.name,
+                    priceMinorText: String($0.price_minor),
+                    rewardSummary: $0.reward_summary,
+                    description: $0.description ?? "",
+                    currency: $0.currency
+                )
+            }
+        )
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(project.title)
+                        .font(.headline)
+
+                    Group {
+                        Text("Subtitle")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextField("", text: $subtitleText)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($focusedField, equals: .subtitle)
+                    }
+
+                    Group {
+                        Text("Description")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextField("", text: $descriptionText, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($focusedField, equals: .description)
+                    }
+
+                    Group {
+                        Text("Project Images")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        PhotosPicker(selection: $coverPickerItems, maxSelectionCount: 5, matching: .images, photoLibrary: .shared()) {
+                            Label(coverSelections.isEmpty ? "Select Project Images" : "Change Project Images", systemImage: "photo")
+                        }
+                        .buttonStyle(.bordered)
+                        if !coverSelections.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(Array(coverSelections.enumerated()), id: \.offset) { _, selection in
+                                        if let uiImage = UIImage(data: selection.data) {
+                                            Image(uiImage: uiImage)
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 92, height: 92)
+                                                .clipped()
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Group {
+                        Text("URLs")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            TextField("", text: $urlDraft)
+                                .textFieldStyle(.roundedBorder)
+                                .keyboardType(.URL)
+                                .textInputAutocapitalization(.never)
+                                .focused($focusedField, equals: .urlDraft)
+                            Button("Add") { addURL() }
+                                .buttonStyle(.bordered)
+                                .disabled(urls.count >= 10)
+                        }
+                        ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
+                            HStack {
+                                Text(url)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                Spacer()
+                                Button("Remove", role: .destructive) {
+                                    urls.remove(at: index)
+                                }
+                                .font(.caption)
+                            }
+                        }
+                    }
+
+                    Text("Plans")
+                        .font(.subheadline.weight(.semibold))
+                    ForEach(Array(planDrafts.indices), id: \.self) { index in
+                        planEditCard(index: index)
+                    }
+                    Button("Add new plan") {
+                        planDrafts.append(
+                            EditablePlanDraft(
+                                existingPlanId: nil,
+                                name: "",
+                                priceMinorText: "",
+                                rewardSummary: "",
+                                description: "",
+                                currency: project.currency
+                            )
+                        )
+                    }
+                    .buttonStyle(.bordered)
+
+                    if !errorText.isEmpty {
+                        Text(errorText)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    Button(saving ? "Saving..." : "Save Changes") {
+                        Task { await saveChanges() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(saving)
+                }
+                .padding(16)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    focusedField = nil
+                }
+            )
+            .navigationTitle("Edit Project")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .onChange(of: coverPickerItems) { _, newValue in
+                Task { await loadProjectCovers(from: newValue) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func planEditCard(index: Int) -> some View {
+        let draft = planDrafts[index]
+        VStack(alignment: .leading, spacing: 8) {
+            if draft.isExisting {
+                Text("\(draft.name) · \(draft.priceMinorText) \(draft.currency)")
+                    .font(.subheadline.weight(.semibold))
+                Text(draft.rewardSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("New Plan")
+                    .font(.subheadline.weight(.semibold))
+                TextField("Plan name", text: $planDrafts[index].name)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focusedField, equals: .planName(draft.id))
+                TextField("Price (JPY)", text: $planDrafts[index].priceMinorText)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.numberPad)
+                    .focused($focusedField, equals: .planPrice(draft.id))
+                TextField("Reward summary", text: $planDrafts[index].rewardSummary)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focusedField, equals: .planReward(draft.id))
+            }
+
+            TextField("Description", text: $planDrafts[index].description, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .focused($focusedField, equals: .planDescription(draft.id))
+
+            PhotosPicker(selection: planPickerBinding(for: draft.id), matching: .images, photoLibrary: .shared()) {
+                Label(selectedPlanImages[draft.id] == nil ? "Select Plan Image" : "Change Plan Image", systemImage: "photo.on.rectangle")
+            }
+            .buttonStyle(.bordered)
+            if let selected = selectedPlanImages[draft.id], let uiImage = UIImage(data: selected.data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(height: 110)
+                    .frame(maxWidth: .infinity)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else if let existingPlanId = draft.existingPlanId,
+                      let existing = project.plans?.first(where: { $0.id == existingPlanId }),
+                      let raw = existing.image_url,
+                      let url = URL(string: raw) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        Rectangle().fill(Color.secondary.opacity(0.15))
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        Rectangle().fill(Color.secondary.opacity(0.15))
+                    @unknown default:
+                        Rectangle().fill(Color.secondary.opacity(0.15))
+                    }
+                }
+                .frame(height: 110)
+                .frame(maxWidth: .infinity)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+
+            if !draft.isExisting {
+                Button("Remove new plan", role: .destructive) {
+                    let planId = planDrafts[index].id
+                    planDrafts.remove(at: index)
+                    planPickerItems[planId] = nil
+                    selectedPlanImages[planId] = nil
+                }
+                .font(.caption)
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func addURL() {
+        let trimmed = urlDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard urls.count < 10 else {
+            errorText = "You can add up to 10 URLs"
+            return
+        }
+        guard let normalized = normalizeURLString(trimmed) else {
+            errorText = "URL format is invalid"
+            return
+        }
+        if !urls.contains(normalized) {
+            urls.append(normalized)
+        }
+        urlDraft = ""
+        errorText = ""
+    }
+
+    private func normalizeURLString(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let withScheme = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        guard let components = URLComponents(string: withScheme) else { return nil }
+        guard let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        guard let host = components.host, !host.isEmpty else { return nil }
+        return components.url?.absoluteString
+    }
+
+    private func planPickerBinding(for localPlanId: UUID) -> Binding<PhotosPickerItem?> {
+        Binding(
+            get: { planPickerItems[localPlanId] },
+            set: { newValue in
+                planPickerItems[localPlanId] = newValue
+                guard let newValue else {
+                    selectedPlanImages[localPlanId] = nil
+                    return
+                }
+                Task { await loadPlanImage(from: newValue, localPlanId: localPlanId) }
+            }
+        )
+    }
+
+    private func loadProjectCovers(from pickerItems: [PhotosPickerItem]) async {
+        if pickerItems.isEmpty {
+            await MainActor.run { coverSelections = [] }
+            return
+        }
+        do {
+            var nextSelections: [SelectedProjectImage] = []
+            for pickerItem in pickerItems.prefix(5) {
+                guard let data = try await pickerItem.loadTransferable(type: Data.self) else { continue }
+                let fileName = pickerItem.itemIdentifier.map { "\($0).jpg" } ?? "project-cover.jpg"
+                let contentType = pickerItem.supportedContentTypes.first?.preferredMIMEType ?? UTType.jpeg.preferredMIMEType ?? "image/jpeg"
+                nextSelections.append(SelectedProjectImage(data: data, fileName: fileName, contentType: contentType))
+            }
+            await MainActor.run { coverSelections = nextSelections }
+        } catch {
+            await MainActor.run { coverSelections = [] }
+        }
+    }
+
+    private func loadPlanImage(from pickerItem: PhotosPickerItem, localPlanId: UUID) async {
+        do {
+            guard let data = try await pickerItem.loadTransferable(type: Data.self) else { return }
+            let fileName = pickerItem.itemIdentifier.map { "\($0).jpg" } ?? "plan-image.jpg"
+            let contentType = pickerItem.supportedContentTypes.first?.preferredMIMEType ?? UTType.jpeg.preferredMIMEType ?? "image/jpeg"
+            await MainActor.run {
+                selectedPlanImages[localPlanId] = SelectedProjectImage(data: data, fileName: fileName, contentType: contentType)
+            }
+        } catch {
+            await MainActor.run {
+                selectedPlanImages[localPlanId] = nil
+            }
+        }
+    }
+
+    private func saveChanges() async {
+        if ["stopped", "failed", "succeeded"].contains(project.status) {
+            errorText = "This project cannot be edited."
+            return
+        }
+
+        saving = true
+        errorText = ""
+        defer { saving = false }
+
+        do {
+            let normalizedUrls = try urls.map { raw -> String in
+                guard let normalized = normalizeURLString(raw) else {
+                    throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(raw)"])
+                }
+                return normalized
+            }
+
+            var coverUrls: [String] = []
+            for cover in coverSelections.prefix(5) {
+                let uploaded = try await client.uploadProjectImage(data: cover.data, fileName: cover.fileName, contentType: cover.contentType)
+                coverUrls.append(uploaded)
+            }
+
+            var uploadedPlanImageMap: [UUID: String] = [:]
+            for draft in planDrafts {
+                guard let selected = selectedPlanImages[draft.id] else { continue }
+                let uploaded = try await client.uploadProjectImage(
+                    data: selected.data,
+                    fileName: selected.fileName,
+                    contentType: selected.contentType
+                )
+                uploadedPlanImageMap[draft.id] = uploaded
+            }
+
+            let existingMinPrice = planDrafts
+                .filter { $0.isExisting }
+                .compactMap { Int($0.priceMinorText) }
+                .min()
+
+            var planPayloads: [UpdateProjectRequest.Plan] = []
+            for draft in planDrafts {
+                let trimmedDescription = draft.description.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let existingPlanId = draft.existingPlanId {
+                    planPayloads.append(
+                        .init(
+                            id: existingPlanId,
+                            name: nil,
+                            price_minor: nil,
+                            reward_summary: nil,
+                            description: trimmedDescription.isEmpty ? nil : trimmedDescription,
+                            image_url: uploadedPlanImageMap[draft.id],
+                            currency: nil
+                        )
+                    )
+                    continue
+                }
+
+                let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let reward = draft.rewardSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty, !reward.isEmpty else {
+                    throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "New plan name and reward are required"])
+                }
+                guard let price = Int(draft.priceMinorText), price > 0 else {
+                    throw NSError(domain: "LifeCastProject", code: -1, userInfo: [NSLocalizedDescriptionKey: "New plan price must be positive"])
+                }
+                if let existingMinPrice, price < existingMinPrice {
+                    throw NSError(
+                        domain: "LifeCastProject",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "New plans cannot be cheaper than existing plans"]
+                    )
+                }
+                planPayloads.append(
+                    .init(
+                        id: nil,
+                        name: name,
+                        price_minor: price,
+                        reward_summary: reward,
+                        description: trimmedDescription.isEmpty ? nil : trimmedDescription,
+                        image_url: uploadedPlanImageMap[draft.id],
+                        currency: draft.currency
+                    )
+                )
+            }
+
+            _ = try await client.updateProject(
+                projectId: project.id,
+                subtitle: subtitleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? nil
+                    : subtitleText.trimmingCharacters(in: .whitespacesAndNewlines),
+                description: descriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? nil
+                    : descriptionText.trimmingCharacters(in: .whitespacesAndNewlines),
+                imageURL: coverUrls.first,
+                imageURLs: coverUrls.isEmpty ? nil : coverUrls,
+                urls: normalizedUrls,
+                plans: planPayloads.isEmpty ? nil : planPayloads
+            )
+            await MainActor.run {
+                onSaved()
+                dismiss()
+            }
+        } catch {
+            await MainActor.run {
+                errorText = (error as NSError).localizedDescription
+            }
+        }
+    }
+
+    private struct EditablePlanDraft: Identifiable {
+        let id: UUID
+        let existingPlanId: UUID?
+        var name: String
+        var priceMinorText: String
+        var rewardSummary: String
+        var description: String
+        var currency: String
+
+        init(existingPlanId: UUID?, name: String, priceMinorText: String, rewardSummary: String, description: String, currency: String) {
+            self.id = existingPlanId ?? UUID()
+            self.existingPlanId = existingPlanId
+            self.name = name
+            self.priceMinorText = priceMinorText
+            self.rewardSummary = rewardSummary
+            self.description = description
+            self.currency = currency
+        }
+
+        var isExisting: Bool { existingPlanId != nil }
+    }
+
+    private enum EditField: Hashable {
+        case subtitle
+        case description
+        case urlDraft
+        case planName(UUID)
+        case planPrice(UUID)
+        case planReward(UUID)
+        case planDescription(UUID)
     }
 }

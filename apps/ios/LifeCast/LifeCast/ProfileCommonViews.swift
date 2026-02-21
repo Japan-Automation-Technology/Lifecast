@@ -283,6 +283,8 @@ struct ProfileProjectDetailView: View {
     var supportButtonTitle: String?
     var supportButtonDisabled: Bool = false
     var onTapSupport: (() -> Void)? = nil
+    var headerActionTitle: String? = nil
+    var onTapHeaderAction: (() -> Void)? = nil
 
     @State private var selectedPlan: ProjectPlanResult?
 
@@ -307,8 +309,22 @@ struct ProfileProjectDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(project.title)
-                .font(.title3.weight(.semibold))
+            HStack(alignment: .top, spacing: 10) {
+                Text(project.title)
+                    .font(.title3.weight(.semibold))
+                Spacer(minLength: 8)
+                if let headerActionTitle, let onTapHeaderAction {
+                    Button(headerActionTitle) {
+                        onTapHeaderAction()
+                    }
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.secondary.opacity(0.12))
+                    .clipShape(Capsule())
+                    .buttonStyle(.plain)
+                }
+            }
 
             if let subtitle = project.subtitle, !subtitle.isEmpty {
                 Text(subtitle)
