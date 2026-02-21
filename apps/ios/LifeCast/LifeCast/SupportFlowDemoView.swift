@@ -140,9 +140,6 @@ struct SupportFlowDemoView: View {
                         await refreshMyVideos()
                     }
                 },
-                onOpenAuth: {
-                    showAuthSheet = true
-                },
                 onProjectEditUnsavedChanged: { hasUnsaved in
                     meHasUnsavedProjectEdits = hasUnsaved
                 },

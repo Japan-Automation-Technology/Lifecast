@@ -843,20 +843,32 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       }>(
         `
         select
-          p.creator_user_id,
-          coalesce(cp.username, u.username, 'user_' || left(p.creator_user_id::text, 8)) as username,
+          u.id as creator_user_id,
+          coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as username,
           coalesce(cp.display_name, u.display_name) as display_name,
           p.title as project_title
-        from projects p
-        inner join users u on u.id = p.creator_user_id
-        left join creator_profiles cp on cp.creator_user_id = p.creator_user_id
+        from users u
+        left join creator_profiles cp on cp.creator_user_id = u.id
+        left join lateral (
+          select
+            pr.title,
+            pr.created_at
+          from projects pr
+          where pr.creator_user_id = u.id
+            and pr.status in ('active', 'draft')
+          order by
+            case when pr.status = 'active' then 0 else 1 end,
+            pr.created_at desc
+          limit 1
+        ) p on true
         where
-          p.status in ('active', 'draft')
-          and
           ($1 = ''
            or coalesce(cp.username, u.username, '') ilike '%' || $1 || '%'
            or coalesce(cp.display_name, u.display_name, '') ilike '%' || $1 || '%')
-        order by p.created_at desc, username asc
+        order by
+          case when p.title is null then 1 else 0 end,
+          p.created_at desc nulls last,
+          username asc
         limit $2
       `,
         [query, limit],

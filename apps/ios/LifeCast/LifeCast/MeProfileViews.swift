@@ -12,7 +12,6 @@ struct MeTabView: View {
     let onRefreshProfile: () -> Void
     let onRefreshVideos: () -> Void
     let onProjectChanged: () -> Void
-    let onOpenAuth: () -> Void
     let onProjectEditUnsavedChanged: (Bool) -> Void
     let projectEditDiscardRequest: Int
 
@@ -137,23 +136,29 @@ struct MeTabView: View {
                         }
                     }
                 } else {
-                    VStack(spacing: 14) {
-                        Spacer()
-                        Image(systemName: "person.crop.circle.badge.exclamationmark")
-                            .font(.system(size: 46))
-                            .foregroundStyle(.secondary)
-                        Text("Sign in to use your profile")
-                            .font(.headline)
-                        Text("Follow creators, support projects, and manage your own posts after signing in.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
-                        Button("Sign In / Sign Up") {
-                            onOpenAuth()
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            Image(systemName: "person.crop.circle.badge.exclamationmark")
+                                .font(.system(size: 46))
+                                .foregroundStyle(.secondary)
+                            Text("Sign in to use your profile")
+                                .font(.headline)
+                            Text("Follow creators, support projects, and manage your own posts after signing in.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 12)
+                            MeInlineAuthView(client: client) {
+                                onRefreshProfile()
+                                onRefreshVideos()
+                                onProjectChanged()
+                            }
+                            .padding(.top, 4)
                         }
-                        .buttonStyle(.borderedProminent)
-                        Spacer()
+                        .frame(maxWidth: 480)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 36)
+                        .padding(.bottom, 28)
                     }
                 }
             }
@@ -191,9 +196,6 @@ struct MeTabView: View {
                         onRefreshProfile()
                         onRefreshVideos()
                         onProjectChanged()
-                    },
-                    onOpenAuth: {
-                        onOpenAuth()
                     }
                 )
             }
@@ -381,10 +383,144 @@ private struct ScrollBounceConfigurator: UIViewRepresentable {
     }
 }
 
+private struct MeInlineAuthView: View {
+    let client: LifeCastAPIClient
+    let onAuthenticated: () -> Void
+
+    @Environment(\.openURL) private var openURL
+
+    @State private var email = ""
+    @State private var password = ""
+    @State private var username = ""
+    @State private var displayName = ""
+    @State private var isSignUp = false
+    @State private var isLoading = false
+    @State private var errorText = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(isSignUp ? "Create account" : "Sign in")
+                .font(.headline)
+
+            TextField("Email", text: $email)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.emailAddress)
+                .textFieldStyle(.roundedBorder)
+
+            SecureField("Password", text: $password)
+                .textFieldStyle(.roundedBorder)
+
+            if isSignUp {
+                TextField("Username (optional)", text: $username)
+                    .textInputAutocapitalization(.never)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Display name (optional)", text: $displayName)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            Button(isSignUp ? "Create account" : "Sign in with Email") {
+                Task { await submitEmailAuth() }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isLoading || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
+
+            Button("Continue with Google") {
+                Task { await continueOAuth(provider: "google") }
+            }
+            .buttonStyle(.bordered)
+            .disabled(isLoading)
+
+            Button(isSignUp ? "Already have an account? Sign in" : "Need an account? Sign up") {
+                isSignUp.toggle()
+                errorText = ""
+            }
+            .font(.footnote)
+            .disabled(isLoading)
+
+            if !errorText.isEmpty {
+                Text(errorText)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(14)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            if isLoading {
+                ProgressView()
+                    .padding(20)
+                    .background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .lifecastAuthSessionUpdated)) { _ in
+            onAuthenticated()
+        }
+    }
+
+    private func submitEmailAuth() async {
+        await MainActor.run {
+            isLoading = true
+            errorText = ""
+        }
+        defer {
+            Task { @MainActor in
+                isLoading = false
+            }
+        }
+
+        do {
+            let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+            if isSignUp {
+                let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                _ = try await client.signUpWithEmail(
+                    email: normalizedEmail,
+                    password: password,
+                    username: normalizedUsername.isEmpty ? nil : normalizedUsername,
+                    displayName: normalizedDisplayName.isEmpty ? nil : normalizedDisplayName
+                )
+            } else {
+                _ = try await client.signInWithEmail(email: normalizedEmail, password: password)
+            }
+            await MainActor.run {
+                onAuthenticated()
+            }
+        } catch {
+            await MainActor.run {
+                errorText = error.localizedDescription
+            }
+        }
+    }
+
+    private func continueOAuth(provider: String) async {
+        await MainActor.run {
+            isLoading = true
+            errorText = ""
+        }
+        defer {
+            Task { @MainActor in
+                isLoading = false
+            }
+        }
+
+        do {
+            let url = try await client.oauthURL(provider: provider)
+            await MainActor.run {
+                openURL(url)
+            }
+        } catch {
+            await MainActor.run {
+                errorText = error.localizedDescription
+            }
+        }
+    }
+}
+
 struct DevUserSwitcherSheet: View {
     let client: LifeCastAPIClient
     let onSwitched: () -> Void
-    let onOpenAuth: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var rows: [DevAuthUser] = []
@@ -430,11 +566,9 @@ struct DevUserSwitcherSheet: View {
                             Text("Not signed in")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            Button("Sign In / Sign Up") {
-                                dismiss()
-                                onOpenAuth()
-                            }
-                            .buttonStyle(.borderedProminent)
+                            Text("Use the sign-in form on the Me page.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         }
                     }
 
@@ -535,15 +669,11 @@ struct DevUserSwitcherSheet: View {
     private func signOut() async {
         loading = true
         defer { loading = false }
-        do {
-            try await client.signOut()
-            errorText = ""
-            isSignedIn = false
-            signedInUserEmail = ""
-            onSwitched()
-        } catch {
-            errorText = error.localizedDescription
-        }
+        await client.signOut()
+        errorText = ""
+        isSignedIn = false
+        signedInUserEmail = ""
+        onSwitched()
     }
 
     private func refreshSessionState() async {
@@ -1463,143 +1593,14 @@ struct ProjectInlineEditView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("Edit Project")
-                    .font(.headline)
-                Spacer()
-                Button("Cancel") {
-                    onCancel()
-                }
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.secondary.opacity(0.12))
-                .clipShape(Capsule())
-                .buttonStyle(.plain)
-            }
-
-            Text(project.title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            Group {
-                Text("Subtitle")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                TextField("", text: $subtitleText)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($focusedField, equals: .subtitle)
-            }
-
-            Group {
-                Text("Project Images")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                PhotosPicker(selection: $coverPickerItems, maxSelectionCount: 5, matching: .images, photoLibrary: .shared()) {
-                    Label("Add Project Images", systemImage: "plus")
-                }
-                .buttonStyle(.bordered)
-                .simultaneousGesture(
-                    TapGesture().onEnded {
-                        focusedField = nil
-                    }
-                )
-                if projectImages.isEmpty {
-                    Text("At least one image is required.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(projectImages) { image in
-                                ZStack(alignment: .topTrailing) {
-                                    imageThumbnail(image)
-                                        .frame(width: 92, height: 92)
-                                        .clipped()
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    Button {
-                                        removeProjectImage(image.id)
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .font(.system(size: 18))
-                                            .foregroundStyle(projectImages.count <= 1 ? .gray : .white, .black.opacity(0.65))
-                                    }
-                                    .disabled(projectImages.count <= 1)
-                                    .offset(x: 6, y: -6)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Group {
-                Text("Description")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                TextField("", text: $descriptionText, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($focusedField, equals: .description)
-            }
-
-            Group {
-                Text("URLs")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                HStack {
-                    TextField("", text: $urlDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .focused($focusedField, equals: .urlDraft)
-                    Button("Add") { addURL() }
-                        .buttonStyle(.bordered)
-                        .disabled(urls.count >= 10)
-                }
-                ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
-                    HStack {
-                        Text(url)
-                            .font(.caption)
-                            .lineLimit(1)
-                        Spacer()
-                        Button("Remove", role: .destructive) {
-                            urls.remove(at: index)
-                        }
-                        .font(.caption)
-                    }
-                }
-            }
-
-            Text("Plans")
-                .font(.subheadline.weight(.semibold))
-            ForEach(Array(planDrafts.indices), id: \.self) { index in
-                planEditCard(index: index)
-            }
-            Button("Add new plan") {
-                planDrafts.append(
-                    EditablePlanDraft(
-                        existingPlanId: nil,
-                        name: "",
-                        priceMinorText: "",
-                        rewardSummary: "",
-                        description: "",
-                        currency: project.currency
-                    )
-                )
-            }
-            .buttonStyle(.bordered)
-
-            if !errorText.isEmpty {
-                Text(errorText)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            Button(saving ? "Saving..." : "Save Changes") {
-                Task { await saveChanges() }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(saving)
+            headerSection
+            projectTitleSection
+            subtitleSection
+            projectImagesSection
+            descriptionSection
+            urlsSection
+            plansSection
+            saveSection
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -1659,6 +1660,179 @@ struct ProjectInlineEditView: View {
                 onDirtyChange(hasUnsavedChanges)
             }
         }
+    }
+
+    private var headerSection: some View {
+        HStack {
+            Text("Edit Project")
+                .font(.headline)
+            Spacer()
+            Button("Cancel") {
+                onCancel()
+            }
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.secondary.opacity(0.12))
+            .clipShape(Capsule())
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var projectTitleSection: some View {
+        Text(project.title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+    }
+
+    private var subtitleSection: some View {
+        Group {
+            Text("Subtitle")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            TextField("", text: $subtitleText)
+                .textFieldStyle(.roundedBorder)
+                .focused($focusedField, equals: .subtitle)
+        }
+    }
+
+    @ViewBuilder
+    private var projectImagesSection: some View {
+        Text("Project Images")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+        PhotosPicker(selection: $coverPickerItems, maxSelectionCount: 5, matching: .images, photoLibrary: .shared()) {
+            Label("Add Project Images", systemImage: "plus")
+        }
+        .buttonStyle(.bordered)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                focusedField = nil
+            }
+        )
+        if projectImages.isEmpty {
+            Text("At least one image is required.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(projectImages) { image in
+                        ZStack(alignment: .topTrailing) {
+                            imageThumbnail(image)
+                                .frame(width: 92, height: 92)
+                                .clipped()
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            Button {
+                                removeProjectImage(image.id)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(projectImages.count <= 1 ? .gray : .white, .black.opacity(0.65))
+                            }
+                            .disabled(projectImages.count <= 1)
+                            .offset(x: 6, y: -6)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var descriptionSection: some View {
+        Group {
+            Text("Description")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            TextField("", text: $descriptionText, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .focused($focusedField, equals: .description)
+        }
+    }
+
+    @ViewBuilder
+    private var urlsSection: some View {
+        Text("URLs")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+        HStack {
+            TextField("", text: $urlDraft)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .focused($focusedField, equals: .urlDraft)
+            Button("Add") { addURL() }
+                .buttonStyle(.bordered)
+                .disabled(urls.count >= 10)
+        }
+        ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
+            HStack {
+                Text(url)
+                    .font(.caption)
+                    .lineLimit(1)
+                Spacer()
+                Button("Remove", role: .destructive) {
+                    urls.remove(at: index)
+                }
+                .font(.caption)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var plansSection: some View {
+        Text("Plans")
+            .font(.subheadline.weight(.semibold))
+        ForEach(Array(planDrafts.indices), id: \.self) { index in
+            planEditCard(index: index)
+        }
+        Button {
+            planDrafts.append(
+                EditablePlanDraft(
+                    existingPlanId: nil,
+                    name: "",
+                    priceMinorText: "",
+                    rewardSummary: "",
+                    description: "",
+                    currency: project.currency
+                )
+            )
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 44, height: 44)
+                .background(Color.accentColor.opacity(0.14))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .accessibilityLabel("Add new plan")
+    }
+
+    @ViewBuilder
+    private var saveSection: some View {
+        if !errorText.isEmpty {
+            Text(errorText)
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+        HStack {
+            Spacer()
+            Button(saving ? "Saving..." : "Save Changes") {
+                Task { await saveChanges() }
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Color.accentColor)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .disabled(saving)
+            .opacity(saving ? 0.75 : 1.0)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.top, 22)
     }
 
     @ViewBuilder

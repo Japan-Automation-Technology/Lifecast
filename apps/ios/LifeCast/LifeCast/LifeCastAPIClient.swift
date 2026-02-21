@@ -1027,9 +1027,9 @@ final class LifeCastAPIClient {
         return result
     }
 
-    func signOut() async throws {
+    func signOut() async {
         struct SignOutResult: Decodable { let signed_out: Bool }
-        _ = try await send(
+        _ = try? await send(
             path: "/v1/auth/sign-out",
             method: "POST",
             body: Optional<String>.none,
