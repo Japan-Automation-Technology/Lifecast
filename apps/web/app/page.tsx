@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 const keyPoints = [
   {
     title: "Short Video Discovery",
@@ -31,12 +33,6 @@ const steps = [
   }
 ];
 
-const trustItems = [
-  "購入型クラウドファンディング（投資型ではない）",
-  "MVPの支援はリターンありのみ",
-  "決済成功はサーバー側（Webhook確認）を正とする"
-];
-
 export default function HomePage() {
   return (
     <main className="page">
@@ -50,30 +46,44 @@ export default function HomePage() {
       </header>
 
       <section className="hero" id="top">
-        <div className="heroCopy">
-          <p className="eyebrow">MOBILE-FIRST CROWDFUNDING</p>
-          <h1>Build in public, back in public.</h1>
-          <p className="lead">
-            短尺動画で進捗を届け、応援につなげる購入型クラウドファンディング。
-            発見から支援まで、モバイルでシンプルに完結します。
-          </p>
-          <a href="#detail" className="primaryButton">
-            Waitlistに登録
-          </a>
-          <p className="heroNote">return-based / all-or-nothing</p>
-        </div>
-
-        <div className="heroPoints">
-          <h2>Key Points</h2>
-          <div className="pointGrid">
-            {keyPoints.map((item, index) => (
-              <article className="pointCard" key={item.title}>
-                <p className="pointIndex">{`0${index + 1}`}</p>
-                <h3>{item.title}</h3>
-                <p>{item.description}</p>
-              </article>
-            ))}
+        <div className="heroPanel">
+          <div className="heroCopy">
+            <p className="eyebrow">MOBILE-FIRST CROWDFUNDING</p>
+            <h1>Build in public, back in public.</h1>
+            <p className="lead">
+              短尺動画で進捗を届け、応援につなげる購入型クラウドファンディング。
+              発見から支援まで、モバイルでシンプルに完結します。
+            </p>
+            <div className="heroMeta">
+              <a href="#detail" className="primaryButton">
+                Waitlistに登録
+              </a>
+              <p className="heroNote">return-based / all-or-nothing</p>
+            </div>
           </div>
+
+          <div className="heroArt" aria-hidden="true">
+            <Image
+              src="/hero-iphone.svg"
+              alt="iPhone preview"
+              width={420}
+              height={860}
+              priority
+            />
+          </div>
+        </div>
+      </section>
+
+      <section className="heroPoints">
+        <h2>Key Points</h2>
+        <div className="pointGrid">
+          {keyPoints.map((item, index) => (
+            <article className="pointCard" key={item.title}>
+              <p className="pointIndex">{`0${index + 1}`}</p>
+              <h3>{item.title}</h3>
+              <p>{item.description}</p>
+            </article>
+          ))}
         </div>
       </section>
 
@@ -91,15 +101,6 @@ export default function HomePage() {
               </article>
             ))}
           </div>
-        </div>
-
-        <div className="detailBlock trustBlock">
-          <h2>Trust</h2>
-          <ul>
-            {trustItems.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
         </div>
       </section>
 

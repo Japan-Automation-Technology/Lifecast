@@ -43,7 +43,7 @@ p {
   position: relative;
   max-width: 1040px;
   margin: 0 auto;
-  padding: 28px 18px 58px;
+  padding: 0 18px 58px;
 }
 
 .page::before {
@@ -63,12 +63,14 @@ p {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin: 0 -8px;
-  padding: 10px 8px 12px;
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  padding: 10px 18px 12px;
   padding-bottom: 14px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid #d6deea;
   backdrop-filter: blur(8px);
-  background: linear-gradient(to bottom, rgba(11, 13, 18, 0.94), rgba(11, 13, 18, 0.72));
+  background: linear-gradient(to bottom, rgba(248, 251, 255, 0.95), rgba(237, 243, 252, 0.78));
 }
 
 .logo {
@@ -79,6 +81,7 @@ p {
   font-size: 23px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  color: #142038;
 }
 
 .logo::after {
@@ -95,8 +98,8 @@ p {
   overflow: hidden;
   font-size: 13px;
   font-weight: 700;
-  color: var(--text);
-  border: 1px solid #30394a;
+  color: #1f2f4a;
+  border: 1px solid #b8c6dc;
   border-radius: 999px;
   padding: 8px 14px;
   background: transparent;
@@ -114,8 +117,8 @@ p {
 }
 
 .waitlistButton:hover {
-  border-color: #506083;
-  color: #d7e0ff;
+  border-color: #8da1c4;
+  color: #10213f;
 }
 
 .waitlistButton:hover::before {
@@ -123,63 +126,93 @@ p {
 }
 
 .hero {
-  margin-top: 34px;
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
-  gap: 28px;
-  align-items: end;
+  margin-top: 24px;
 }
 
-.heroCopy {
-  padding-bottom: 26px;
-  border-bottom: 1px solid var(--line);
+.heroPanel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.65fr);
+  gap: 20px;
+  align-items: center;
+  padding: 0;
 }
 
 .eyebrow {
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #7f8ba8;
+  color: #95a4c4;
 }
 
 h1 {
-  margin-top: 12px;
-  max-width: 780px;
+  margin-top: 14px;
+  max-width: 100%;
   font-family: var(--font-title), sans-serif;
-  font-size: clamp(42px, 8.6vw, 86px);
-  line-height: 0.92;
-  letter-spacing: -0.04em;
-  font-weight: 700;
+  font-size: clamp(48px, 6.8vw, 96px);
+  line-height: 0.93;
+  letter-spacing: -0.045em;
+  font-weight: 800;
+  color: #f1f5ff;
 }
 
 .lead {
   margin-top: 18px;
-  max-width: 700px;
-  color: var(--muted);
-  line-height: 1.75;
-  font-size: clamp(14px, 1.8vw, 17px);
+  max-width: 480px;
+  color: #a7b3cc;
+  line-height: 1.7;
+  font-size: 15px;
+}
+
+.heroMeta {
+  margin-top: 22px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .primaryButton {
-  margin-top: 22px;
-  display: inline-block;
-  padding: 10px 0;
-  font-size: 14px;
+  margin-top: 0;
+  display: inline-flex;
+  padding: 11px 18px;
+  font-size: 13px;
   font-weight: 700;
-  color: var(--brand);
-  border-bottom: 1px solid var(--brand);
-  transition: color 0.2s ease, border-color 0.2s ease;
+  color: #edf3ff;
+  border: 1px solid #2c3650;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #151b29, #1a2131);
+  transition: all 0.2s ease;
 }
 
 .primaryButton:hover {
-  color: var(--brand-strong);
-  border-color: var(--brand-strong);
+  border-color: #4d5f8a;
+  color: #ffffff;
 }
 
 .heroNote {
-  margin-top: 10px;
-  color: #78829c;
+  margin-top: 0;
+  color: #7f8ba6;
   font-size: 12px;
+}
+
+.heroArt {
+  min-height: 540px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.heroArt img {
+  display: block;
+  width: min(100%, 340px);
+  height: auto;
+  border-radius: 44px;
+  border: none;
+  box-shadow: 0 26px 52px rgba(0, 0, 0, 0.5);
+}
+
+.heroPoints {
+  margin-top: 34px;
 }
 
 .heroPoints h2 {
@@ -232,7 +265,7 @@ h1 {
 .detail {
   margin-top: 28px;
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  grid-template-columns: 1fr;
   gap: 28px;
 }
 
@@ -285,20 +318,6 @@ h1 {
   line-height: 1.6;
 }
 
-.trustBlock ul {
-  margin: 16px 0 0;
-  padding-left: 18px;
-  color: var(--muted);
-}
-
-.trustBlock li + li {
-  margin-top: 9px;
-}
-
-.trustBlock li::marker {
-  color: #8090b3;
-}
-
 .footer {
   margin-top: 34px;
   padding-top: 20px;
@@ -337,13 +356,21 @@ a:focus-visible {
 }
 
 @media (max-width: 860px) {
-  .hero {
+  .heroPanel {
     grid-template-columns: 1fr;
     gap: 20px;
   }
 
+  h1 {
+    font-size: clamp(44px, 10vw, 74px);
+  }
+
+  .heroArt {
+    min-height: auto;
+    justify-content: center;
+  }
+
   .detail {
-    grid-template-columns: 1fr;
     gap: 20px;
   }
 }
@@ -354,7 +381,17 @@ a:focus-visible {
   }
 
   h1 {
-    font-size: clamp(38px, 12vw, 66px);
+    font-size: clamp(38px, 12vw, 62px);
+  }
+
+  .heroMeta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .heroPoints {
+    margin-top: 24px;
   }
 
   .pointGrid {
