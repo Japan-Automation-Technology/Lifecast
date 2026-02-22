@@ -399,6 +399,11 @@ a:focus-visible {
     gap: 8px;
   }
 
+  .heroPanel {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
   .heroPoints {
     margin-top: 24px;
   }
@@ -425,6 +430,13 @@ a:focus-visible {
 
   .stepItem {
     grid-template-columns: 40px 1fr;
+    border-bottom: none;
+  }
+
+  .detailBlock {
+    border-top: none;
+    background: none;
+    padding-top: 0;
   }
 
   .stepId {

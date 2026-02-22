@@ -76,9 +76,8 @@ export default function HomePage() {
       <section className="heroPoints">
         <h2>Key Points</h2>
         <div className="pointGrid">
-          {keyPoints.map((item, index) => (
+          {keyPoints.map((item) => (
             <article className="pointCard" key={item.title}>
-              <p className="pointIndex">{`0${index + 1}`}</p>
               <h3>{item.title}</h3>
               <p>{item.description}</p>
             </article>
