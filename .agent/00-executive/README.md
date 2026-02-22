@@ -1,7 +1,7 @@
 # Executive Layer
 
 Purpose:
-- Fastest way to understand what LifeCast is, what is fixed, and where risks remain.
+- Fastest way to understand what Lifecast is, what is fixed, and where risks remain.
 
 When to read deeper:
 - Open this layer before any implementation or strategy task.

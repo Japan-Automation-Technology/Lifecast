@@ -25,7 +25,7 @@ Purpose:
 - Synchronize feed scroll state with player lifecycle.
 
 Inference note:
-- We apply these principles to LifeCast even though our current scale is much smaller than ByteDance.
+- We apply these principles to Lifecast even though our current scale is much smaller than ByteDance.
 
 ## 2) Source-backed guidance used
 
@@ -36,7 +36,7 @@ Inference note:
 - Monolith paper (real-time recommendation/training architecture cues):
   - /Users/takeshi/Downloads/2209.07663v2.pdf
 
-## 3) Target architecture for LifeCast
+## 3) Target architecture for Lifecast
 
 1. Ingest API layer
 - `POST /v1/videos/uploads` (already exists): create upload session.

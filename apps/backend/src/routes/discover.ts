@@ -831,8 +831,8 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             {
               creator_user_id: "00000000-0000-0000-0000-000000000002",
               username: "lifecast_maker",
-              display_name: "LifeCast Maker",
-              project_title: "LifeCast Dev Project",
+              display_name: "Lifecast Maker",
+              project_title: "Lifecast Dev Project",
             },
           ],
         }),
@@ -1492,7 +1492,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
           profile: {
             creator_user_id: profileUserId,
             username: "lifecast_maker",
-            display_name: "LifeCast Maker",
+            display_name: "Lifecast Maker",
             bio: null,
             avatar_url: null,
           },

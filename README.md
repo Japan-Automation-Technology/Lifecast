@@ -1,4 +1,4 @@
-# LifeCast Workspace
+# Lifecast Workspace
 
 Monorepo baseline for M1 contract-freeze implementation.
 

@@ -1,4 +1,4 @@
--- LifeCast MVP database draft (PostgreSQL 16+)
+-- Lifecast MVP database draft (PostgreSQL 16+)
 -- Scope: Journal / Support / Dispute / UploadSession
 
 create extension if not exists pgcrypto;

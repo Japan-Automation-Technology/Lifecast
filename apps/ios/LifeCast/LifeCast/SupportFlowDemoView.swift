@@ -2079,7 +2079,7 @@ private struct AuthEntrySheet: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(isSignUp ? "Create your profile" : "Welcome back")
                                     .font(.system(size: 20, weight: .bold))
-                                Text(isSignUp ? "Set up your account to start posting." : "Sign in to continue in LifeCast.")
+                                Text(isSignUp ? "Set up your account to start posting." : "Sign in to continue in Lifecast.")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }

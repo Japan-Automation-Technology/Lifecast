@@ -7,9 +7,9 @@ Future-state thesis:
 - Building in public + micro-community feedback + direct support can become a standard startup path for consumer-facing creative products.
 
 What success looks like:
-- Creators repeatedly launch and improve products through supporter feedback loops on LifeCast.
+- Creators repeatedly launch and improve products through supporter feedback loops on Lifecast.
 - Supporters become identity-level participants, not one-time buyers.
-- LifeCast becomes the default bridge between attention and funding for process-heavy creators.
+- Lifecast becomes the default bridge between attention and funding for process-heavy creators.
 
 Non-goal at this stage:
 - Becoming a general-purpose ecommerce backend for post-campaign operations.

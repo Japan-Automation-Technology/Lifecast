@@ -1,6 +1,6 @@
 # Web App
 
-Planned web surfaces for LifeCast.
+Planned web surfaces for Lifecast.
 
 M1 target surfaces:
 - Project details and policy-disclosure pages.

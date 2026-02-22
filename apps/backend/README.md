@@ -1,4 +1,4 @@
-# LifeCast Backend (M1 Skeleton)
+# Lifecast Backend (M1 Skeleton)
 
 Fastify + TypeScript API skeleton aligned to M1 contract freeze.
 

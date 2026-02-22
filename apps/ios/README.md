@@ -1,6 +1,6 @@
 # iOS App (Native)
 
-Planned native Swift client for LifeCast.
+Planned native Swift client for Lifecast.
 
 Immediate build order:
 1. Auth/session shell.
@@ -57,3 +57,8 @@ Appium smoke command policy:
 - Do not use `smoke:ios:appium` for normal UI verification.
 - If and only if you intentionally validate the Create tab upload-start flow, run:
   - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:create-upload`
+
+App Store naming notes:
+- App icon/home-screen name is controlled by `PRODUCT_NAME` and `CFBundleDisplayName` (now `Lifecast`).
+- Bundle ID is now set to `jp.lifecast.lifecast`. Make sure the matching App ID/provisioning profile exists in Apple Developer.
+- The App Store listing name itself is managed in App Store Connect and must be updated there separately if still shown as `LifeCast`.

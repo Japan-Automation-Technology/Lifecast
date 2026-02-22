@@ -1,6 +1,6 @@
-# LifeCast Agent Knowledge Base
+# Lifecast Agent Knowledge Base
 
-Purpose: This folder is the single source of truth for AI-driven product and engineering work on LifeCast.
+Purpose: This folder is the single source of truth for AI-driven product and engineering work on Lifecast.
 
 Read order:
 1. `00-executive/one-page-brief.md`

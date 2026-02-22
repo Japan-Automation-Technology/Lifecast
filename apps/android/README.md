@@ -1,6 +1,6 @@
 # Android App (Native)
 
-Planned native Kotlin client for LifeCast.
+Planned native Kotlin client for Lifecast.
 
 Immediate build order:
 1. Auth/session shell.

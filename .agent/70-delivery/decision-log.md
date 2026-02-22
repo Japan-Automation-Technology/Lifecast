@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-02-22
+- User-facing brand capitalization is standardized as `Lifecast` in app UI copy and core docs/contracts titles.
+- iOS app display name is set via build settings (`PRODUCT_NAME` + `CFBundleDisplayName` = `Lifecast`).
+- iOS Bundle identifier is switched to `jp.lifecast.lifecast` before first App Store Connect upload; Apple Developer App ID/provisioning must match this value.
+
 ## 2026-02-21
 - Event contract v1 expanded with watch-quality events (`video_play_started`, `video_watch_progress`) as backward-compatible additions.
 - iOS feed playback now emits play-started, watch-progress, and watch-completed events for ranking/analytics signals.
@@ -101,4 +106,4 @@ Cross-reference:
 - `../50-data-analytics/logging-retention.md`
 - `./m1-execution-tickets.md`
 
-Last updated: 2026-02-13
+Last updated: 2026-02-22

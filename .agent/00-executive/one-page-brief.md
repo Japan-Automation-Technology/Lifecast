@@ -1,6 +1,6 @@
 # One Page Brief
 
-Product name: LifeCast
+Product name: Lifecast
 
 Tagline:
 - Short-video-first crowdfunding for creators building products in public.
@@ -27,7 +27,7 @@ Differentiation vs legacy crowdfunding:
 
 Business hypothesis:
 - Existing workflow is fragmented (TikTok attention -> external crowdfunding conversion).
-- LifeCast unifies discovery, engagement, and funding conversion.
+- Lifecast unifies discovery, engagement, and funding conversion.
 - Creators can still repurpose content to TikTok/Instagram for top-of-funnel acquisition.
 
 North-star direction:

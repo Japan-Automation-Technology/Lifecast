@@ -46,7 +46,7 @@ async function runSeed() {
       `
       insert into creator_profiles (creator_user_id, username, display_name, bio, created_at, updated_at)
       values
-        ($1, 'lifecast_maker', 'LifeCast Maker', 'Building products in public.', now(), now()),
+        ($1, 'lifecast_maker', 'Lifecast Maker', 'Building products in public.', now(), now()),
         ($2, 'tak_game_lab', 'Tak Game Lab', 'Handheld game hardware development.', now(), now())
       on conflict (creator_user_id)
       do update set
@@ -64,7 +64,7 @@ async function runSeed() {
         id, creator_user_id, title, status, goal_amount_minor, currency, deadline_at, created_at, updated_at
       )
       values (
-        $1, $2, 'LifeCast Dev Project', 'active', 500000, 'JPY', now() + interval '14 days', now(), now()
+        $1, $2, 'Lifecast Dev Project', 'active', 500000, 'JPY', now() + interval '14 days', now(), now()
       )
       on conflict (id)
       do update set

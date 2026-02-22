@@ -1,8 +1,8 @@
 # GTM Loop
 
 Initial acquisition strategy:
-- Creators repurpose LifeCast-ready vertical videos to TikTok/Instagram.
-- External posts drive audience into LifeCast project pages/feed.
+- Creators repurpose Lifecast-ready vertical videos to TikTok/Instagram.
+- External posts drive audience into Lifecast project pages/feed.
 
 Engagement strategy:
 - Keep high density of active projects in feed.
