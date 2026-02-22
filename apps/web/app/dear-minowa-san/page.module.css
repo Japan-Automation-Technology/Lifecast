@@ -87,6 +87,37 @@
   line-height: 1.9;
 }
 
+.visionBlock {
+  margin-top: 14px;
+  border: 1px solid #2a3550;
+  border-radius: 12px;
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(146, 171, 230, 0.08), rgba(146, 171, 230, 0.02));
+}
+
+.visionBlock p {
+  margin: 0;
+  color: #c0cae1;
+  line-height: 1.9;
+}
+
+.visionBlock p + p {
+  margin-top: 12px;
+}
+
+.visionSection + .visionSection {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #2a3550;
+}
+
+.visionSection h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: #e3e9f9;
+  letter-spacing: -0.01em;
+}
+
 .closing {
   margin-top: 36px;
   border-top: 1px solid #2a3550;
