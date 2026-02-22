@@ -411,6 +411,10 @@ a:focus-visible {
     grid-template-columns: 40px 1fr;
   }
 
+  .stepId {
+    font-size: 13px;
+  }
+
   .footer {
     flex-direction: column;
     align-items: flex-start;
