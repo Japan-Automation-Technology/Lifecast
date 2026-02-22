@@ -3,34 +3,34 @@ import Image from "next/image";
 const keyPoints = [
   {
     title: "Short Video Discovery",
-    description: "進捗動画を起点に、応援したいプロジェクトをすぐ見つけられる。"
+    description: "進捗動画を起点に、応援したいプロジェクトをすぐ見つけられる。",
   },
   {
     title: "Participatory Support",
-    description: "プロセスを応援しながら、プロジェクトの一員として参加できる。"
+    description: "プロセスを応援しながら、プロジェクトの一員として参加できる。",
   },
   {
     title: "Simple Support Flow",
-    description: "プランを選んでそのまま支援へ。迷わない導線で完了できる。"
-  }
+    description: "プランを選んでそのまま支援へ。迷わない導線で完了できる。",
+  },
 ];
 
 const steps = [
   {
     id: "01",
     title: "見る",
-    description: "フィードで進捗動画を見て、気になるプロジェクトを選ぶ。"
+    description: "フィードで進捗動画を見て、気になるプロジェクトを選ぶ。",
   },
   {
     id: "02",
     title: "選ぶ",
-    description: "プランの内容・金額・配送見込みを確認して選択する。"
+    description: "プランの内容・金額・配送見込みを確認して選択する。",
   },
   {
     id: "03",
     title: "支援する",
-    description: "チェックアウトを完了し、支援履歴に反映される。"
-  }
+    description: "チェックアウトを完了し、支援履歴に反映される。",
+  },
 ];
 
 export default function HomePage() {
@@ -48,7 +48,7 @@ export default function HomePage() {
       <section className="hero" id="top">
         <div className="heroPanel">
           <div className="heroCopy">
-            <p className="eyebrow">MOBILE-FIRST CROWDFUNDING</p>
+            <p className="eyebrow">PROCESS-DRIVEN CROWDFUNDING</p>
             <h1>Build in public, back in public.</h1>
             <p className="lead">
               短尺動画で進捗を届け、応援につなげる購入型クラウドファンディング。
@@ -106,9 +106,7 @@ export default function HomePage() {
       <footer className="footer">
         <div>
           <p className="logo">Lifecast</p>
-          <p className="footerText">
-            Short-video-first purchase-style crowdfunding platform.
-          </p>
+          <p className="footerText">Process-driven crowdfunding platform.</p>
         </div>
         <div className="footerLinks">
           <a href="#">Policy</a>

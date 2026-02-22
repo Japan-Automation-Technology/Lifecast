@@ -6,6 +6,8 @@
   --line: #232a38;
   --brand: #89a8ff;
   --brand-strong: #6a90ff;
+  --accent: #63d4f2;
+  --accent-warm: #ffb457;
 }
 
 * {
@@ -22,8 +24,11 @@ body {
   font-family: var(--font-body), "Hiragino Sans", sans-serif;
   color: var(--text);
   background:
-    radial-gradient(900px 500px at 85% -15%, rgba(110, 137, 215, 0.2), transparent 60%),
-    radial-gradient(780px 460px at -5% 8%, rgba(51, 89, 194, 0.17), transparent 58%),
+    radial-gradient(1240px 700px at 94% -20%, rgba(144, 172, 255, 0.34), transparent 62%),
+    radial-gradient(1040px 620px at -10% 8%, rgba(78, 117, 235, 0.28), transparent 60%),
+    radial-gradient(840px 480px at 84% 86%, rgba(76, 230, 240, 0.18), transparent 64%),
+    radial-gradient(560px 320px at 16% 76%, rgba(255, 180, 87, 0.12), transparent 66%),
+    linear-gradient(160deg, rgba(24, 38, 66, 0.42) 0%, rgba(11, 16, 30, 0) 52%),
     var(--bg);
 }
 
@@ -91,7 +96,7 @@ p {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--brand), #68e6ff);
+  background: linear-gradient(135deg, var(--brand), var(--accent));
 }
 
 .waitlistButton {
@@ -113,7 +118,7 @@ p {
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: linear-gradient(135deg, rgba(138, 168, 255, 0.22), rgba(82, 215, 235, 0.1));
+  background: linear-gradient(135deg, rgba(138, 168, 255, 0.34), rgba(99, 212, 242, 0.2));
   opacity: 0;
   transition: opacity 0.2s ease;
 }
@@ -143,7 +148,7 @@ p {
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #95a4c4;
+  color: #9fb7ea;
 }
 
 h1 {
@@ -180,20 +185,20 @@ h1 {
   font-size: 13px;
   font-weight: 700;
   color: #edf3ff;
-  border: 1px solid #2c3650;
+  border: 1px solid #3f4e74;
   border-radius: 999px;
-  background: linear-gradient(135deg, #151b29, #1a2131);
+  background: linear-gradient(135deg, rgba(37, 54, 96, 0.55), rgba(24, 33, 53, 0.8));
   transition: all 0.2s ease;
 }
 
 .primaryButton:hover {
-  border-color: #4d5f8a;
+  border-color: #6f89c2;
   color: #ffffff;
 }
 
 .heroNote {
   margin-top: 0;
-  color: #7f8ba6;
+  color: #93a1c0;
   font-size: 12px;
 }
 
@@ -210,7 +215,10 @@ h1 {
   height: auto;
   border-radius: 44px;
   border: none;
-  box-shadow: 0 26px 52px rgba(0, 0, 0, 0.5);
+  box-shadow:
+    0 26px 52px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(132, 158, 230, 0.18),
+    0 0 42px rgba(95, 178, 246, 0.2);
 }
 
 .heroPoints {
@@ -243,7 +251,7 @@ h1 {
 .pointIndex {
   font-family: var(--font-title), sans-serif;
   font-size: 13px;
-  color: #6e7da0;
+  color: #8ea7dd;
   letter-spacing: 0.08em;
 }
 
@@ -265,7 +273,7 @@ h1 {
 }
 
 .detail {
-  margin-top: 28px;
+  margin-top: 40px;
   display: grid;
   grid-template-columns: 1fr;
   gap: 28px;
@@ -300,7 +308,7 @@ h1 {
 
 .stepId {
   font-family: var(--font-title), sans-serif;
-  color: #8393b5;
+  color: #9bb4ec;
   font-size: 13px;
   letter-spacing: 0.08em;
   font-weight: 700;
