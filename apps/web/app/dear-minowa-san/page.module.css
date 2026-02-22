@@ -41,7 +41,7 @@
 }
 
 .section {
-  margin-top: 34px;
+  margin-top: 52px;
 }
 
 .section h2,
@@ -102,6 +102,14 @@
   background: linear-gradient(180deg, rgba(146, 171, 230, 0.08), rgba(146, 171, 230, 0.02));
 }
 
+.flatBlock {
+  margin-top: 14px;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  background: none;
+}
+
 .visionBlock p {
   margin: 0;
   color: #c0cae1;
@@ -127,6 +135,10 @@
 
 .subheading {
   margin-top: 16px !important;
+}
+
+.videoHeading {
+  margin-top: 26px !important;
 }
 
 .workList {

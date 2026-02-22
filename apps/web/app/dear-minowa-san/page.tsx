@@ -56,7 +56,7 @@ const currentWorks = [
 
 const visionSections = [
   {
-    title: "Vision 1: 日本発グローバルプラットフォームを作る",
+    title: "1. 日本発グローバルプラットフォームを作る",
     paragraphs: [
       "私たちの第一のビジョンは、日本発のグローバルプラットフォームを作ることです。AIで制作コストが下がる時代に希少になるのは、アウトプット単体ではなく、積み上げられた歴史と人格です。継続的な制作ログ、時間をかけて育つキャラクター、作り手の一貫した物語は短期で模倣できません。",
       "日本が強みとしてきた連載文化・IP運用・推し文化は、この時代の価値構造と一致しています。さらに、日本のアニメやキャラクター、美学は言語に依存せず世界で受容されてきた実績があり、ショート動画はその発見と拡散を加速させる分配装置になります。",
@@ -64,7 +64,7 @@ const visionSections = [
     ],
   },
   {
-    title: "Vision 2: 応援が価値になる新しい経済を作る",
+    title: "2. 応援が価値になる新しい経済を作る",
     paragraphs: [
       "クラウドファンディングやDAO、株式の小口化によって、『プロジェクトを支援し、見返りを得る』構造はすでに一般化しました。支援は富裕層だけの行為ではなく、より多くの人が参加できる行為になっています。",
       "一方で今の仕組みには、高サイクル性が足りません。良いプロジェクトを素早く見つけ、自分の行動で押し上げ、影響を実感する循環が弱い。支援はできても、発見と増幅の速度が遅く、個人の関与実感が薄いのが課題です。",
@@ -124,9 +124,8 @@ export default function DearMinowaPage() {
 
       <section className={styles.section}>
         <h2>私たちは誰か</h2>
-        <div className={styles.visionBlock}>
+        <div className={`${styles.visionBlock} ${styles.flatBlock}`}>
           <section className={styles.visionSection}>
-            <h3>経歴</h3>
             <p>{whoWeAreIntro}</p>
 
             <h3 className={styles.subheading}>今やっていること</h3>
@@ -145,7 +144,9 @@ export default function DearMinowaPage() {
               ))}
             </ul>
 
-            <h3 className={styles.subheading}>自己紹介とアプリのデモ動画です！（3分）</h3>
+            <h3 className={`${styles.subheading} ${styles.videoHeading}`}>
+              自己紹介とアプリのデモ動画です！（3分）
+            </h3>
             <div className={styles.videoWrap}>
               <iframe
                 className={styles.videoFrame}
