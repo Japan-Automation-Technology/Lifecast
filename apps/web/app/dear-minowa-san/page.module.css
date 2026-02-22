@@ -94,6 +94,10 @@
   line-height: 1.9;
 }
 
+.list li + li {
+  margin-top: 14px;
+}
+
 .visionBlock {
   margin-top: 14px;
   border: 1px solid #2a3550;
