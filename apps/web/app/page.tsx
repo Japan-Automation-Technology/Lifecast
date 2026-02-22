@@ -6,12 +6,12 @@ const keyPoints = [
     description: "進捗動画を起点に、応援したいプロジェクトをすぐ見つけられる。"
   },
   {
-    title: "Simple Support Flow",
-    description: "プランを選んでそのまま支援へ。迷わない導線で完了できる。"
+    title: "Participatory Support",
+    description: "プロセスを応援しながら、プロジェクトの一員として参加できる。"
   },
   {
-    title: "Clear Funding Rule",
-    description: "all-or-nothingで明快。目標未達時は自動返金される。"
+    title: "Simple Support Flow",
+    description: "プランを選んでそのまま支援へ。迷わない導線で完了できる。"
   }
 ];
 
@@ -58,7 +58,6 @@ export default function HomePage() {
               <a href="#detail" className="primaryButton">
                 Waitlistに登録
               </a>
-              <p className="heroNote">return-based / all-or-nothing</p>
             </div>
           </div>
 
