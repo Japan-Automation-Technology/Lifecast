@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import styles from "./page.module.css";
 
 export const metadata: Metadata = {
@@ -81,17 +82,30 @@ const whyMinowaItems = [
 export default function DearMinowaPage() {
   return (
     <main className={styles.page}>
-      <section className={styles.hero}>
-        <p className={styles.kicker}>Dear Minowa-san</p>
-        <h1>箕輪厚介さんへ</h1>
-        <p>
-          Lifecastは、ショート動画×プロセスエコノミーに最適化されたクラウドファンディングプラットフォームです。
-          日本初のグローバルプラットフォームを創出し、起業や資金調達の常識を変えることを目指しています。
-          以下をお読みいただき、私たちのビジョンと熱意を感じ取っていただければ幸いです。
-        </p>
+      <section className="hero" id="top">
+        <div className="heroPanel">
+          <div className="heroCopy">
+            <p className="eyebrow">DEAR MINOWA-SAN</p>
+            <h1 className={styles.dearTitle}>箕輪厚介さんへ</h1>
+            <p className="lead">
+              Lifecastは、ショート動画×プロセスエコノミーに最適化されたクラウドファンディングプラットフォームです。
+              日本発のグローバルプラットフォームとして、起業と資金調達の常識を更新したいと考えています。
+            </p>
+          </div>
+
+          <div className="heroArt" aria-hidden="true">
+            <Image
+              src="/hero-iphone.png"
+              alt="iPhone preview"
+              width={420}
+              height={860}
+              priority
+            />
+          </div>
+        </div>
       </section>
 
-      <section className={styles.section}>
+      <section className={styles.section} id="who-we-are">
         <h2>なぜショート動画型クラウドファンディングが来るのか</h2>
         <div className={styles.grid}>
           {whyNowItems.map((item) => (

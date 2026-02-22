@@ -33,6 +33,13 @@
   line-height: 1.8;
 }
 
+@media (min-width: 861px) {
+  .dearTitle {
+    font-size: clamp(44px, 5.8vw, 82px);
+    white-space: nowrap;
+  }
+}
+
 .section {
   margin-top: 34px;
 }
