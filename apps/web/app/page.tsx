@@ -1,76 +1,121 @@
-const mvpFeatures = [
+const keyPoints = [
   {
-    title: "Short Video Feed",
-    description: "縦型の短尺フィードで、挑戦の進捗をテンポよく発見。"
+    title: "Short Video Discovery",
+    description: "進捗動画を起点に、応援したいプロジェクトをすぐ見つけられる。"
   },
   {
-    title: "3-Tier Plan Setup",
-    description: "最大3プランでシンプルに支援募集を開始。"
+    title: "Simple Support Flow",
+    description: "プランを選んでそのまま支援へ。迷わない導線で完了できる。"
   },
   {
-    title: "All-or-Nothing Funding",
-    description: "目標未達時は自動返金される、明快な資金調達モデル。"
-  },
-  {
-    title: "Supporter Identity",
-    description: "バッジや支援履歴で、応援が可視化されるコミュニティ。"
+    title: "Clear Funding Rule",
+    description: "all-or-nothingで明快。目標未達時は自動返金される。"
   }
 ];
 
-const flowSteps = [
-  "動画で挑戦を投稿",
-  "プランを選んで支援",
-  "達成までの進捗を一緒に追う"
+const steps = [
+  {
+    id: "01",
+    title: "見る",
+    description: "フィードで進捗動画を見て、気になるプロジェクトを選ぶ。"
+  },
+  {
+    id: "02",
+    title: "選ぶ",
+    description: "プランの内容・金額・配送見込みを確認して選択する。"
+  },
+  {
+    id: "03",
+    title: "支援する",
+    description: "チェックアウトを完了し、支援履歴に反映される。"
+  }
+];
+
+const trustItems = [
+  "購入型クラウドファンディング（投資型ではない）",
+  "MVPの支援はリターンありのみ",
+  "決済成功はサーバー側（Webhook確認）を正とする"
 ];
 
 export default function HomePage() {
   return (
     <main className="page">
-      <section className="hero">
-        <p className="eyebrow">LIFECAST</p>
-        <h1>Build In Public, Back In Public.</h1>
-        <p className="lead">
-          Lifecastは、クリエイターの開発プロセスを短尺動画で届け、
-          その場で支援につなげるモバイル中心の購入型クラウドファンディングです。
-        </p>
-        <div className="heroActions">
-          <a href="#features" className="button buttonPrimary">
-            MVP機能を見る
+      <header className="header">
+        <a href="#top" className="logo">
+          Lifecast
+        </a>
+        <a href="#detail" className="waitlistButton">
+          Waitlist
+        </a>
+      </header>
+
+      <section className="hero" id="top">
+        <div className="heroCopy">
+          <p className="eyebrow">MOBILE-FIRST CROWDFUNDING</p>
+          <h1>Build in public, back in public.</h1>
+          <p className="lead">
+            短尺動画で進捗を届け、応援につなげる購入型クラウドファンディング。
+            発見から支援まで、モバイルでシンプルに完結します。
+          </p>
+          <a href="#detail" className="primaryButton">
+            Waitlistに登録
           </a>
-          <a href="#coming-soon" className="button buttonGhost">
-            リリース情報
-          </a>
+          <p className="heroNote">return-based / all-or-nothing</p>
+        </div>
+
+        <div className="heroPoints">
+          <h2>Key Points</h2>
+          <div className="pointGrid">
+            {keyPoints.map((item, index) => (
+              <article className="pointCard" key={item.title}>
+                <p className="pointIndex">{`0${index + 1}`}</p>
+                <h3>{item.title}</h3>
+                <p>{item.description}</p>
+              </article>
+            ))}
+          </div>
         </div>
       </section>
 
-      <section id="features" className="section">
-        <h2>MVPでできること</h2>
-        <div className="featureGrid">
-          {mvpFeatures.map((feature) => (
-            <article key={feature.title} className="featureCard">
-              <h3>{feature.title}</h3>
-              <p>{feature.description}</p>
-            </article>
-          ))}
+      <section className="detail" id="detail">
+        <div className="detailBlock">
+          <h2>How It Works</h2>
+          <div className="stepList">
+            {steps.map((step) => (
+              <article className="stepItem" key={step.id}>
+                <p className="stepId">{step.id}</p>
+                <div>
+                  <h3>{step.title}</h3>
+                  <p>{step.description}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className="detailBlock trustBlock">
+          <h2>Trust</h2>
+          <ul>
+            {trustItems.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
         </div>
       </section>
 
-      <section className="section">
-        <h2>使い方はシンプル</h2>
-        <ol className="flowList">
-          {flowSteps.map((step) => (
-            <li key={step}>{step}</li>
-          ))}
-        </ol>
-      </section>
-
-      <section id="coming-soon" className="section sectionAccent">
-        <h2>Web版は準備中</h2>
-        <p>
-          現在はモバイルアプリ体験を優先して開発中です。Webでは当面、
-          サービス紹介とポリシー関連ページを提供予定です。
-        </p>
-      </section>
+      <footer className="footer">
+        <div>
+          <p className="logo">Lifecast</p>
+          <p className="footerText">
+            Short-video-first purchase-style crowdfunding platform.
+          </p>
+        </div>
+        <div className="footerLinks">
+          <a href="#">Policy</a>
+          <a href="#">Contact</a>
+          <a href="#">Terms</a>
+        </div>
+      </footer>
     </main>
   );
 }
