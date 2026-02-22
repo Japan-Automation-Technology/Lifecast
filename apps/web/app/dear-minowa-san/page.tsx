@@ -137,7 +137,7 @@ export default function DearMinowaPage() {
               ))}
             </ul>
 
-            <h3 className={styles.subheading}>軽い自己紹介動画です！（3分）</h3>
+            <h3 className={styles.subheading}>自己紹介とアプリのデモ動画です！（3分）</h3>
             <div className={styles.videoWrap}>
               <iframe
                 className={styles.videoFrame}
