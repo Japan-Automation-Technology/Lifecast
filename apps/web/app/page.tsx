@@ -63,7 +63,7 @@ export default function HomePage() {
 
           <div className="heroArt" aria-hidden="true">
             <Image
-              src="/hero-iphone.svg"
+              src="/hero-iphone.png"
               alt="iPhone preview"
               width={420}
               height={860}

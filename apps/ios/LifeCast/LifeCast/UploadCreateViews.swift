@@ -22,6 +22,7 @@ struct UploadCreateView: View {
     @State private var descriptionText = ""
     @State private var tagsText = ""
     @State private var linkText = ""
+    @FocusState private var focusedField: CreateInputField?
 
     var body: some View {
         NavigationStack {
@@ -39,6 +40,10 @@ struct UploadCreateView: View {
                 .padding(.bottom, 36)
             }
             .scrollDismissesKeyboard(.interactively)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                focusedField = nil
+            }
             .navigationTitle("Create")
             .task {
                 await loadActiveProject()
@@ -102,6 +107,7 @@ struct UploadCreateView: View {
                     .padding(8)
                     .background(Color.gray.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .focused($focusedField, equals: .description)
 
                 TextField("Tags (comma separated)", text: $tagsText)
                     .textInputAutocapitalization(.never)
@@ -110,6 +116,7 @@ struct UploadCreateView: View {
                     .frame(height: 42)
                     .background(Color.gray.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .focused($focusedField, equals: .tags)
 
                 TextField("Link (optional)", text: $linkText)
                     .textInputAutocapitalization(.never)
@@ -119,6 +126,7 @@ struct UploadCreateView: View {
                     .frame(height: 42)
                     .background(Color.gray.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .focused($focusedField, equals: .link)
 
                 Button("Publish") {
                     Task {
@@ -458,6 +466,12 @@ struct UploadCreateView: View {
         }
         return "Upload failed. Please retry."
     }
+}
+
+private enum CreateInputField: Hashable {
+    case description
+    case tags
+    case link
 }
 
 private struct SelectedUploadVideo {
