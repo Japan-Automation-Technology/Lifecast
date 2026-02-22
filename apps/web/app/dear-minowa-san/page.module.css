@@ -118,6 +118,47 @@
   letter-spacing: -0.01em;
 }
 
+.subheading {
+  margin-top: 16px !important;
+}
+
+.workList {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.workItem + .workItem {
+  margin-top: 10px;
+}
+
+.workTitle {
+  color: #d8e7ff;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: rgba(216, 231, 255, 0.45);
+  text-underline-offset: 3px;
+}
+
+.workItem p {
+  margin: 4px 0 0;
+  color: #c0cae1;
+}
+
+.videoWrap {
+  margin-top: 10px;
+  border: 1px solid #2a3550;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0d1422;
+}
+
+.videoFrame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+}
+
 .closing {
   margin-top: 36px;
   border-top: 1px solid #2a3550;
