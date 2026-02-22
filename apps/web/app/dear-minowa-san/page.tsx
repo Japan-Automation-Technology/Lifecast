@@ -78,12 +78,6 @@ const whyMinowaItems = [
   "何よりも個人的に強くリスペクトしており、発信を見続ける中で何度も学ばせてもらってきました。私がこのアイデアを思いついたのも、箕輪さんの本や動画から得たインプットの積み重ねによるところも大いにあると思います。冷奴チャンネルや人間エネルギーカードなど、箕輪さんならではの独特な発想も大好きです。私からの感謝の気持ちも込めて、ぜひこの会社の株式を持っていただきたいと思っています。",
 ];
 
-const whyUsItems = [
-  "自分たちでクラファンをやろうとして、現行UXの課題を当事者として痛感した（Laplaceというボードゲーム企画）。",
-  "AIを中心とした最新技術との親和性が高く、制作・運営の効率化を実践してきた（Singular Radio運営）。",
-  "海外大生として、国内最適に閉じないグローバル志向でプロダクトを設計できる。",
-];
-
 export default function DearMinowaPage() {
   return (
     <main className={styles.page}>
@@ -170,15 +164,6 @@ export default function DearMinowaPage() {
         <h2>なぜ、箕輪さんに関わってほしいのか</h2>
         <ul className={styles.list}>
           {whyMinowaItems.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      </section>
-
-      <section className={styles.section}>
-        <h2>なぜ、私たちであるべきか</h2>
-        <ul className={styles.list}>
-          {whyUsItems.map((item) => (
             <li key={item}>{item}</li>
           ))}
         </ul>

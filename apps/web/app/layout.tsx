@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Manrope, Noto_Sans_JP } from "next/font/google";
+import Link from "next/link";
 import "./globals.css";
 
 const titleFont = Manrope({
@@ -28,7 +29,17 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
-      <body className={`${titleFont.variable} ${bodyFont.variable}`}>{children}</body>
+      <body className={`${titleFont.variable} ${bodyFont.variable}`}>
+        <header className="header">
+          <Link href="/#top" className="logo">
+            Lifecast
+          </Link>
+          <Link href="/#detail" className="waitlistButton">
+            Waitlist
+          </Link>
+        </header>
+        {children}
+      </body>
     </html>
   );
 }

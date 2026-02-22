@@ -36,15 +36,6 @@ const steps = [
 export default function HomePage() {
   return (
     <main className="page">
-      <header className="header">
-        <a href="#top" className="logo">
-          Lifecast
-        </a>
-        <a href="#detail" className="waitlistButton">
-          Waitlist
-        </a>
-      </header>
-
       <section className="hero" id="top">
         <div className="heroPanel">
           <div className="heroCopy">
