@@ -213,12 +213,11 @@ h1 {
   display: block;
   width: min(100%, 340px);
   height: auto;
-  border-radius: 44px;
-  border: none;
-  box-shadow:
-    0 26px 52px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(132, 158, 230, 0.18),
-    0 0 42px rgba(95, 178, 246, 0.2);
+  border-radius: 0;
+  box-shadow: none;
+  filter:
+    drop-shadow(0 24px 48px rgba(0, 0, 0, 0.48))
+    drop-shadow(0 0 28px rgba(95, 178, 246, 0.18));
 }
 
 .heroPoints {
