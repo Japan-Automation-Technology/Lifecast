@@ -9,6 +9,7 @@ dist/
 pnpm-debug.log*
 .tmp/
 apps/backend/.data/
+apps/*/.next/
 
 # Xcode user/local build artifacts
 DerivedData/
