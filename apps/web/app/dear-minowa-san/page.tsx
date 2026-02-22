@@ -78,7 +78,7 @@ export default function DearMinowaPage() {
       </section>
 
       <section className={styles.section}>
-        <h2>なぜショート型クラウドファンディングが来るのか</h2>
+        <h2>なぜショート動画型クラウドファンディングが来るのか</h2>
         <div className={styles.grid}>
           {whyNowItems.map((item) => (
             <article key={item.title} className={styles.card}>
