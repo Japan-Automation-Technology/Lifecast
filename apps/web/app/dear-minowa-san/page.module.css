@@ -139,11 +139,18 @@
 }
 
 .workTitle {
-  color: #d8e7ff;
   font-weight: 700;
+}
+
+a.workTitle {
+  color: #8fc7ff;
   text-decoration: underline;
-  text-decoration-color: rgba(216, 231, 255, 0.45);
+  text-decoration-color: rgba(143, 199, 255, 0.6);
   text-underline-offset: 3px;
+}
+
+a.workTitle:hover {
+  color: #b6dcff;
 }
 
 .workItem p {
@@ -176,6 +183,17 @@
   margin: 12px 0 0;
   color: #c0cae1;
   line-height: 1.8;
+}
+
+.closing a {
+  color: #8fc7ff;
+  text-decoration: underline;
+  text-decoration-color: rgba(143, 199, 255, 0.6);
+  text-underline-offset: 3px;
+}
+
+.closing a:hover {
+  color: #b6dcff;
 }
 
 @media (max-width: 780px) {

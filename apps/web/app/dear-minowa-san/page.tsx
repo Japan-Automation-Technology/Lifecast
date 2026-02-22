@@ -186,8 +186,18 @@ export default function DearMinowaPage() {
       <section className={styles.closing}>
         <h2>最後に</h2>
         <p>
-          もし一度お時間をいただけるなら、プロダクトの実画面と事業構想を10分でお見せします。
-          応援が経済行動の中心になる時代に、次の当たり前を一緒に作りたいです。
+          最後までお読みいただき、ありがとうございます。
+          もし少しでもご興味を持っていただけたら、今後の関わり方について、チャットでも構いませんので一度お話しさせてください。
+          私たちはまだアイデア・デモアプリの段階ですが、箕輪さんとともにLifecastを世界に通用するプラットフォームへ育て、応援社会の当たり前を作り上げていきたいと考えています。
+          <a href="https://x.com/dancing_amigo" target="_blank" rel="noreferrer">
+            XのDM（@dancing_amigo）
+          </a>
+          、または
+          <a href="mailto:htakeshi0614@gmail.com">
+            メール（htakeshi0614@gmail.com）
+          </a>
+          までご連絡いただけますと幸いです。
+          どうぞよろしくお願いいたします。
         </p>
       </section>
     </main>
