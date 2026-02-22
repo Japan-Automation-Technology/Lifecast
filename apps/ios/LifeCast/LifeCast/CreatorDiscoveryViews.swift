@@ -733,6 +733,7 @@ struct CreatorPublicPageView: View {
                 client: client,
                 projectContext: makeCreatorFeedProject(page),
                 isCurrentUserVideo: isViewingSelfProfile == true,
+                onSupportTap: onSupportTap,
                 onVideoDeleted: {}
             )
         }

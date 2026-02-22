@@ -115,6 +115,7 @@ struct PostedVideosListView: View {
                     isSupportedByCurrentUser: false
                 ),
                 isCurrentUserVideo: true,
+                onSupportTap: { _, _ in },
                 onVideoDeleted: {
                     onRefreshVideos()
                 }
@@ -145,6 +146,7 @@ struct CreatorPostedFeedView: View {
     let client: LifeCastAPIClient
     let projectContext: FeedProjectSummary
     let isCurrentUserVideo: Bool
+    let onSupportTap: (MyProjectResult, UUID?) -> Void
     let onVideoDeleted: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -189,6 +191,7 @@ struct CreatorPostedFeedView: View {
         client: LifeCastAPIClient,
         projectContext: FeedProjectSummary,
         isCurrentUserVideo: Bool,
+        onSupportTap: @escaping (MyProjectResult, UUID?) -> Void = { _, _ in },
         onVideoDeleted: @escaping () -> Void
     ) {
         self.videos = videos
@@ -196,6 +199,7 @@ struct CreatorPostedFeedView: View {
         self.client = client
         self.projectContext = projectContext
         self.isCurrentUserVideo = isCurrentUserVideo
+        self.onSupportTap = onSupportTap
         self.onVideoDeleted = onVideoDeleted
         let initial = videos.firstIndex(where: { $0.video_id == initialVideoId }) ?? 0
         _feedVideos = State(initialValue: videos)
@@ -347,7 +351,7 @@ struct CreatorPostedFeedView: View {
             CreatorPublicPageView(
                 client: client,
                 creatorId: route.id,
-                onSupportTap: { _, _ in }
+                onSupportTap: onSupportTap
             )
         }
     }
@@ -583,6 +587,7 @@ struct CreatorPostedFeedView: View {
                     postedFeedPanelDragOffsetX = max(0, dx)
                 }
             ) { idx in
+                let tappedPlan = idx > 0 ? plans[idx - 1] : nil
                 VStack(alignment: .leading, spacing: 12) {
                     FeedPanelPageHeaderView(currentPage: idx, plansCount: plans.count, totalCount: feedPanelPageCount(for: project))
                     if idx == 0 {
@@ -592,6 +597,21 @@ struct CreatorPostedFeedView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .contentShape(Rectangle())
+                .gesture(
+                    TapGesture(count: 2)
+                        .onEnded {
+                            Task {
+                                await likeOnDoubleTapInPostedFeed(project: project)
+                            }
+                        }
+                        .exclusively(before: TapGesture(count: 1).onEnded {
+                            guard !isCurrentUserVideo else { return }
+                            Task {
+                                await triggerSupportFromPanel(project: project, preferredPlanId: tappedPlan?.id)
+                            }
+                        })
+                )
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
@@ -673,8 +693,14 @@ struct CreatorPostedFeedView: View {
             isChecked: project.isSupportedByCurrentUser,
             isNeutral: isNeutralState
         ) {
-            if !showFeedProjectPanel {
-                openPostedFeedProjectPanel(for: project)
+            if isCurrentUserVideo {
+                if !showFeedProjectPanel {
+                    openPostedFeedProjectPanel(for: project)
+                }
+            } else {
+                Task {
+                    await triggerSupportFromPanel(project: project, preferredPlanId: nil)
+                }
             }
         }
     }
@@ -1182,6 +1208,33 @@ struct CreatorPostedFeedView: View {
             let videoId = feedVideos[idx].video_id
             let context = resolvedProjectContext(for: videoId)
             await loadPostedFeedProjectDetail(for: context, forceRefresh: false)
+        }
+    }
+
+    private func triggerSupportFromPanel(project: FeedProjectSummary, preferredPlanId: UUID?) async {
+        guard !isCurrentUserVideo else { return }
+        if let cached = feedProjectDetailsById[project.id] {
+            await MainActor.run {
+                onSupportTap(cached, preferredPlanId)
+            }
+            return
+        }
+        do {
+            let page = try await client.getCreatorPage(creatorUserId: project.creatorId)
+            if let detail = page.project {
+                await MainActor.run {
+                    feedProjectDetailsById[project.id] = detail
+                    onSupportTap(detail, preferredPlanId)
+                }
+            } else {
+                await MainActor.run {
+                    deleteErrorText = "No active project to support."
+                }
+            }
+        } catch {
+            await MainActor.run {
+                deleteErrorText = "Failed to load support plans: \(error.localizedDescription)"
+            }
         }
     }
 
