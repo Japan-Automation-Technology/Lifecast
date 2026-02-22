@@ -1,13 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { extname, resolve } from "node:path";
+import { extname } from "node:path";
 import { z } from "zod";
 import { requireRequestUserId } from "../auth/requestContext.js";
 import { fail, ok } from "../response.js";
 import { store } from "../store/hybridStore.js";
-
-const PROJECT_IMAGE_ROOT = resolve(process.cwd(), ".data/project-images");
+import { readImageBinary, writeImageBinary } from "../store/services/imageStorageService.js";
+import { buildPublicAppUrl, normalizeLegacyLocalAssetUrl, normalizeLegacyLocalAssetUrls } from "../url/publicAssetUrl.js";
 
 const createProjectBody = z.object({
   title: z.string().min(1).max(120),
@@ -128,8 +127,8 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     creator_user_id: project.creatorUserId,
     title: project.title,
     subtitle: project.subtitle,
-    image_url: project.imageUrl,
-    image_urls: project.imageUrls,
+    image_url: normalizeLegacyLocalAssetUrl(project.imageUrl),
+    image_urls: normalizeLegacyLocalAssetUrls(project.imageUrls),
     category: project.category,
     location: project.location,
     status: project.status,
@@ -150,7 +149,7 @@ export async function registerProjectRoutes(app: FastifyInstance) {
           price_minor: project.minimumPlan.priceMinor,
           reward_summary: project.minimumPlan.rewardSummary,
           description: project.minimumPlan.description,
-          image_url: project.minimumPlan.imageUrl,
+          image_url: normalizeLegacyLocalAssetUrl(project.minimumPlan.imageUrl),
           currency: project.minimumPlan.currency,
         }
       : null,
@@ -160,7 +159,7 @@ export async function registerProjectRoutes(app: FastifyInstance) {
       price_minor: plan.priceMinor,
       reward_summary: plan.rewardSummary,
       description: plan.description,
-      image_url: plan.imageUrl,
+      image_url: normalizeLegacyLocalAssetUrl(plan.imageUrl),
       currency: plan.currency,
     })),
   });
@@ -197,11 +196,14 @@ export async function registerProjectRoutes(app: FastifyInstance) {
 
     const imageId = randomUUID();
     const fileName = `${imageId}.${ext}`;
-    const filePath = resolve(PROJECT_IMAGE_ROOT, fileName);
-    await mkdir(PROJECT_IMAGE_ROOT, { recursive: true });
-    await writeFile(filePath, data);
+    await writeImageBinary({
+      kind: "projects",
+      fileName,
+      contentType,
+      data,
+    });
 
-    const imageUrl = `${req.protocol}://${req.headers.host}/v1/projects/images/${fileName}`;
+    const imageUrl = buildPublicAppUrl(`/v1/projects/images/${fileName}`);
     return reply.send(ok({ image_url: imageUrl }));
   });
 
@@ -212,10 +214,9 @@ export async function registerProjectRoutes(app: FastifyInstance) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid file name"));
     }
 
-    const filePath = resolve(PROJECT_IMAGE_ROOT, fileName);
     let binary: Buffer;
     try {
-      binary = await readFile(filePath);
+      binary = await readImageBinary({ kind: "projects", fileName });
     } catch {
       return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Image not found"));
     }

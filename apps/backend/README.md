@@ -53,3 +53,6 @@ Key env vars:
 - `LIFECAST_STRIPE_WEBHOOK_SECRET`
 - `LIFECAST_OUTBOX_WEBHOOK_URL`
 - `LIFECAST_OUTBOX_WEBHOOK_BEARER`
+- `LIFECAST_PUBLIC_BASE_URL` (for absolute URL generation in API responses)
+- `LIFECAST_GCS_BUCKET` (optional; when set, project/profile images are stored in GCS)
+- `LIFECAST_GCS_IMAGE_PREFIX` (optional; default `images`)

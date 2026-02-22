@@ -4,6 +4,9 @@
 - User-facing brand capitalization is standardized as `Lifecast` in app UI copy and core docs/contracts titles.
 - iOS app display name is set via build settings (`PRODUCT_NAME` + `CFBundleDisplayName` = `Lifecast`).
 - iOS Bundle identifier is switched to `jp.lifecast.lifecast` before first App Store Connect upload; Apple Developer App ID/provisioning must match this value.
+- Project/plan/profile image storage is switched to GCS when `LIFECAST_GCS_BUCKET` is configured; local filesystem storage remains fallback for local development.
+- Image upload APIs now generate absolute URLs from `LIFECAST_PUBLIC_BASE_URL` (not request host/protocol) to avoid `localhost` leakage to real-device clients.
+- Added one-off migration script `pnpm -C /Users/takeshi/Desktop/lifecast/apps/backend db:normalize-image-urls` to rewrite legacy `localhost` image URLs in DB records to the current public base URL.
 
 ## 2026-02-21
 - Event contract v1 expanded with watch-quality events (`video_play_started`, `video_watch_progress`) as backward-compatible additions.

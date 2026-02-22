@@ -1,13 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import type { PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { extname, resolve } from "node:path";
+import { extname } from "node:path";
 import { z } from "zod";
 import { requireRequestUserId } from "../auth/requestContext.js";
 import { fail, ok } from "../response.js";
 import { dbPool, hasDb } from "../store/db.js";
 import { store } from "../store/hybridStore.js";
+import { readImageBinary, writeImageBinary } from "../store/services/imageStorageService.js";
+import { buildPublicAppUrl, getPublicBaseUrl, normalizeLegacyLocalAssetUrl, normalizeLegacyLocalAssetUrls } from "../url/publicAssetUrl.js";
 
 const discoverQuery = z.object({
   query: z.string().max(80).optional(),
@@ -56,8 +57,6 @@ const updateMyProfileBody = z
   .refine((value) => value.username !== undefined || value.display_name !== undefined || value.bio !== undefined || value.avatar_url !== undefined, {
     message: "At least one field must be provided",
   });
-
-const PROFILE_IMAGE_ROOT = resolve(process.cwd(), ".data/profile-images");
 
 async function loadProfileStats(client: PoolClient, creatorUserId: string, excludeCreatorUserId?: string) {
   let followersCount = 0;
@@ -225,7 +224,7 @@ async function loadSupportedProjects(client: PoolClient, supporterUserId: string
     currency: row.currency,
     project_title: row.project_title,
     project_subtitle: row.project_subtitle,
-    project_image_url: row.project_image_url,
+    project_image_url: normalizeLegacyLocalAssetUrl(row.project_image_url),
     project_goal_amount_minor: Number(row.project_goal_amount_minor ?? 0),
     project_funded_amount_minor: Number(row.project_funded_amount_minor ?? 0),
     project_currency: row.project_currency,
@@ -325,7 +324,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
 
     const client = await dbPool.connect();
     try {
-      const publicBaseUrl = (process.env.LIFECAST_PUBLIC_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+      const publicBaseUrl = getPublicBaseUrl();
       const result = await client.query<{
         project_id: string;
         creator_user_id: string;
@@ -428,7 +427,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             project_id: row.project_id,
             creator_user_id: row.creator_user_id,
             username: row.username,
-            creator_avatar_url: row.creator_avatar_url,
+            creator_avatar_url: normalizeLegacyLocalAssetUrl(row.creator_avatar_url),
             caption: row.caption ?? "Project update",
             video_id: row.video_id,
             playback_url: row.video_id ? `${publicBaseUrl}/v1/videos/${row.video_id}/playback` : null,
@@ -909,7 +908,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
 
     const client = await dbPool.connect();
     try {
-      const publicBaseUrl = (process.env.LIFECAST_PUBLIC_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+      const publicBaseUrl = getPublicBaseUrl();
       const result = await client.query<{
         video_id: string;
         creator_user_id: string;
@@ -1017,8 +1016,8 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
                 creator_user_id: project.creatorUserId,
                 title: project.title,
                 subtitle: project.subtitle,
-                image_url: project.imageUrl,
-                image_urls: project.imageUrls,
+                image_url: normalizeLegacyLocalAssetUrl(project.imageUrl),
+                image_urls: normalizeLegacyLocalAssetUrls(project.imageUrls),
                 category: project.category,
                 location: project.location,
                 status: project.status,
@@ -1032,8 +1031,26 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
                 description: project.description,
                 urls: project.urls,
                 created_at: project.createdAt,
-                minimum_plan: project.minimumPlan,
-                plans: project.plans,
+                minimum_plan: project.minimumPlan
+                  ? {
+                      id: project.minimumPlan.id,
+                      name: project.minimumPlan.name,
+                      price_minor: project.minimumPlan.priceMinor,
+                      reward_summary: project.minimumPlan.rewardSummary,
+                      description: project.minimumPlan.description,
+                      image_url: normalizeLegacyLocalAssetUrl(project.minimumPlan.imageUrl),
+                      currency: project.minimumPlan.currency,
+                    }
+                  : null,
+                plans: project.plans.map((plan) => ({
+                  id: plan.id,
+                  name: plan.name,
+                  price_minor: plan.priceMinor,
+                  reward_summary: plan.rewardSummary,
+                  description: plan.description,
+                  image_url: normalizeLegacyLocalAssetUrl(plan.imageUrl),
+                  currency: plan.currency,
+                })),
               }
             : null,
           videos: videos,
@@ -1078,7 +1095,10 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
 
       return reply.send(
         ok({
-          profile: profileResult.rows[0],
+          profile: {
+            ...profileResult.rows[0],
+            avatar_url: normalizeLegacyLocalAssetUrl(profileResult.rows[0].avatar_url),
+          },
           viewer_relationship: relationship,
           profile_stats: profileStats,
           project: project
@@ -1087,8 +1107,8 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
                 creator_user_id: project.creatorUserId,
                 title: project.title,
                 subtitle: project.subtitle,
-                image_url: project.imageUrl,
-                image_urls: project.imageUrls,
+                image_url: normalizeLegacyLocalAssetUrl(project.imageUrl),
+                image_urls: normalizeLegacyLocalAssetUrls(project.imageUrls),
                 category: project.category,
                 location: project.location,
                 status: project.status,
@@ -1109,7 +1129,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
                       price_minor: project.minimumPlan.priceMinor,
                       reward_summary: project.minimumPlan.rewardSummary,
                       description: project.minimumPlan.description,
-                      image_url: project.minimumPlan.imageUrl,
+                      image_url: normalizeLegacyLocalAssetUrl(project.minimumPlan.imageUrl),
                       currency: project.minimumPlan.currency,
                     }
                   : null,
@@ -1119,7 +1139,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
                   price_minor: plan.priceMinor,
                   reward_summary: plan.rewardSummary,
                   description: plan.description,
-                  image_url: plan.imageUrl,
+                    image_url: normalizeLegacyLocalAssetUrl(plan.imageUrl),
                   currency: plan.currency,
                 })),
               }
@@ -1309,7 +1329,10 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       return reply.send(
         ok({
           profile_stats: profileStats,
-          rows: rows.rows,
+          rows: rows.rows.map((row) => ({
+            ...row,
+            avatar_url: normalizeLegacyLocalAssetUrl(row.avatar_url),
+          })),
         }),
       );
     } finally {
@@ -1474,7 +1497,10 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       return reply.send(
         ok({
           profile_stats: profileStats,
-          rows: rows.rows,
+          rows: rows.rows.map((row) => ({
+            ...row,
+            avatar_url: normalizeLegacyLocalAssetUrl(row.avatar_url),
+          })),
         }),
       );
     } finally {
@@ -1540,9 +1566,13 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             bio: null,
             avatar_url: null,
           };
+      const normalizedProfile = {
+        ...profile,
+        avatar_url: normalizeLegacyLocalAssetUrl(profile.avatar_url),
+      };
       return reply.send(
         ok({
-          profile,
+          profile: normalizedProfile,
           profile_stats: profileStats,
         }),
       );
@@ -1634,11 +1664,14 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
 
     const imageId = randomUUID();
     const fileName = `${imageId}.${ext}`;
-    const filePath = resolve(PROFILE_IMAGE_ROOT, fileName);
-    await mkdir(PROFILE_IMAGE_ROOT, { recursive: true });
-    await writeFile(filePath, data);
+    await writeImageBinary({
+      kind: "profiles",
+      fileName,
+      contentType,
+      data,
+    });
 
-    const imageUrl = `${req.protocol}://${req.headers.host}/v1/profiles/images/${fileName}`;
+    const imageUrl = buildPublicAppUrl(`/v1/profiles/images/${fileName}`);
     return reply.send(ok({ image_url: imageUrl }));
   });
 
@@ -1649,10 +1682,9 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid file name"));
     }
 
-    const filePath = resolve(PROFILE_IMAGE_ROOT, fileName);
     let binary: Buffer;
     try {
-      binary = await readFile(filePath);
+      binary = await readImageBinary({ kind: "profiles", fileName });
     } catch {
       return reply.code(404).send(fail("RESOURCE_NOT_FOUND", "Image not found"));
     }
@@ -1801,7 +1833,10 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
 
       return reply.send(
         ok({
-          profile: profileResult.rows[0],
+          profile: {
+            ...profileResult.rows[0],
+            avatar_url: normalizeLegacyLocalAssetUrl(profileResult.rows[0].avatar_url),
+          },
           profile_stats: profileStats,
         }),
       );

@@ -10,6 +10,7 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:seed:second-creator": "tsx src/scripts/setupSecondCreatorDemo.ts",
+    "db:normalize-image-urls": "tsx src/scripts/normalizeLegacyImageUrls.ts",
     "db:bootstrap": "pnpm db:migrate && pnpm db:seed",
     "db:reset-app-data": "tsx src/scripts/resetAppData.ts",
     "db:reset-dev-videos": "tsx src/scripts/resetDevVideos.ts",
@@ -24,6 +25,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
+    "@google-cloud/storage": "^7.19.0",
     "dotenv": "^17.3.1",
     "fastify": "^5.1.0",
     "pg": "^8.13.1",
