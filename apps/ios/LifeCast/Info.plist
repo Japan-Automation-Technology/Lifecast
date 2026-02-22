@@ -40,6 +40,8 @@
 		<key>NSAllowsArbitraryLoadsInMedia</key>
 		<true/>
 	</dict>
+	<key>LIFECAST_API_BASE_URL</key>
+	<string>https://lifecast-backend-i3ylrolgja-uw.a.run.app</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

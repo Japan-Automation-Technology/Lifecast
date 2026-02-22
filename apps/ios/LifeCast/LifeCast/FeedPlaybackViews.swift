@@ -95,7 +95,7 @@ struct PostedVideosListView: View {
             CreatorPostedFeedView(
                 videos: newestFirstVideos,
                 initialVideoId: video.video_id,
-                client: LifeCastAPIClient(baseURL: URL(string: "http://localhost:8080")!),
+                client: LifeCastAPIClient(baseURL: LifeCastRuntimeConfig.apiBaseURL),
                 projectContext: FeedProjectSummary(
                     id: UUID(),
                     creatorId: effectiveProfile?.creator_user_id ?? UUID(),
@@ -123,7 +123,7 @@ struct PostedVideosListView: View {
         }
         .task {
             if resolvedCreatorProfile == nil {
-                let api = LifeCastAPIClient(baseURL: URL(string: "http://localhost:8080")!)
+                let api = LifeCastAPIClient(baseURL: LifeCastRuntimeConfig.apiBaseURL)
                 if let fetched = try? await api.getMyProfile().profile {
                     resolvedCreatorProfile = fetched
                 }

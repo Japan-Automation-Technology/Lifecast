@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+.data
+dev-assets
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*

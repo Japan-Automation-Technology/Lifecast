@@ -1,6 +1,20 @@
 import Foundation
 import CryptoKit
 
+enum LifeCastRuntimeConfig {
+    // Cloud Run URL; can be overridden via Info.plist key LIFECAST_API_BASE_URL.
+    private static let fallbackAPIBaseURL = "https://lifecast-backend-i3ylrolgja-uw.a.run.app"
+
+    static var apiBaseURL: URL {
+        if let raw = Bundle.main.object(forInfoDictionaryKey: "LIFECAST_API_BASE_URL") as? String,
+           !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let url = URL(string: raw) {
+            return url
+        }
+        return URL(string: fallbackAPIBaseURL)!
+    }
+}
+
 struct PrepareSupportRequest: Encodable {
     let plan_id: UUID
     let quantity: Int

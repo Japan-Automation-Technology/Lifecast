@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 import UIKit
 
 struct SupportFlowDemoView: View {
-    private let client = LifeCastAPIClient(baseURL: URL(string: "http://localhost:8080")!)
+    private let client = LifeCastAPIClient(baseURL: LifeCastRuntimeConfig.apiBaseURL)
 
     @State private var selectedTab = 0
     @State private var feedMode: FeedMode = .forYou
