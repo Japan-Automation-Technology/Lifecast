@@ -89,7 +89,7 @@ export default function DearMinowaPage() {
             <h1 className={styles.dearTitle}>箕輪厚介さんへ</h1>
             <p className="lead">
               Lifecastは、ショート動画×プロセスエコノミーに最適化されたクラウドファンディングプラットフォームです。
-              日本発のグローバルプラットフォームとして、起業と資金調達の常識を更新したいと考えています。
+              日本発のグローバルプラットフォームとして、起業と資金調達の常識をアップデートしたいと考えています。
             </p>
           </div>
 
