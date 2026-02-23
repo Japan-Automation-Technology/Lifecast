@@ -40,18 +40,18 @@ const currentWorks = [
   {
     title: "シンギュラーラジオ（AIポッドキャスト）",
     url: "https://www.youtube.com/@SingularRadio",
-    note: "AI活用から論文解説まで、AIの本質的な情報を広く伝えるためのポッドキャストとそのコミュニティを運営しています。"
+    note: "AI活用から論文解説まで、AIの本質的な情報を広く伝えるためのポッドキャストとそのコミュニティを運営しています。",
   },
   {
     title: "ボードゲーム『Laplace』",
     url: "https://www.laplace.zone",
-    note: "AI時代をテーマにした2v2戦略ボードゲームを企画・開発しています。物理版をクラウドファンディング実施予定です。"
+    note: "AI時代をテーマにした2v2戦略ボードゲームを企画・開発しています。物理版をクラウドファンディング実施予定です。",
   },
   {
     title: "AI関連の研究開発",
     url: "",
-    note: "スポーツやリサーチなど、私たちの知見を活かせる分野で、企業と協力してAIの研究開発を行っています。"
-  }
+    note: "スポーツやリサーチなど、私たちの知見を活かせる分野で、企業と協力してAIの研究開発を行っています。",
+  },
 ];
 
 const visionSections = [
@@ -133,7 +133,12 @@ export default function DearMinowaPage() {
               {currentWorks.map((work) => (
                 <li key={work.title} className={styles.workItem}>
                   {work.url ? (
-                    <a href={work.url} target="_blank" rel="noreferrer" className={styles.workTitle}>
+                    <a
+                      href={work.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={styles.workTitle}
+                    >
                       {work.title}
                     </a>
                   ) : (
@@ -190,15 +195,21 @@ export default function DearMinowaPage() {
           最後までお読みいただき、ありがとうございます。
           もし少しでもご興味を持っていただけたら、今後の関わり方について、チャットでも構いませんので一度お話しさせてください。
           私たちはまだアイデア・デモ段階ですが、箕輪さんとともにLifecastを世界に通用するプラットフォームへ育て、応援社会の当たり前を作り上げていきたいと考えています。
-          <a href="https://x.com/dancing_amigo" target="_blank" rel="noreferrer">
+          その他気になる点があれば、
+          <a href="/q-and-a">Q&Aページ</a>
+          も用意していますので、あわせてご覧いただけると嬉しいです。 ご連絡は
+          <a
+            href="https://x.com/dancing_amigo"
+            target="_blank"
+            rel="noreferrer"
+          >
             XのDM（@dancing_amigo）
           </a>
           、または
           <a href="mailto:htakeshi0614@gmail.com">
             メール（htakeshi0614@gmail.com）
           </a>
-          までご連絡いただけますと幸いです。
-          どうぞよろしくお願いいたします。
+          までお願いいたします。
         </p>
       </section>
     </main>
