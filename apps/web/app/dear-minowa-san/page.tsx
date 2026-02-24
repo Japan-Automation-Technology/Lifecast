@@ -150,12 +150,12 @@ export default function DearMinowaPage() {
             </ul>
 
             <h3 className={`${styles.subheading} ${styles.videoHeading}`}>
-              自己紹介とアプリのデモ動画です！（3分）
+              自己紹介とアプリのデモ動画です！（3分40秒）
             </h3>
             <div className={styles.videoWrap}>
               <iframe
                 className={styles.videoFrame}
-                src="https://www.youtube.com/embed/M7lc1UVf-VE"
+                src="https://www.youtube.com/embed/PEQIlZHuwMk"
                 title="Temporary YouTube placeholder"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                 referrerPolicy="strict-origin-when-cross-origin"
