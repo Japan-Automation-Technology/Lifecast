@@ -162,8 +162,11 @@ struct SupportFlowDemoView: View {
             }, onOpenAuth: {
                 showAuthSheet = true
             }, onAutoOpenPickerCancelled: {
-                guard selectedTab == 2 else { return }
-                selectedTab = tabBeforeCreate
+                let fallbackTab = 0
+                selectedTab = (tabBeforeCreate == 2) ? fallbackTab : tabBeforeCreate
+            }, onPreviewBackToPreviousTab: {
+                let fallbackTab = 0
+                selectedTab = (tabBeforeCreate == 2) ? fallbackTab : tabBeforeCreate
             }, onFullscreenPreviewChanged: { isFullscreen in
                 isCreateFullscreenPreview = isFullscreen
             })

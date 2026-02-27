@@ -9,6 +9,7 @@ struct UploadCreateView: View {
     let onUploadReady: () -> Void
     let onOpenAuth: () -> Void
     let onAutoOpenPickerCancelled: () -> Void
+    let onPreviewBackToPreviousTab: () -> Void
     let onFullscreenPreviewChanged: (Bool) -> Void
 
     @State private var isVideoPickerPresented = false
@@ -161,6 +162,7 @@ struct UploadCreateView: View {
 
                         Button {
                             resetSelectedVideoAndReturnToPicker()
+                            onPreviewBackToPreviousTab()
                         } label: {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 20, weight: .semibold))
