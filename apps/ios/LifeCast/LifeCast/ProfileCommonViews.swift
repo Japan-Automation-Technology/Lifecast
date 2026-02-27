@@ -586,9 +586,11 @@ struct ProfileProjectDetailView: View {
                 }
                 .frame(width: contentColumnWidth, alignment: .leading)
 
-                HStack(spacing: 12) {
+                HStack(spacing: 0) {
                     statsCard(icon: "person.2", title: "サポーター", value: "\(project.supporter_count.formatted())人")
+                        .frame(maxWidth: .infinity, alignment: .center)
                     statsCard(icon: "clock", title: "残り", value: remainingDaysText)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
                 .frame(width: contentColumnWidth, alignment: .leading)
 
@@ -778,7 +780,6 @@ struct ProfileProjectDetailView: View {
                 Text(value)
                     .font(.title3.weight(.heavy))
             }
-            Spacer(minLength: 0)
         }
         .padding(.vertical, 8)
     }
