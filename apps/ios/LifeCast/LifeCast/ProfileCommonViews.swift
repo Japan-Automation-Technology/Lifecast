@@ -466,6 +466,21 @@ struct ProfileProjectDetailView: View {
         return "\(Int(rawPercent.rounded()))%"
     }
 
+    private var rawProgressRatio: Double {
+        guard project.goal_amount_minor > 0 else { return 0 }
+        return Double(project.funded_amount_minor) / Double(project.goal_amount_minor)
+    }
+
+    private var progressFillRatio: Double {
+        min(max(rawProgressRatio, 0), 1)
+    }
+
+    private var progressFillColor: Color {
+        rawProgressRatio >= 1
+            ? Color(red: 0.83, green: 0.69, blue: 0.22)
+            : .green
+    }
+
     private var remainingDaysText: String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -544,27 +559,21 @@ struct ProfileProjectDetailView: View {
                     .frame(width: contentColumnWidth, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    GeometryReader { _ in
+                    GeometryReader { geometry in
                         ZStack(alignment: .leading) {
                             Capsule()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 0.20, green: 0.82, blue: 0.96),
-                                            Color(red: 0.78, green: 0.23, blue: 0.92),
-                                            Color(red: 1.0, green: 0.45, blue: 0.08),
-                                            Color(red: 0.98, green: 0.90, blue: 0.15),
-                                            Color(red: 0.65, green: 0.94, blue: 0.10)
-                                        ],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
+                                .fill(Color.gray.opacity(0.28))
+                            if progressFillRatio > 0 {
+                                Rectangle()
+                                    .fill(progressFillColor)
+                                    .frame(width: geometry.size.width * progressFillRatio)
+                            }
                             Text(progressPercentText)
                                 .font(.headline.weight(.black))
                                 .foregroundStyle(Color.black.opacity(0.78))
                                 .padding(.leading, 16)
                         }
+                        .clipShape(Capsule())
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .frame(height: progressBarHeight)
