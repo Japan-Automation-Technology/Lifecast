@@ -19,11 +19,6 @@
     "verify:cloudflare-stream:backend": "pnpm --filter @lifecast/backend verify:cloudflare-stream",
     "dev:backend:worker:video-processing": "pnpm --filter @lifecast/backend dev:worker:video-processing",
     "smoke:ios:appium": "node -e \"console.error('Deprecated: do not use smoke:ios:appium for UI validation. Use smoke:ios:upload-profile or smoke:ios:posted-feed. For explicit create-upload checks only, run smoke:ios:create-upload.'); process.exit(1)\"",
-    "smoke:ios:create-upload": "LIFECAST_ALLOW_CREATE_UPLOAD_SMOKE=1 node scripts/appium/ios-smoke.mjs",
-    "smoke:ios:upload-profile": "node scripts/appium/ios-upload-profile-screens.mjs",
-    "smoke:ios:posted-feed": "node scripts/appium/ios-posted-feed-navigation.mjs",
-    "smoke:ios:project-plan-image": "node scripts/appium/ios-project-plan-image-picker.mjs",
-    "smoke:ios:project-edit-keyboard-dismiss": "node scripts/appium/ios-project-edit-keyboard-dismiss.mjs",
     "dev:backend:worker:video-maintenance": "pnpm --filter @lifecast/backend dev:worker:video-maintenance"
   }
 }

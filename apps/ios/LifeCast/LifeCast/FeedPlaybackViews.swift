@@ -589,7 +589,6 @@ struct CreatorPostedFeedView: View {
             ) { idx in
                 let tappedPlan = idx > 0 ? plans[idx - 1] : nil
                 VStack(alignment: .leading, spacing: 12) {
-                    FeedPanelPageHeaderView(currentPage: idx, plansCount: plans.count, totalCount: feedPanelPageCount(for: project))
                     if idx == 0 {
                         FeedProjectOverviewPanelContentView(project: project, detail: cachedDetail, isLoading: isLoading)
                     } else {
@@ -626,7 +625,7 @@ struct CreatorPostedFeedView: View {
         .padding(.bottom, 18)
         .frame(width: width, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.black.opacity(0.86))
+        .background(FeedProjectPanelBackground())
     }
 
 

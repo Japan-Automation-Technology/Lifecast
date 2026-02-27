@@ -397,12 +397,12 @@ struct ProfileProjectDetailView: View {
     var onTapHeaderAction: (() -> Void)? = nil
 
     @State private var selectedPlan: ProjectPlanResult?
-
-    private var funded: Int { max(project.funded_amount_minor, 0) }
-    private var goal: Int { max(project.goal_amount_minor, 1) }
-    private var progressRatio: Double { Double(funded) / Double(goal) }
-    private var progressClamped: Double { min(progressRatio, 1.0) }
-    private var progressPercent: Int { Int(progressRatio * 100.0) }
+    @State private var showHeroVideo = false
+    private let contentHorizontalInset: CGFloat = 34
+    private let titleHorizontalInset: CGFloat = 12
+    private let progressHorizontalInset: CGFloat = 20
+    private let progressBarHeight: CGFloat = 32
+    private let bodyHorizontalInset: CGFloat = 10
 
     private var galleryURLs: [String] {
         if let images = project.image_urls, !images.isEmpty {
@@ -414,151 +414,184 @@ struct ProfileProjectDetailView: View {
         return []
     }
 
+    private var heroImageURL: String? {
+        galleryURLs.first
+    }
+
+    private var mockFlexibleContents: [ProjectDetailBlock] {
+        [
+            .heading("ストーリー"),
+            .text("累計6万本のトング実績から生まれた新作。調理中に置いても先端が付かない、衛生的でスマートな設計です。"),
+            .bullets([
+                "先端がテーブルに触れにくいホールド形状",
+                "分厚い肉・パスタ・揚げ物まで対応",
+                "毎日の調理で使いやすい重量バランス"
+            ]),
+            .image(heroImageURL),
+            .heading("開発のこだわり"),
+            .text("分厚い肉・パスタ・揚げ物まで幅広く対応。ホールド力と取り回しのバランスを徹底調整しました。"),
+            .quote("厚い食材をしっかり掴み、置いた時は先端が付かない。毎日の料理を少し快適にする道具です。"),
+            .image(galleryURLs.dropFirst().first ?? heroImageURL),
+            .heading("今後の拡張"),
+            .text("このセクションは将来的に、作成者が自由に画像と文章を追加できる構成を想定しています。")
+        ]
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                Text(project.title)
-                    .font(.title3.weight(.semibold))
-                Spacer(minLength: 8)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Spacer()
                 if let headerActionTitle, let onTapHeaderAction {
                     Button(headerActionTitle) {
                         onTapHeaderAction()
                     }
                     .accessibilityIdentifier("profile-project-header-action")
                     .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.secondary.opacity(0.12))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Color.black.opacity(0.08))
                     .clipShape(Capsule())
                     .buttonStyle(.plain)
                 }
             }
+            .padding(.horizontal, contentHorizontalInset)
 
-            if let subtitle = project.subtitle, !subtitle.isEmpty {
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            Button {
+                showHeroVideo = true
+            } label: {
+                ZStack(alignment: .center) {
+                    projectImage(urlString: heroImageURL, height: 292)
 
-            ProgressView(value: progressClamped)
-                .tint(fundingProgressTint(progressRatio))
-            Text("\(progressPercent)% (\(funded.formatted()) / \(goal.formatted()) \(project.currency))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                    LinearGradient(
+                        colors: [Color.clear, Color.black.opacity(0.65)],
+                        startPoint: .center,
+                        endPoint: .bottom
+                    )
 
-            HStack(spacing: 6) {
-                Image(systemName: "person.2.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text("\(project.supporter_count) supporters")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if !galleryURLs.isEmpty {
-                TabView {
-                    ForEach(galleryURLs, id: \.self) { raw in
-                        if let url = URL(string: raw) {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .empty:
-                                    Rectangle().fill(Color.secondary.opacity(0.15))
-                                case .success(let image):
-                                    image.resizable().scaledToFill()
-                                case .failure:
-                                    Rectangle().fill(Color.secondary.opacity(0.15))
-                                @unknown default:
-                                    Rectangle().fill(Color.secondary.opacity(0.15))
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 210)
-                            .clipped()
-                        }
-                    }
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 38, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 88, height: 88)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.85), lineWidth: 1.5)
+                        )
                 }
-                .frame(height: 210)
-                .tabViewStyle(.page(indexDisplayMode: .automatic))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 4)
 
-            if let description = project.description, !description.isEmpty {
-                Text(description)
-                    .font(.footnote)
-            }
+            Text("トングにハンドル革命を。肉を逃さず置いても汚れないFEDECA『つかみのトング』")
+                .font(.title.weight(.heavy))
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, titleHorizontalInset)
 
-            if let urls = project.urls, !urls.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("URLs")
-                        .font(.caption.weight(.semibold))
+            VStack(alignment: .leading, spacing: 8) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.20, green: 0.82, blue: 0.96),
+                                        Color(red: 0.78, green: 0.23, blue: 0.92),
+                                        Color(red: 1.0, green: 0.45, blue: 0.08),
+                                        Color(red: 0.98, green: 0.90, blue: 0.15),
+                                        Color(red: 0.65, green: 0.94, blue: 0.10)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                        Text("3863%")
+                            .font(.headline.weight(.black))
+                            .foregroundStyle(Color.black.opacity(0.78))
+                            .padding(.leading, 16)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: progressBarHeight)
+
+                VStack(spacing: 6) {
+                    Text("応援購入総額")
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    ForEach(urls, id: \.self) { raw in
-                        if let url = URL(string: raw) {
-                            Link(raw, destination: url)
-                                .font(.caption)
-                                .lineLimit(1)
-                        } else {
-                            Text(raw)
-                                .font(.caption)
-                        }
-                    }
+                    Text("11,589,855円")
+                        .font(.system(size: 38, weight: .black, design: .rounded))
+                        .minimumScaleFactor(0.82)
+                        .lineLimit(1)
+                    Text("目標金額 300,000円")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+            }
+            .padding(.horizontal, progressHorizontalInset)
+
+            HStack(spacing: 12) {
+                statsCard(icon: "person.2", title: "サポーター", value: "1,456人")
+                statsCard(icon: "clock", title: "残り", value: "51日")
+            }
+            .padding(.horizontal, contentHorizontalInset)
+
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(Array(mockFlexibleContents.enumerated()), id: \.offset) { _, block in
+                    flexibleBlockView(block)
                 }
             }
+            .padding(.top, 4)
+            .padding(.horizontal, bodyHorizontalInset)
 
-            Text("Plans")
-                .font(.subheadline.weight(.semibold))
+            Text("リターン")
+                .font(.title3.weight(.bold))
+                .padding(.horizontal, bodyHorizontalInset)
             plansCarousel
-
-            if let category = project.category, !category.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "tag")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(category)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            HStack(spacing: 6) {
-                Image(systemName: "calendar")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text(projectPeriodLine(createdISO: project.created_at, deadlineISO: project.deadline_at, durationDays: project.duration_days))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let location = project.location, !location.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "mappin.and.ellipse")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(location)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
+                .padding(.horizontal, bodyHorizontalInset)
 
             if let supportButtonTitle, let onTapSupport {
-                Button(supportButtonTitle) {
-                    onTapSupport(nil)
+                HStack(spacing: 14) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.title3.weight(.semibold))
+                    Image(systemName: "heart")
+                        .font(.title3.weight(.semibold))
+                    Button(supportButtonTitle) {
+                        onTapSupport(nil)
+                    }
+                    .font(.title3.weight(.black))
+                    .foregroundStyle(Color.black.opacity(0.84))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color(red: 0.99, green: 0.82, blue: 0.0))
+                    .clipShape(Capsule())
+                    .disabled(supportButtonDisabled)
+                    .opacity(supportButtonDisabled ? 0.6 : 1.0)
                 }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(
-                    LinearGradient(
-                        colors: [Color(red: 0.20, green: 0.78, blue: 0.42), Color(red: 0.11, green: 0.66, blue: 0.32)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
-                .disabled(supportButtonDisabled)
-                .opacity(supportButtonDisabled ? 0.6 : 1.0)
                 .padding(.top, 2)
+                .padding(.horizontal, contentHorizontalInset)
+            }
+        }
+        .fullScreenCover(isPresented: $showHeroVideo) {
+            NavigationStack {
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    projectImage(urlString: heroImageURL, height: 720)
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(9.0 / 16.0, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .padding(.horizontal, 18)
+                }
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Close") {
+                            showHeroVideo = false
+                        }
+                        .foregroundStyle(.white)
+                    }
+                }
             }
         }
         .sheet(item: $selectedPlan) { plan in
@@ -641,51 +674,7 @@ struct ProfileProjectDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 12) {
                     ForEach(project.plans ?? [], id: \.id) { plan in
-                        Button {
-                            selectedPlan = plan
-                        } label: {
-                            VStack(alignment: .leading, spacing: 8) {
-                                if let raw = plan.image_url, let url = URL(string: raw) {
-                                    AsyncImage(url: url) { phase in
-                                        switch phase {
-                                        case .empty:
-                                            Rectangle().fill(Color.secondary.opacity(0.15))
-                                        case .success(let image):
-                                            image.resizable().scaledToFill()
-                                        case .failure:
-                                            Rectangle().fill(Color.secondary.opacity(0.15))
-                                        @unknown default:
-                                            Rectangle().fill(Color.secondary.opacity(0.15))
-                                        }
-                                    }
-                                    .frame(height: 96)
-                                    .frame(maxWidth: .infinity)
-                                    .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                } else {
-                                    Rectangle()
-                                        .fill(Color.secondary.opacity(0.15))
-                                        .frame(height: 96)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                }
-                                Text(plan.name)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                                Text("\(plan.price_minor.formatted()) \(plan.currency)")
-                                    .font(.caption)
-                                    .foregroundStyle(.primary)
-                                Text(plan.reward_summary)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                            }
-                            .padding(10)
-                            .frame(width: cardWidth, alignment: .leading)
-                            .background(Color.secondary.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                        }
-                        .buttonStyle(.plain)
+                        planCard(plan: plan, width: cardWidth)
                     }
                 }
             }
@@ -693,25 +682,123 @@ struct ProfileProjectDetailView: View {
         .frame(height: 188)
     }
 
-    private func projectPeriodLine(createdISO: String, deadlineISO: String, durationDays: Int?) -> String {
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime]
-        let isoFormatterWithFractional = ISO8601DateFormatter()
-        isoFormatterWithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let calendar = Calendar(identifier: .gregorian)
-        let deadline = isoFormatterWithFractional.date(from: deadlineISO) ?? isoFormatter.date(from: deadlineISO)
-        var start = isoFormatterWithFractional.date(from: createdISO) ?? isoFormatter.date(from: createdISO)
-        if start == nil, let deadline, let durationDays {
-            start = calendar.date(byAdding: .day, value: -durationDays, to: deadline)
+    @ViewBuilder
+    private func projectImage(urlString: String?, height: CGFloat) -> some View {
+        if let raw = urlString, let url = URL(string: raw) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .empty:
+                    Rectangle().fill(Color.black.opacity(0.12))
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .failure:
+                    Rectangle().fill(Color.black.opacity(0.12))
+                @unknown default:
+                    Rectangle().fill(Color.black.opacity(0.12))
+                }
+            }
+            .frame(height: height)
+            .frame(maxWidth: .infinity)
+            .clipped()
+        } else {
+            LinearGradient(
+                colors: [Color.black.opacity(0.8), Color.black.opacity(0.45), Color.gray.opacity(0.35)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .frame(height: height)
         }
+    }
 
-        let displayFormatter = DateFormatter()
-        displayFormatter.locale = Locale(identifier: "en_US_POSIX")
-        displayFormatter.calendar = calendar
-        displayFormatter.dateFormat = "MMM d, yyyy"
+    private func statsCard(icon: String, title: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.title3.weight(.heavy))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8)
+    }
 
-        let startText = start.map { displayFormatter.string(from: $0) } ?? "-"
-        let endText = deadline.map { displayFormatter.string(from: $0) } ?? "-"
-        return "\(startText) ~ \(endText)"
+    private func planCard(plan: ProjectPlanResult, width: CGFloat) -> some View {
+        Button {
+            selectedPlan = plan
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                projectImage(urlString: plan.image_url, height: 96)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                Text(plan.name)
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text("\(plan.price_minor.formatted()) \(plan.currency)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(plan.reward_summary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            .padding(10)
+            .frame(width: width, alignment: .leading)
+            .background(Color.black.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func flexibleBlockView(_ block: ProjectDetailBlock) -> some View {
+        switch block {
+        case .heading(let title):
+            Text(title)
+                .font(.title3.weight(.heavy))
+                .foregroundStyle(.primary)
+                .padding(.top, 8)
+        case .text(let body):
+            Text(body)
+                .font(.body.weight(.medium))
+                .fixedSize(horizontal: false, vertical: true)
+        case .bullets(let items):
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .top, spacing: 10) {
+                        Circle()
+                            .fill(Color(red: 0.97, green: 0.78, blue: 0.08))
+                            .frame(width: 8, height: 8)
+                            .padding(.top, 5)
+                        Text(item)
+                            .font(.body.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        case .quote(let quote):
+            Text("“\(quote)”")
+                .font(.body.weight(.semibold))
+                .italic()
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.black.opacity(0.04))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        case .image(let url):
+            projectImage(urlString: url, height: 240)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+    }
+
+    private enum ProjectDetailBlock {
+        case heading(String)
+        case text(String)
+        case bullets([String])
+        case quote(String)
+        case image(String?)
     }
 }

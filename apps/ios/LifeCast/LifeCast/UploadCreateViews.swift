@@ -5,6 +5,7 @@ import SwiftUI
 struct UploadCreateView: View {
     let client: LifeCastAPIClient
     let isAuthenticated: Bool
+    let autoOpenPickerNonce: Int
     let onUploadReady: () -> Void
     let onOpenAuth: () -> Void
 
@@ -52,6 +53,9 @@ struct UploadCreateView: View {
                 Task {
                     await loadSelectedVideo(from: newValue)
                 }
+            }
+            .onChange(of: autoOpenPickerNonce) { _, _ in
+                presentPickerIfEligible()
             }
             .photosPicker(
                 isPresented: $isVideoPickerPresented,
@@ -386,6 +390,14 @@ struct UploadCreateView: View {
                 errorText = error.localizedDescription
             }
         }
+    }
+
+    private func presentPickerIfEligible() {
+        guard isAuthenticated else { return }
+        guard !isVideoPickerPresented else { return }
+        guard selectedUploadVideo == nil else { return }
+        guard state != .uploading && state != .processing else { return }
+        isVideoPickerPresented = true
     }
 
     private func uniquePseudoSha256() -> String {

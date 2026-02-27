@@ -7,6 +7,7 @@ This file defines project-specific operating rules for any agent working in `/Us
 Always treat `.agent/` as the canonical product+engineering knowledge base.
 
 Minimum required read order before substantial implementation:
+
 1. `.agent/README.md`
 2. `.agent/00-executive/one-page-brief.md`
 3. `.agent/00-executive/frozen-decisions.md`
@@ -21,6 +22,7 @@ Then read deeper only for the active task.
 ## 2) Non-Negotiable Product Constraints
 
 From frozen decisions and MVP scope:
+
 - Product is purchase-style crowdfunding (not investment), all-or-nothing funding.
 - MVP support type is return-based support only.
 - Must-have MVP scope includes feed, project/plan creation (max 3 plans), support checkout, follow/like/comment/share, supporter badge, supported projects list, basic notifications, and core event logging.
@@ -31,6 +33,7 @@ If a task would change these constraints, do not improvise. Explicitly call out 
 ## 3) Contract and Data Rules
 
 API and event contracts are strict:
+
 - Do not rely on undocumented backend behavior.
 - Respect API response envelope and stable error-code handling.
 - Use integer minor units for money and ISO-8601 UTC timestamps.
@@ -38,6 +41,7 @@ API and event contracts are strict:
 - Preserve event contract required fields and semantic meaning.
 
 Any breaking contract change requires:
+
 - versioning discipline,
 - rollout plan,
 - and decision-log update in `.agent/70-delivery/decision-log.md`.
@@ -45,26 +49,14 @@ Any breaking contract change requires:
 ## 4) UI/UX Implementation Rule
 
 Do not gate capabilities by route origin when ownership is available.
+
 - Example principle: destructive/self actions (like delete video) must be decided by ownership (`is my content`) rather than by whether user came from Me tab or another profile surface.
 
-## 5) iOS UI Verification Policy (Important)
+## 5) UI Testing Skill Rule
 
-Appium evidence is required for UI-affecting tasks, but use the correct scripts:
-- Preferred routine UI scripts:
-  - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:upload-profile`
-  - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:posted-feed`
-- `smoke:ios:appium` is deprecated and intentionally fails.
-- Create-tab upload-start smoke is explicit-only:
-  - `pnpm -C /Users/takeshi/Desktop/lifecast smoke:ios:create-upload`
-
-When reporting UI work, include:
-- commands run,
-- assertion summary,
-- screenshot absolute paths.
-
-## 6) Delivery Hygiene
-
-- Keep changes scoped and minimal.
-- Prefer updating existing docs/contracts over introducing parallel sources.
-- When a decision or policy changes, reflect it in `.agent/70-delivery/decision-log.md` and relevant spec files.
-
+- Use `.agent/skills/ui-post-implementation-test/SKILL.md` after any UI-affecting implementation.
+- Do not report UI tasks complete without:
+  - build success,
+  - at least one automation flow run,
+  - screenshot evidence.
+- If blocked, report the exact command and error, and clearly state unverified scope.

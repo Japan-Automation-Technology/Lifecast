@@ -256,25 +256,58 @@ struct FeedFundingMetaView: View {
     }
 }
 
-struct FeedPanelPageHeaderView: View {
-    let currentPage: Int
-    let plansCount: Int
-    let totalCount: Int
+struct FeedProjectPanelBackground: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.04, green: 0.08, blue: 0.14),
+                    Color(red: 0.06, green: 0.14, blue: 0.2),
+                    Color(red: 0.09, green: 0.09, blue: 0.14)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            RadialGradient(
+                colors: [
+                    Color.cyan.opacity(0.24),
+                    Color.clear
+                ],
+                center: .topLeading,
+                startRadius: 20,
+                endRadius: 420
+            )
+            RadialGradient(
+                colors: [
+                    Color.indigo.opacity(0.2),
+                    Color.clear
+                ],
+                center: .bottomTrailing,
+                startRadius: 30,
+                endRadius: 440
+            )
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .opacity(0.18)
+        }
+    }
+}
+
+struct FeedPanelSectionCard<Content: View>: View {
+    @ViewBuilder let content: Content
 
     var body: some View {
-        HStack {
-            Text(currentPage == 0 ? "Project Overview" : "Plan \(currentPage) / \(plansCount)")
-                .font(.headline)
-                .foregroundStyle(.white)
-            Spacer()
-            Text("\(currentPage + 1) / \(totalCount)")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.82))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.white.opacity(0.14))
-                .clipShape(Capsule())
-        }
+        content
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.white.opacity(0.1))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.2), radius: 14, x: 0, y: 8)
     }
 }
 
@@ -284,39 +317,86 @@ struct FeedProjectOverviewPanelContentView: View {
     let isLoading: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let detail {
-                FeedProjectOverviewImageView(detail: detail, fallbackThumbnailURL: project.thumbnailURL)
-                Text(detail.title)
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                if let subtitle = detail.subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.subheadline)
+        FeedPanelSectionCard {
+            VStack(alignment: .leading, spacing: 10) {
+                if let detail {
+                    FeedProjectOverviewImageView(detail: detail, fallbackThumbnailURL: project.thumbnailURL)
+                    Text(detail.title)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    if let subtitle = detail.subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.92))
+                    }
+                    Text((detail.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (detail.description ?? "") : "-")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.96))
+                        .padding(.top, 4)
+                    Text("Funded: \(feedFormatJPY(detail.funded_amount_minor)) / \(feedFormatJPY(detail.goal_amount_minor))")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.9))
+                    Text("Supporters: \(detail.supporter_count)")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.9))
+                    Text("Period: \(feedFormatDate(detail.created_at)) ~ \(feedFormatDate(detail.deadline_at))")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.9))
+                    Text("Status: \(detail.status)")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.9))
+                } else if isLoading {
+                    ProgressView("Loading project...")
+                        .tint(.white)
+                        .foregroundStyle(.white.opacity(0.82))
+                } else {
+                    if let thumbnail = project.thumbnailURL, let url = URL(string: thumbnail) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .empty:
+                                Rectangle().fill(Color.secondary.opacity(0.12))
+                            case .success(let image):
+                                image.resizable().scaledToFill()
+                            case .failure:
+                                Rectangle().fill(Color.secondary.opacity(0.12))
+                            @unknown default:
+                                Rectangle().fill(Color.secondary.opacity(0.12))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 172)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    Text(project.caption)
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.96))
+                    Text("-")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.92))
+                        .padding(.top, 4)
+                    Text("Funded: \(feedFormatJPY(project.fundedAmountMinor))")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.9))
+                    Text("Supporters: -")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.9))
+                    Text("Period: -")
+                        .font(.footnote)
                         .foregroundStyle(.white.opacity(0.9))
                 }
-                Text((detail.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (detail.description ?? "") : "-")
-                    .font(.footnote)
-                    .foregroundStyle(.white)
-                    .padding(.top, 4)
-                Text("Funded: \(feedFormatJPY(detail.funded_amount_minor)) / \(feedFormatJPY(detail.goal_amount_minor))")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Supporters: \(detail.supporter_count)")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Period: \(feedFormatDate(detail.created_at)) ~ \(feedFormatDate(detail.deadline_at))")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Status: \(detail.status)")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-            } else if isLoading {
-                ProgressView("Loading project...")
-                    .tint(.white)
-                    .foregroundStyle(.white.opacity(0.82))
-            } else {
-                if let thumbnail = project.thumbnailURL, let url = URL(string: thumbnail) {
+            }
+        }
+    }
+}
+
+struct FeedPlanPanelContentView: View {
+    let plan: ProjectPlanResult
+
+    var body: some View {
+        FeedPanelSectionCard {
+            VStack(alignment: .leading, spacing: 10) {
+                if let raw = plan.image_url, let url = URL(string: raw) {
                     AsyncImage(url: url) { phase in
                         switch phase {
                         case .empty:
@@ -330,67 +410,24 @@ struct FeedProjectOverviewPanelContentView: View {
                         }
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 172)
+                    .frame(height: 148)
                     .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-                Text(project.caption)
-                    .font(.footnote)
+                Text(plan.name)
+                    .font(.headline)
                     .foregroundStyle(.white)
-                Text("-")
+                Text("\(plan.price_minor.formatted()) \(plan.currency)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.58, green: 1.0, blue: 0.86))
+                Text(plan.reward_summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : plan.reward_summary)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.96))
+                Text((plan.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (plan.description ?? "") : "-")
                     .font(.footnote)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.white.opacity(0.86))
                     .padding(.top, 4)
-                Text("Funded: \(feedFormatJPY(project.fundedAmountMinor))")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Supporters: -")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.88))
-                Text("Period: -")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.88))
             }
-        }
-    }
-}
-
-struct FeedPlanPanelContentView: View {
-    let plan: ProjectPlanResult
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let raw = plan.image_url, let url = URL(string: raw) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .empty:
-                        Rectangle().fill(Color.secondary.opacity(0.12))
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    case .failure:
-                        Rectangle().fill(Color.secondary.opacity(0.12))
-                    @unknown default:
-                        Rectangle().fill(Color.secondary.opacity(0.12))
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 148)
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            Text(plan.name)
-                .font(.headline)
-                .foregroundStyle(.white)
-            Text("\(plan.price_minor.formatted()) \(plan.currency)")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.green)
-            Text(plan.reward_summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "-" : plan.reward_summary)
-                .font(.subheadline)
-                .foregroundStyle(.white)
-            Text((plan.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? (plan.description ?? "") : "-")
-                .font(.footnote)
-                .foregroundStyle(.white.opacity(0.84))
-                .padding(.top, 4)
         }
     }
 }

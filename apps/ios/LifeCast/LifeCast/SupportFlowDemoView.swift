@@ -63,6 +63,7 @@ struct SupportFlowDemoView: View {
     @State private var meProjectEditDiscardRequest = 0
     @State private var meTabSectionOverride = 0
     @State private var meTabSectionOverrideNonce = 0
+    @State private var createPickerAutoOpenNonce = 0
     @State private var pendingAppTabAfterDiscard: Int?
     @State private var showDiscardProjectEditDialog = false
 
@@ -145,7 +146,11 @@ struct SupportFlowDemoView: View {
                 .tabItem { Image(systemName: "magnifyingglass") }
                 .tag(1)
 
-            UploadCreateView(client: client, isAuthenticated: isAuthenticated, onUploadReady: {
+            UploadCreateView(
+                client: client,
+                isAuthenticated: isAuthenticated,
+                autoOpenPickerNonce: createPickerAutoOpenNonce,
+                onUploadReady: {
                 Task {
                     await refreshMyVideos()
                 }
@@ -246,7 +251,16 @@ struct SupportFlowDemoView: View {
             _ = await (authTask, videosTask, supportTask, profileTask)
         }
         .onChange(of: selectedTab) { _, newValue in
-            if newValue == 3 {
+            if newValue == 2 {
+                createPickerAutoOpenNonce += 1
+                transitionHomeTrackedVideo(to: nil, projectId: nil)
+                setHomeFeedEdgeBoosting(false)
+                homeFeedPlayer?.pause()
+                homeFeedPlayer = nil
+                for player in homeFeedPlayerCache.values {
+                    player.pause()
+                }
+            } else if newValue == 3 {
                 transitionHomeTrackedVideo(to: nil, projectId: nil)
                 setHomeFeedEdgeBoosting(false)
                 homeFeedPlayer?.pause()
@@ -581,6 +595,10 @@ struct SupportFlowDemoView: View {
     }
 
     private func requestAppTabSelection(_ tab: Int) {
+        if tab == 2 && selectedTab == 2 {
+            createPickerAutoOpenNonce += 1
+            return
+        }
         guard selectedTab != tab else { return }
         if tab == 2 && !isAuthenticated {
             showAuthSheet = true
@@ -662,11 +680,6 @@ struct SupportFlowDemoView: View {
             ) { idx in
                 let tappedPlan = idx > 0 ? plans[idx - 1] : nil
                 VStack(alignment: .leading, spacing: 12) {
-                    FeedPanelPageHeaderView(
-                        currentPage: idx,
-                        plansCount: plans.count,
-                        totalCount: homeFeedPanelPageCount(for: project)
-                    )
                     if idx == 0 {
                         FeedProjectOverviewPanelContentView(project: project, detail: cachedDetail, isLoading: isLoading)
                     } else {
@@ -709,7 +722,7 @@ struct SupportFlowDemoView: View {
         .frame(width: width, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .contentShape(Rectangle())
-        .background(Color.black.opacity(0.86))
+        .background(FeedProjectPanelBackground())
     }
 
 
