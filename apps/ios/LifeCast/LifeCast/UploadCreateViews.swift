@@ -170,7 +170,7 @@ struct UploadCreateView: View {
                                 .clipShape(Circle())
                         }
                         .padding(.leading, 16)
-                        .padding(.top, topInset + 8)
+                        .padding(.top, topInset + 70)
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: max(0, fullscreenContentHeight - footerTotalHeight))
