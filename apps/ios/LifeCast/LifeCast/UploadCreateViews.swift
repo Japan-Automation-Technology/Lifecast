@@ -9,6 +9,7 @@ struct UploadCreateView: View {
     let onUploadReady: () -> Void
     let onOpenAuth: () -> Void
     let onAutoOpenPickerCancelled: () -> Void
+    let onFullscreenPreviewChanged: (Bool) -> Void
 
     @State private var isVideoPickerPresented = false
     @State private var selectedPickerItem: PhotosPickerItem?
@@ -47,6 +48,7 @@ struct UploadCreateView: View {
                 } else if composerStep == .preview, selectedUploadVideo != nil {
                     previewComposerSection
                         .toolbar(.hidden, for: .navigationBar)
+                        .ignoresSafeArea(edges: .top)
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 18) {
@@ -89,6 +91,9 @@ struct UploadCreateView: View {
                     onAutoOpenPickerCancelled()
                 }
             }
+            .onAppear {
+                onFullscreenPreviewChanged(isFullscreenPreviewActive)
+            }
             .photosPicker(
                 isPresented: $isVideoPickerPresented,
                 selection: $selectedPickerItem,
@@ -96,6 +101,7 @@ struct UploadCreateView: View {
                 photoLibrary: .shared()
             )
             .onDisappear {
+                onFullscreenPreviewChanged(false)
                 if let observer = previewPlaybackObserver {
                     NotificationCenter.default.removeObserver(observer)
                     previewPlaybackObserver = nil
@@ -135,103 +141,70 @@ struct UploadCreateView: View {
     }
 
     private var previewComposerSection: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            if let previewPlayer {
-                VideoPlayer(player: previewPlayer)
-                    .scaledToFill()
-                    .ignoresSafeArea()
-                    .onAppear {
-                        previewPlayer.play()
+        GeometryReader { proxy in
+            let topInset = proxy.safeAreaInsets.top
+            let footerTotalHeight = appBottomBarHeight
+            let fullscreenContentHeight = proxy.size.height + topInset
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    ZStack(alignment: .topLeading) {
+                        if let previewPlayer {
+                            FullscreenVideoPlayer(player: previewPlayer)
+                                .onAppear {
+                                    previewPlayer.play()
+                                }
+                        } else {
+                            Color.gray.opacity(0.3)
+                        }
+
+                        Button {
+                            resetSelectedVideoAndReturnToPicker()
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 44, height: 44)
+                                .background(Color.black.opacity(0.3))
+                                .clipShape(Circle())
+                        }
+                        .padding(.leading, 16)
+                        .padding(.top, topInset + 8)
                     }
-            } else {
-                Color.gray.opacity(0.3).ignoresSafeArea()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: max(0, fullscreenContentHeight - footerTotalHeight))
+                    .clipped()
+
+                    VStack(spacing: 0) {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.08))
+                            .frame(height: 1)
+                        HStack {
+                            Button {
+                                Task {
+                                    await startUploadFlow()
+                                }
+                            } label: {
+                                Text(state == .uploading || state == .processing ? "投稿中..." : "投稿")
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 40)
+                                    .background(Color(red: 0.98, green: 0.19, blue: 0.40))
+                                    .clipShape(Capsule())
+                            }
+                        .disabled(state == .uploading || state == .processing)
+                        }
+                        .padding(.horizontal, 16)
+                        .frame(height: appBottomBarHeight)
+                    }
+                    .frame(height: footerTotalHeight)
+                    .background(Color.black.opacity(0.96).ignoresSafeArea(edges: .bottom))
+                }
+                .frame(height: fullscreenContentHeight, alignment: .top)
+                .offset(y: -topInset)
             }
-
-            VStack(spacing: 0) {
-                HStack {
-                    Button {
-                        resetSelectedVideoAndReturnToPicker()
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(Color.black.opacity(0.3))
-                            .clipShape(Circle())
-                    }
-
-                    Spacer()
-
-                    Button {
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(Color.black.opacity(0.3))
-                            .clipShape(Circle())
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-
-                Spacer()
-
-                HStack(alignment: .top, spacing: 0) {
-                    Spacer()
-                    VStack(spacing: 20) {
-                        previewToolButton(icon: "camera.rotate")
-                        previewToolButton(icon: "crop")
-                        previewToolButton(icon: "textformat")
-                        previewToolButton(icon: "sparkles")
-                        previewToolButton(icon: "person.2.circle")
-                        previewToolButton(icon: "rectangle.3.group")
-                    }
-                    .padding(.trailing, 16)
-                }
-
-                Spacer()
-
-                HStack(spacing: 12) {
-                    Button {
-                    } label: {
-                        Text("Your Story")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 54)
-                            .background(Color.white.opacity(0.18))
-                            .clipShape(Capsule())
-                    }
-
-                    Button {
-                        composerStep = .details
-                    } label: {
-                        Text("Next")
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 54)
-                            .background(Color(red: 0.98, green: 0.19, blue: 0.40))
-                            .clipShape(Capsule())
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 24)
-            }
-        }
-    }
-
-    private func previewToolButton(icon: String) -> some View {
-        Button {
-        } label: {
-            Image(systemName: icon)
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(Color.black.opacity(0.3))
-                .clipShape(Circle())
         }
     }
 
@@ -539,6 +512,7 @@ struct UploadCreateView: View {
                 state = .idle
                 statusText = "Ready to publish"
                 errorText = ""
+                onFullscreenPreviewChanged(true)
             }
         } catch {
             await MainActor.run {
@@ -548,6 +522,7 @@ struct UploadCreateView: View {
                 state = .failed
                 statusText = "Video selection failed"
                 errorText = error.localizedDescription
+                onFullscreenPreviewChanged(false)
             }
         }
     }
@@ -572,6 +547,7 @@ struct UploadCreateView: View {
         }
         previewPlayer?.pause()
         previewPlayer = nil
+        onFullscreenPreviewChanged(false)
     }
 
     private func configurePreviewPlayer(with url: URL?) {
@@ -676,6 +652,10 @@ struct UploadCreateView: View {
         }
         return "Upload failed. Please retry."
     }
+
+    private var isFullscreenPreviewActive: Bool {
+        isAuthenticated && composerStep == .preview && selectedUploadVideo != nil
+    }
 }
 
 private enum CreateInputField: Hashable {
@@ -694,6 +674,26 @@ private struct SelectedUploadVideo {
     let data: Data
     let fileName: String
     let contentType: String
+}
+
+private struct FullscreenVideoPlayer: UIViewControllerRepresentable {
+    let player: AVPlayer
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.showsPlaybackControls = false
+        controller.videoGravity = .resizeAspectFill
+        controller.view.backgroundColor = .black
+        return controller
+    }
+
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        if controller.player !== player {
+            controller.player = player
+        }
+        controller.videoGravity = .resizeAspectFill
+    }
 }
 
 struct ProjectPlanDraft: Identifiable {

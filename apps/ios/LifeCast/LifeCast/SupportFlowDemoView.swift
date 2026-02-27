@@ -65,6 +65,7 @@ struct SupportFlowDemoView: View {
     @State private var meTabSectionOverrideNonce = 0
     @State private var createPickerAutoOpenNonce = 0
     @State private var tabBeforeCreate = 0
+    @State private var isCreateFullscreenPreview = false
     @State private var pendingAppTabAfterDiscard: Int?
     @State private var showDiscardProjectEditDialog = false
 
@@ -163,8 +164,10 @@ struct SupportFlowDemoView: View {
             }, onAutoOpenPickerCancelled: {
                 guard selectedTab == 2 else { return }
                 selectedTab = tabBeforeCreate
+            }, onFullscreenPreviewChanged: { isFullscreen in
+                isCreateFullscreenPreview = isFullscreen
             })
-                .safeAreaPadding(.bottom, bottomBarInset)
+                .safeAreaPadding(.bottom, isCreateFullscreenPreview ? 0 : bottomBarInset)
                 .tabItem { Image(systemName: "plus.square.fill") }
                 .tag(2)
 
@@ -204,7 +207,7 @@ struct SupportFlowDemoView: View {
         .toolbar(.hidden, for: .tabBar)
         .background(Color.black.ignoresSafeArea())
         .overlay(alignment: .bottom) {
-            if !isKeyboardVisible {
+            if !isKeyboardVisible && !isCreateFullscreenPreview {
                 appBottomBar
             }
         }
@@ -281,6 +284,7 @@ struct SupportFlowDemoView: View {
                     await refreshFeedProjectsFromAPI()
                 }
             } else {
+                isCreateFullscreenPreview = false
                 transitionHomeTrackedVideo(to: nil, projectId: nil)
                 setHomeFeedEdgeBoosting(false)
                 homeFeedPlayer?.pause()
