@@ -514,14 +514,15 @@ struct ProfileProjectDetailView: View {
                         onTapHeaderAction()
                     }
                     .accessibilityIdentifier("profile-project-header-action")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
+                    .font(.subheadline.weight(.bold))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
                     .background(Color.black.opacity(0.08))
                     .clipShape(Capsule())
                     .buttonStyle(.plain)
                 }
             }
+            .padding(.trailing, horizontalInset)
 
             Button {
                 showHeroVideo = true

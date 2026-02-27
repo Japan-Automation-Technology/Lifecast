@@ -30,6 +30,12 @@ struct MeTabView: View {
     @State private var pendingMeAction: PendingMeAction?
     @State private var showDiscardProjectEditDialog = false
     @State private var selectedCreatorRoute: CreatorRoute? = nil
+    @State private var canStartProjectEditFromMenu = false
+    @State private var canEndProjectFromMenu = false
+    @State private var canDeleteProjectFromMenu = false
+    @State private var projectEditRequestNonce = 0
+    @State private var projectEndRequestNonce = 0
+    @State private var projectDeleteRequestNonce = 0
     
     private var currentUsername: String {
         myProfile?.username ?? "lifecast_maker"
@@ -92,9 +98,17 @@ struct MeTabView: View {
                                             client: client,
                                             onProjectChanged: onProjectChanged,
                                             discardSignal: localProjectEditDiscardNonce,
+                                            editRequestSignal: projectEditRequestNonce,
+                                            endRequestSignal: projectEndRequestNonce,
+                                            deleteRequestSignal: projectDeleteRequestNonce,
                                             onUnsavedChangesChanged: { hasUnsaved in
                                                 hasUnsavedProjectEdits = hasUnsaved
                                                 onProjectEditUnsavedChanged(hasUnsaved)
+                                            },
+                                            onProjectMenuAvailabilityChanged: { canEdit, canEnd, canDelete in
+                                                canStartProjectEditFromMenu = canEdit
+                                                canEndProjectFromMenu = canEnd
+                                                canDeleteProjectFromMenu = canDelete
                                             }
                                         )
                                     } else if selectedIndex == 1 {
@@ -201,6 +215,18 @@ struct MeTabView: View {
             .navigationDestination(isPresented: $showUserSwitcher) {
                 DevUserSwitcherSheet(
                     client: client,
+                    canEditProject: canStartProjectEditFromMenu,
+                    canEndProject: canEndProjectFromMenu,
+                    canDeleteProject: canDeleteProjectFromMenu,
+                    onEditProject: {
+                        requestMeAction(.openProjectEdit)
+                    },
+                    onEndProject: {
+                        requestMeAction(.openProjectEnd)
+                    },
+                    onDeleteProject: {
+                        requestMeAction(.openProjectDelete)
+                    },
                     onSwitched: {
                         onRefreshProfile()
                         onRefreshVideos()
@@ -313,6 +339,24 @@ struct MeTabView: View {
         switch action {
         case .openUserSwitcher:
             showUserSwitcher = true
+        case .openProjectEdit:
+            showUserSwitcher = false
+            if selectedIndex != 0 {
+                selectedIndex = 0
+            }
+            projectEditRequestNonce += 1
+        case .openProjectEnd:
+            showUserSwitcher = false
+            if selectedIndex != 0 {
+                selectedIndex = 0
+            }
+            projectEndRequestNonce += 1
+        case .openProjectDelete:
+            showUserSwitcher = false
+            if selectedIndex != 0 {
+                selectedIndex = 0
+            }
+            projectDeleteRequestNonce += 1
         case .switchSection(let index):
             guard selectedIndex != index else { return }
             selectedIndex = index
@@ -327,6 +371,9 @@ struct MeTabView: View {
     private enum PendingMeAction {
         case switchSection(Int)
         case openUserSwitcher
+        case openProjectEdit
+        case openProjectEnd
+        case openProjectDelete
     }
 
     private func loadMySupportedProjects() async {
@@ -781,6 +828,12 @@ private struct MeInlineAuthView: View {
 
 struct DevUserSwitcherSheet: View {
     let client: LifeCastAPIClient
+    let canEditProject: Bool
+    let canEndProject: Bool
+    let canDeleteProject: Bool
+    let onEditProject: () -> Void
+    let onEndProject: () -> Void
+    let onDeleteProject: () -> Void
     let onSwitched: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -814,6 +867,54 @@ struct DevUserSwitcherSheet: View {
 
                 List {
                     Section("Account") {
+                        Button {
+                            dismiss()
+                            DispatchQueue.main.async {
+                                onEditProject()
+                            }
+                        } label: {
+                            HStack {
+                                Text("Edit Project")
+                                Spacer()
+                                Image(systemName: "square.and.pencil")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .disabled(!canEditProject)
+                        .opacity(canEditProject ? 1.0 : 0.42)
+
+                        Button(role: .destructive) {
+                            dismiss()
+                            DispatchQueue.main.async {
+                                onEndProject()
+                            }
+                        } label: {
+                            HStack {
+                                Text("End Project")
+                                Spacer()
+                                Image(systemName: "stop.circle")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .disabled(!canEndProject)
+                        .opacity(canEndProject ? 1.0 : 0.42)
+
+                        Button(role: .destructive) {
+                            dismiss()
+                            DispatchQueue.main.async {
+                                onDeleteProject()
+                            }
+                        } label: {
+                            HStack {
+                                Text("Delete Project")
+                                Spacer()
+                                Image(systemName: "trash")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .disabled(!canDeleteProject)
+                        .opacity(canDeleteProject ? 1.0 : 0.42)
+
                         if isSignedIn {
                             if !signedInUserEmail.isEmpty {
                                 Text(signedInUserEmail)
@@ -1142,7 +1243,11 @@ struct ProjectPageView: View {
     let client: LifeCastAPIClient
     let onProjectChanged: () -> Void
     let discardSignal: Int
+    let editRequestSignal: Int
+    let endRequestSignal: Int
+    let deleteRequestSignal: Int
     let onUnsavedChangesChanged: (Bool) -> Void
+    let onProjectMenuAvailabilityChanged: (Bool, Bool, Bool) -> Void
 
     @State private var myProject: MyProjectResult?
     @State private var projectHistory: [MyProjectResult] = []
@@ -1209,21 +1314,6 @@ struct ProjectPageView: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        if myProject.status == "active" || myProject.status == "draft" {
-                            if myProject.support_count_total == 0 {
-                                Button("Delete Project", role: .destructive) {
-                                    Task {
-                                        await deleteProject(projectId: myProject.id)
-                                    }
-                                }
-                                .buttonStyle(.bordered)
-                            } else {
-                                Button("End Project", role: .destructive) {
-                                    showEndConfirm = true
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                        }
                     }
                     if myProject.status == "stopped" || myProject.status == "failed" || myProject.status == "succeeded" {
                         Divider().padding(.vertical, 4)
@@ -1335,14 +1425,45 @@ struct ProjectPageView: View {
             }
             publishUnsavedState()
         }
+        .onChange(of: editRequestSignal) { _, _ in
+            guard let project = myProject, canEditProject(project) else { return }
+            isEditingProjectInline = true
+            projectEditHasChanges = false
+        }
+        .onChange(of: endRequestSignal) { _, _ in
+            guard let project = myProject, canEndProject(project) else { return }
+            showEndConfirm = true
+        }
+        .onChange(of: deleteRequestSignal) { _, _ in
+            guard let project = myProject, canDeleteProject(project) else { return }
+            Task {
+                await deleteProject(projectId: project.id)
+            }
+        }
     }
 
     private func publishUnsavedState() {
         onUnsavedChangesChanged(isEditingProjectInline && projectEditHasChanges)
     }
 
+    private func publishEditAvailability() {
+        guard let project = myProject else {
+            onProjectMenuAvailabilityChanged(false, false, false)
+            return
+        }
+        onProjectMenuAvailabilityChanged(canEditProject(project), canEndProject(project), canDeleteProject(project))
+    }
+
     private func canEditProject(_ project: MyProjectResult) -> Bool {
         !["stopped", "failed", "succeeded"].contains(project.status)
+    }
+
+    private func canDeleteProject(_ project: MyProjectResult) -> Bool {
+        (project.status == "active" || project.status == "draft") && project.support_count_total == 0
+    }
+
+    private func canEndProject(_ project: MyProjectResult) -> Bool {
+        (project.status == "active" || project.status == "draft") && project.support_count_total > 0
     }
 
     private func createProjectSection(buttonTitle: String) -> some View {
@@ -1527,9 +1648,7 @@ struct ProjectPageView: View {
 
     private func projectDetailsView(project: MyProjectResult) -> some View {
         ProfileProjectDetailView(
-            project: project,
-            headerActionTitle: canEditProject(project) ? "Edit" : nil,
-            onTapHeaderAction: canEditProject(project) ? { isEditingProjectInline = true } : nil
+            project: project
         )
     }
 
@@ -1666,12 +1785,14 @@ struct ProjectPageView: View {
                 projectHistory = projects.filter { $0.status != "active" && $0.status != "draft" }
                 projectErrorText = ""
                 hasLoadedProjectsOnce = true
+                publishEditAvailability()
             }
         } catch {
             await MainActor.run {
                 myProject = nil
                 projectHistory = []
                 hasLoadedProjectsOnce = true
+                publishEditAvailability()
             }
         }
     }
@@ -1779,6 +1900,7 @@ struct ProjectPageView: View {
                 projectHistory = projectHistory.filter { $0.id != project.id }
                 projectErrorText = ""
                 projectCreateStatusText = "Created"
+                publishEditAvailability()
                 onProjectChanged()
             }
         } catch {
@@ -1793,6 +1915,7 @@ struct ProjectPageView: View {
             try await client.deleteProject(projectId: projectId)
             await MainActor.run {
                 myProject = nil
+                publishEditAvailability()
                 onProjectChanged()
             }
         } catch {
