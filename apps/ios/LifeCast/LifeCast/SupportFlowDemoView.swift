@@ -64,6 +64,7 @@ struct SupportFlowDemoView: View {
     @State private var meTabSectionOverride = 0
     @State private var meTabSectionOverrideNonce = 0
     @State private var createPickerAutoOpenNonce = 0
+    @State private var tabBeforeCreate = 0
     @State private var pendingAppTabAfterDiscard: Int?
     @State private var showDiscardProjectEditDialog = false
 
@@ -159,6 +160,9 @@ struct SupportFlowDemoView: View {
                 selectedTab = 3
             }, onOpenAuth: {
                 showAuthSheet = true
+            }, onAutoOpenPickerCancelled: {
+                guard selectedTab == 2 else { return }
+                selectedTab = tabBeforeCreate
             })
                 .safeAreaPadding(.bottom, bottomBarInset)
                 .tabItem { Image(systemName: "plus.square.fill") }
@@ -608,6 +612,9 @@ struct SupportFlowDemoView: View {
             pendingAppTabAfterDiscard = tab
             showDiscardProjectEditDialog = true
             return
+        }
+        if tab == 2 {
+            tabBeforeCreate = selectedTab
         }
         selectedTab = tab
     }

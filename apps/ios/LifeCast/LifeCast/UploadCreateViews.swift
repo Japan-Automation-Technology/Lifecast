@@ -8,10 +8,12 @@ struct UploadCreateView: View {
     let autoOpenPickerNonce: Int
     let onUploadReady: () -> Void
     let onOpenAuth: () -> Void
+    let onAutoOpenPickerCancelled: () -> Void
 
     @State private var isVideoPickerPresented = false
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var selectedUploadVideo: SelectedUploadVideo?
+    @State private var awaitingAutoOpenedPickerResult = false
     @State private var previewURL: URL?
     @State private var myProject: MyProjectResult?
     @State private var state: UploadFlowState = .idle
@@ -55,7 +57,15 @@ struct UploadCreateView: View {
                 }
             }
             .onChange(of: autoOpenPickerNonce) { _, _ in
-                presentPickerIfEligible()
+                presentPickerIfEligible(triggeredByAutoOpen: true)
+            }
+            .onChange(of: isVideoPickerPresented) { wasPresented, isPresented in
+                guard wasPresented, !isPresented else { return }
+                guard awaitingAutoOpenedPickerResult else { return }
+                awaitingAutoOpenedPickerResult = false
+                if selectedPickerItem == nil && selectedUploadVideo == nil {
+                    onAutoOpenPickerCancelled()
+                }
             }
             .photosPicker(
                 isPresented: $isVideoPickerPresented,
@@ -392,11 +402,12 @@ struct UploadCreateView: View {
         }
     }
 
-    private func presentPickerIfEligible() {
+    private func presentPickerIfEligible(triggeredByAutoOpen: Bool) {
         guard isAuthenticated else { return }
         guard !isVideoPickerPresented else { return }
         guard selectedUploadVideo == nil else { return }
         guard state != .uploading && state != .processing else { return }
+        awaitingAutoOpenedPickerResult = triggeredByAutoOpen
         isVideoPickerPresented = true
     }
 
