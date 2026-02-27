@@ -46,40 +46,43 @@ struct MeTabView: View {
                 if isAuthenticated {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
-                            ProfileOverviewSection(
-                                avatarURL: myProfile?.avatar_url,
-                                displayName: currentDisplayName,
-                                bioText: myProfile?.bio?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
-                                followingCount: myProfileStats?.following_count ?? 0,
-                                followersCount: myProfileStats?.followers_count ?? 0,
-                                supportCount: myProfileStats?.supported_project_count ?? 0,
-                                onTapFollowing: {
-                                    selectedNetworkTab = .following
-                                    showNetwork = true
-                                },
-                                onTapFollowers: {
-                                    selectedNetworkTab = .followers
-                                    showNetwork = true
-                                },
-                                onTapSupport: {
-                                    selectedNetworkTab = .support
-                                    showNetwork = true
+                            VStack(spacing: 8) {
+                                ProfileOverviewSection(
+                                    avatarURL: myProfile?.avatar_url,
+                                    displayName: currentDisplayName,
+                                    bioText: myProfile?.bio?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+                                    followingCount: myProfileStats?.following_count ?? 0,
+                                    followersCount: myProfileStats?.followers_count ?? 0,
+                                    supportCount: myProfileStats?.supported_project_count ?? 0,
+                                    onTapFollowing: {
+                                        selectedNetworkTab = .following
+                                        showNetwork = true
+                                    },
+                                    onTapFollowers: {
+                                        selectedNetworkTab = .followers
+                                        showNetwork = true
+                                    },
+                                    onTapSupport: {
+                                        selectedNetworkTab = .support
+                                        showNetwork = true
+                                    }
+                                ) {
+                                    Button("Edit Profile") {
+                                        showEditProfile = true
+                                    }
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(.primary)
+                                    .frame(width: 136, height: 36)
+                                    .background(Color.white)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .stroke(Color.gray.opacity(0.35), lineWidth: 1)
+                                    )
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                                    .buttonStyle(.plain)
                                 }
-                            ) {
-                                Button("Edit Profile") {
-                                    showEditProfile = true
-                                }
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.primary)
-                                .frame(width: 136, height: 36)
-                                .background(Color.white)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .stroke(Color.gray.opacity(0.35), lineWidth: 1)
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                                .buttonStyle(.plain)
                             }
+                            .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 6)
 
                             Section {
@@ -1167,6 +1170,7 @@ struct ProjectPageView: View {
     @State private var projectCreateInFlight = false
     @State private var projectCreateStatusText = ""
     @State private var hasLoadedProjectsOnce = false
+    private let sectionHorizontalPadding: CGFloat = 16
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -1198,6 +1202,7 @@ struct ProjectPageView: View {
                         )
                     } else {
                         projectDetailsView(project: myProject)
+                            .padding(.horizontal, -sectionHorizontalPadding)
                         if myProject.status == "stopped" {
                             Text("Ended project. Refund policy: full refund.")
                                 .font(.caption)
@@ -1288,7 +1293,7 @@ struct ProjectPageView: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(sectionHorizontalPadding)
 
         }
         .background(
