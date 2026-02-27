@@ -441,8 +441,8 @@ struct CreatorPublicPageView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 16, pinnedViews: [.sectionHeaders]) {
+        ScrollView(.vertical, showsIndicators: true) {
+            LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
                 if let page {
                     VStack(spacing: 8) {
                         ProfileOverviewSection(
@@ -557,7 +557,7 @@ struct CreatorPublicPageView: View {
                         .padding(.horizontal, 16)
                 }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: appBottomBarHeight + 20)
@@ -674,13 +674,14 @@ struct CreatorPublicPageView: View {
                         onSupportTap(project, preferredPlanId)
                     }
                 )
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text("No active project")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func creatorPostsSection(page: CreatorPublicPageResult) -> some View {

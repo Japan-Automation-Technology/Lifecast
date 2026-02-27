@@ -6,6 +6,44 @@ function toIso(value: Date | string) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
+type ProjectDetailBlock =
+  | { type: "heading"; text: string }
+  | { type: "text"; text: string }
+  | { type: "quote"; text: string }
+  | { type: "image"; image_url: string | null }
+  | { type: "bullets"; items: string[] };
+
+function normalizeProjectDetailBlocks(value: unknown): ProjectDetailBlock[] {
+  if (!Array.isArray(value)) return [];
+  const blocks: ProjectDetailBlock[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const block = raw as Record<string, unknown>;
+    const type = typeof block.type === "string" ? block.type : "";
+    if (["heading", "text", "quote"].includes(type)) {
+      const text = typeof block.text === "string" ? block.text.trim() : "";
+      if (text.length > 0) {
+        blocks.push({ type: type as "heading" | "text" | "quote", text });
+      }
+      continue;
+    }
+    if (type === "image") {
+      const imageUrl = typeof block.image_url === "string" ? block.image_url.trim() : "";
+      blocks.push({ type: "image", image_url: imageUrl.length > 0 ? imageUrl : null });
+      continue;
+    }
+    if (type === "bullets") {
+      const items = Array.isArray(block.items)
+        ? block.items.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)
+        : [];
+      if (items.length > 0) {
+        blocks.push({ type: "bullets", items });
+      }
+    }
+  }
+  return blocks;
+}
+
 export class ProjectsService {
   constructor(private readonly memory: InMemoryStore) {}
   async getProjectByCreator(creatorUserId: string) {
@@ -21,6 +59,7 @@ export class ProjectsService {
         subtitle: string | null;
         cover_image_url: string | null;
         project_image_urls: unknown;
+        project_detail_blocks: unknown;
         category: string | null;
         location: string | null;
         status: string;
@@ -42,6 +81,7 @@ export class ProjectsService {
           subtitle,
           cover_image_url,
           project_image_urls,
+          project_detail_blocks,
           category,
           location,
           status,
@@ -112,6 +152,7 @@ export class ProjectsService {
         subtitle: row.subtitle,
         imageUrl: row.cover_image_url,
         imageUrls: Array.isArray(row.project_image_urls) ? (row.project_image_urls as string[]) : [],
+        detailBlocks: normalizeProjectDetailBlocks(row.project_detail_blocks),
         category: row.category,
         location: row.location,
         status: row.status,
@@ -146,6 +187,7 @@ export class ProjectsService {
         subtitle: string | null;
         cover_image_url: string | null;
         project_image_urls: unknown;
+        project_detail_blocks: unknown;
         category: string | null;
         location: string | null;
         status: string;
@@ -167,6 +209,7 @@ export class ProjectsService {
           subtitle,
           cover_image_url,
           project_image_urls,
+          project_detail_blocks,
           category,
           location,
           status,
@@ -237,6 +280,7 @@ export class ProjectsService {
           subtitle: row.subtitle,
           imageUrl: row.cover_image_url,
           imageUrls: Array.isArray(row.project_image_urls) ? (row.project_image_urls as string[]) : [],
+          detailBlocks: normalizeProjectDetailBlocks(row.project_detail_blocks),
           category: row.category,
           location: row.location,
           status: row.status,
@@ -266,6 +310,7 @@ export class ProjectsService {
     subtitle: string | null;
     imageUrl: string | null;
     imageUrls: string[];
+    detailBlocks: ProjectDetailBlock[];
     category: string | null;
     location: string | null;
     goalAmountMinor: number;
@@ -303,9 +348,9 @@ export class ProjectsService {
       await client.query(
         `
         insert into projects (
-          id, creator_user_id, title, subtitle, cover_image_url, project_image_urls, category, location, status, goal_amount_minor, currency, duration_days, deadline_at, description, external_urls, created_at, updated_at
+          id, creator_user_id, title, subtitle, cover_image_url, project_image_urls, project_detail_blocks, category, location, status, goal_amount_minor, currency, duration_days, deadline_at, description, external_urls, created_at, updated_at
         )
-        values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, 'active', $9, $10, $11, $12, $13, $14::jsonb, now(), now())
+        values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, 'active', $10, $11, $12, $13, $14, $15::jsonb, now(), now())
       `,
         [
           projectId,
@@ -314,6 +359,7 @@ export class ProjectsService {
           input.subtitle,
           input.imageUrls[0] ?? input.imageUrl,
           JSON.stringify(input.imageUrls),
+          JSON.stringify(normalizeProjectDetailBlocks(input.detailBlocks)),
           input.category,
           input.location,
           input.goalAmountMinor,
@@ -364,6 +410,7 @@ export class ProjectsService {
         subtitle: input.subtitle,
         imageUrl: input.imageUrls[0] ?? input.imageUrl,
         imageUrls: input.imageUrls,
+        detailBlocks: normalizeProjectDetailBlocks(input.detailBlocks),
         category: input.category,
         location: input.location,
         status: "active",
@@ -398,6 +445,7 @@ export class ProjectsService {
     subtitle?: string | null;
     description?: string | null;
     imageUrls?: string[];
+    detailBlocks?: ProjectDetailBlock[];
     urls?: string[];
     plans?: Array<{
       id?: string;
@@ -424,9 +472,10 @@ export class ProjectsService {
         description: string | null;
         cover_image_url: string | null;
         project_image_urls: unknown;
+        project_detail_blocks: unknown;
         external_urls: unknown;
       }>(
-        `select id, creator_user_id, status, subtitle, description, cover_image_url, project_image_urls, external_urls from projects where id = $1 limit 1`,
+        `select id, creator_user_id, status, subtitle, description, cover_image_url, project_image_urls, project_detail_blocks, external_urls from projects where id = $1 limit 1`,
         [input.projectId],
       );
       if ((existing.rowCount ?? 0) === 0) {
@@ -454,6 +503,8 @@ export class ProjectsService {
         ? (current.external_urls as string[]).filter((v) => typeof v === "string")
         : [];
       const mergedUrls = input.urls === undefined ? currentUrls : input.urls;
+      const mergedDetailBlocks =
+        input.detailBlocks === undefined ? normalizeProjectDetailBlocks(current.project_detail_blocks) : normalizeProjectDetailBlocks(input.detailBlocks);
 
       await client.query(
         `
@@ -463,6 +514,7 @@ export class ProjectsService {
             cover_image_url = $5,
             project_image_urls = $6::jsonb,
             external_urls = $7::jsonb,
+            project_detail_blocks = $8::jsonb,
             updated_at = now()
         where id = $1 and creator_user_id = $2
       `,
@@ -474,6 +526,7 @@ export class ProjectsService {
           mergedCoverImageUrl,
           JSON.stringify(mergedImageUrls),
           JSON.stringify(mergedUrls),
+          JSON.stringify(mergedDetailBlocks),
         ],
       );
 

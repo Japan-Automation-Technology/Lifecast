@@ -5,6 +5,13 @@ const nowIso = () => new Date().toISOString();
 const plusHoursIso = (hours: number) => new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
 const plusDaysIso = (days: number) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 
+type ProjectDetailBlock =
+  | { type: "heading"; text: string }
+  | { type: "text"; text: string }
+  | { type: "quote"; text: string }
+  | { type: "image"; image_url: string | null }
+  | { type: "bullets"; items: string[] };
+
 export class InMemoryStore {
   private readonly supports = new Map<string, SupportRecord>();
   private readonly uploads = new Map<string, UploadSession>();
@@ -17,6 +24,7 @@ export class InMemoryStore {
     subtitle: string | null;
     imageUrl: string | null;
     imageUrls: string[];
+    detailBlocks: ProjectDetailBlock[];
     category: string | null;
     location: string | null;
     status: string;
@@ -131,6 +139,7 @@ export class InMemoryStore {
     subtitle: string | null;
     imageUrl: string | null;
     imageUrls: string[];
+    detailBlocks: ProjectDetailBlock[];
     category: string | null;
     location: string | null;
     goalAmountMinor: number;
@@ -168,6 +177,7 @@ export class InMemoryStore {
       subtitle: input.subtitle,
       imageUrl: input.imageUrls[0] ?? input.imageUrl,
       imageUrls: input.imageUrls,
+      detailBlocks: input.detailBlocks,
       category: input.category,
       location: input.location,
       status: "active",
@@ -194,6 +204,7 @@ export class InMemoryStore {
     subtitle?: string | null;
     description?: string | null;
     imageUrls?: string[];
+    detailBlocks?: ProjectDetailBlock[];
     urls?: string[];
     plans?: Array<{
       id?: string;
@@ -251,6 +262,7 @@ export class InMemoryStore {
       imageUrl: input.imageUrls === undefined
         ? existing.imageUrl
         : (input.imageUrls[0] ?? existing.imageUrl),
+      detailBlocks: input.detailBlocks === undefined ? existing.detailBlocks : input.detailBlocks,
       urls: input.urls === undefined ? existing.urls : input.urls,
       plans: nextPlans,
       minimumPlan: nextPlans[0] ?? null,

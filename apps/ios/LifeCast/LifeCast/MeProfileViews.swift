@@ -45,7 +45,7 @@ struct MeTabView: View {
             Group {
                 if isAuthenticated {
                     ScrollView {
-                        LazyVStack(spacing: 16, pinnedViews: [.sectionHeaders]) {
+                        LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
                             ProfileOverviewSection(
                                 avatarURL: myProfile?.avatar_url,
                                 displayName: currentDisplayName,

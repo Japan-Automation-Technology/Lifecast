@@ -97,6 +97,13 @@ struct ProjectPlanResult: Decodable, Identifiable {
     let currency: String
 }
 
+struct ProjectDetailBlockResult: Codable {
+    let type: String
+    let text: String?
+    let image_url: String?
+    let items: [String]?
+}
+
 struct MyProjectResult: Decodable {
     let id: UUID
     let creator_user_id: UUID
@@ -113,6 +120,7 @@ struct MyProjectResult: Decodable {
     let deadline_at: String
     let description: String?
     let urls: [String]?
+    let detail_blocks: [ProjectDetailBlockResult]?
     let funded_amount_minor: Int
     let supporter_count: Int
     let support_count_total: Int
@@ -363,6 +371,7 @@ struct CreateProjectRequest: Encodable {
     let deadline_at: String?
     let description: String?
     let urls: [String]?
+    let detail_blocks: [ProjectDetailBlockResult]?
     let plans: [Plan]
 }
 
@@ -382,6 +391,7 @@ struct UpdateProjectRequest: Encodable {
     let image_url: String?
     let image_urls: [String]?
     let urls: [String]?
+    let detail_blocks: [ProjectDetailBlockResult]?
     let plans: [Plan]?
 }
 
@@ -1263,6 +1273,7 @@ final class LifeCastAPIClient {
             deadline_at: deadlineAtISO8601,
             description: description,
             urls: urls,
+            detail_blocks: nil,
             plans: plans
         )
         return try await send(path: "/v1/projects", method: "POST", body: body, idempotencyKey: "ios-project-create-\(UUID().uuidString)")
@@ -1283,6 +1294,7 @@ final class LifeCastAPIClient {
             image_url: imageURLs?.first ?? imageURL,
             image_urls: imageURLs,
             urls: urls,
+            detail_blocks: nil,
             plans: plans
         )
         return try await send(

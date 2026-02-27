@@ -1030,6 +1030,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
                 deadline_at: project.deadlineAt,
                 description: project.description,
                 urls: project.urls,
+                detail_blocks: project.detailBlocks,
                 created_at: project.createdAt,
                 minimum_plan: project.minimumPlan
                   ? {
@@ -1121,6 +1122,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
                 deadline_at: project.deadlineAt,
                 description: project.description,
                 urls: project.urls,
+                detail_blocks: project.detailBlocks,
                 created_at: project.createdAt,
                 minimum_plan: project.minimumPlan
                   ? {

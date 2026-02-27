@@ -1026,6 +1026,13 @@ export class HybridStore {
     subtitle: string | null;
     imageUrl: string | null;
     imageUrls: string[];
+    detailBlocks: Array<
+      | { type: "heading"; text: string }
+      | { type: "text"; text: string }
+      | { type: "quote"; text: string }
+      | { type: "image"; image_url: string | null }
+      | { type: "bullets"; items: string[] }
+    >;
     category: string | null;
     location: string | null;
     goalAmountMinor: number;
@@ -1052,6 +1059,13 @@ export class HybridStore {
     subtitle?: string | null;
     description?: string | null;
     imageUrls?: string[];
+    detailBlocks?: Array<
+      | { type: "heading"; text: string }
+      | { type: "text"; text: string }
+      | { type: "quote"; text: string }
+      | { type: "image"; image_url: string | null }
+      | { type: "bullets"; items: string[] }
+    >;
     urls?: string[];
     plans?: Array<{
       id?: string;

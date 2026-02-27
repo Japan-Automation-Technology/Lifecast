@@ -8,6 +8,29 @@ import { store } from "../store/hybridStore.js";
 import { readImageBinary, writeImageBinary } from "../store/services/imageStorageService.js";
 import { buildPublicAppUrl, normalizeLegacyLocalAssetUrl, normalizeLegacyLocalAssetUrls } from "../url/publicAssetUrl.js";
 
+const projectDetailBlockSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("heading"),
+    text: z.string().min(1).max(160),
+  }),
+  z.object({
+    type: z.literal("text"),
+    text: z.string().min(1).max(5000),
+  }),
+  z.object({
+    type: z.literal("quote"),
+    text: z.string().min(1).max(500),
+  }),
+  z.object({
+    type: z.literal("image"),
+    image_url: z.string().url().max(2048).nullable(),
+  }),
+  z.object({
+    type: z.literal("bullets"),
+    items: z.array(z.string().min(1).max(240)).min(1).max(12),
+  }),
+]);
+
 const createProjectBody = z.object({
   title: z.string().min(1).max(120),
   subtitle: z.string().max(160).optional(),
@@ -22,6 +45,7 @@ const createProjectBody = z.object({
   deadline_at: z.string().datetime().optional(),
   description: z.string().max(5000).optional(),
   urls: z.array(z.string().url().max(2048)).max(10).optional(),
+  detail_blocks: z.array(projectDetailBlockSchema).max(120).optional(),
   minimum_plan: z
     .object({
       name: z.string().min(1).max(60),
@@ -59,6 +83,7 @@ const updateProjectBody = z.object({
   image_url: z.string().url().max(2048).nullable().optional(),
   image_urls: z.array(z.string().url().max(2048)).min(1).max(5).optional(),
   urls: z.array(z.string().url().max(2048)).max(10).optional(),
+  detail_blocks: z.array(projectDetailBlockSchema).max(120).optional(),
   plans: z
     .array(
       z.object({
@@ -118,6 +143,13 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     location: string | null;
     description: string | null;
     urls: string[];
+    detailBlocks: Array<
+      | { type: "heading"; text: string }
+      | { type: "text"; text: string }
+      | { type: "quote"; text: string }
+      | { type: "image"; image_url: string | null }
+      | { type: "bullets"; items: string[] }
+    >;
     durationDays: number | null;
     fundedAmountMinor: number;
     supporterCount: number;
@@ -138,6 +170,7 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     deadline_at: project.deadlineAt,
     description: project.description,
     urls: project.urls,
+    detail_blocks: project.detailBlocks,
     funded_amount_minor: project.fundedAmountMinor,
     supporter_count: project.supporterCount,
     support_count_total: project.supportCountTotal,
@@ -289,6 +322,7 @@ export async function registerProjectRoutes(app: FastifyInstance) {
       durationDays: body.data.project_duration_days ?? null,
       description: body.data.description?.trim() || null,
       urls: body.data.urls ?? [],
+      detailBlocks: body.data.detail_blocks ?? [],
       plans: (body.data.plans && body.data.plans.length > 0
         ? body.data.plans
         : body.data.minimum_plan
@@ -341,6 +375,7 @@ export async function registerProjectRoutes(app: FastifyInstance) {
       description: body.data.description === undefined ? undefined : body.data.description?.trim() ?? null,
       imageUrls: mergedImageUrls?.map((v) => v.trim()).filter((v) => v.length > 0),
       urls: body.data.urls,
+      detailBlocks: body.data.detail_blocks,
       plans: body.data.plans?.map((plan) => ({
         id: plan.id,
         name: plan.name,
