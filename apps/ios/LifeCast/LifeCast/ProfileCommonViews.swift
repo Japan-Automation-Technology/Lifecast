@@ -193,6 +193,7 @@ struct ProfileOverviewSection<ActionContent: View>: View {
 
             actionContent
         }
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private func profileStatButton(value: Int, label: String, action: @escaping () -> Void) -> some View {

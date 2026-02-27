@@ -14,7 +14,10 @@ struct UploadCreateView: View {
     @State private var selectedPickerItem: PhotosPickerItem?
     @State private var selectedUploadVideo: SelectedUploadVideo?
     @State private var awaitingAutoOpenedPickerResult = false
+    @State private var composerStep: CreateComposerStep = .pick
     @State private var previewURL: URL?
+    @State private var previewPlayer: AVPlayer?
+    @State private var previewPlaybackObserver: NSObjectProtocol?
     @State private var myProject: MyProjectResult?
     @State private var state: UploadFlowState = .idle
     @State private var uploadProgress: Double = 0
@@ -29,25 +32,44 @@ struct UploadCreateView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if !isAuthenticated {
-                        loggedOutSection
-                    } else {
-                        uploadMainSection
+            Group {
+                if !isAuthenticated {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            loggedOutSection
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .padding(.bottom, 36)
                     }
-                    Spacer(minLength: 0)
+                    .navigationTitle("Create")
+                } else if composerStep == .preview, selectedUploadVideo != nil {
+                    previewComposerSection
+                        .toolbar(.hidden, for: .navigationBar)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            if selectedUploadVideo == nil {
+                                chooseVideoSection
+                            } else {
+                                uploadDetailsSection
+                            }
+                            uploadStatusSection
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .padding(.bottom, 36)
+                    }
+                    .scrollDismissesKeyboard(.interactively)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        focusedField = nil
+                    }
+                    .navigationTitle("Create")
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
-                .padding(.bottom, 36)
             }
-            .scrollDismissesKeyboard(.interactively)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                focusedField = nil
-            }
-            .navigationTitle("Create")
             .task {
                 await loadActiveProject()
             }
@@ -73,6 +95,14 @@ struct UploadCreateView: View {
                 matching: .videos,
                 photoLibrary: .shared()
             )
+            .onDisappear {
+                if let observer = previewPlaybackObserver {
+                    NotificationCenter.default.removeObserver(observer)
+                    previewPlaybackObserver = nil
+                }
+                previewPlayer?.pause()
+                previewPlayer = nil
+            }
         }
     }
 
@@ -90,67 +120,184 @@ struct UploadCreateView: View {
         }
     }
 
-    private var uploadMainSection: some View {
+    private var chooseVideoSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Upload")
                 .font(.subheadline.weight(.semibold))
-            Text("Pick a video, add details, then publish.")
+            Text("Pick a video to open the preview composer.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Button("Choose Video") {
                 isVideoPickerPresented = true
             }
             .buttonStyle(.bordered)
+        }
+    }
 
-            if let previewURL {
-                VideoPlayer(player: AVPlayer(url: previewURL))
-                    .frame(height: 220)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .allowsHitTesting(false)
+    private var previewComposerSection: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let previewPlayer {
+                VideoPlayer(player: previewPlayer)
+                    .scaledToFill()
+                    .ignoresSafeArea()
+                    .onAppear {
+                        previewPlayer.play()
+                    }
+            } else {
+                Color.gray.opacity(0.3).ignoresSafeArea()
             }
 
+            VStack(spacing: 0) {
+                HStack {
+                    Button {
+                        resetSelectedVideoAndReturnToPicker()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color.black.opacity(0.3))
+                            .clipShape(Circle())
+                    }
+
+                    Spacer()
+
+                    Button {
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color.black.opacity(0.3))
+                            .clipShape(Circle())
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+
+                Spacer()
+
+                HStack(alignment: .top, spacing: 0) {
+                    Spacer()
+                    VStack(spacing: 20) {
+                        previewToolButton(icon: "camera.rotate")
+                        previewToolButton(icon: "crop")
+                        previewToolButton(icon: "textformat")
+                        previewToolButton(icon: "sparkles")
+                        previewToolButton(icon: "person.2.circle")
+                        previewToolButton(icon: "rectangle.3.group")
+                    }
+                    .padding(.trailing, 16)
+                }
+
+                Spacer()
+
+                HStack(spacing: 12) {
+                    Button {
+                    } label: {
+                        Text("Your Story")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 54)
+                            .background(Color.white.opacity(0.18))
+                            .clipShape(Capsule())
+                    }
+
+                    Button {
+                        composerStep = .details
+                    } label: {
+                        Text("Next")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 54)
+                            .background(Color(red: 0.98, green: 0.19, blue: 0.40))
+                            .clipShape(Capsule())
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 24)
+            }
+        }
+    }
+
+    private func previewToolButton(icon: String) -> some View {
+        Button {
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(Color.black.opacity(0.3))
+                .clipShape(Circle())
+        }
+    }
+
+    private var uploadDetailsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Upload details")
+                .font(.subheadline.weight(.semibold))
             if let selectedUploadVideo {
                 Text("Selected: \(selectedUploadVideo.fileName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                Text("Description")
-                    .font(.caption.weight(.semibold))
-                TextEditor(text: $descriptionText)
-                    .frame(minHeight: 88, maxHeight: 120)
-                    .padding(8)
-                    .background(Color.gray.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .focused($focusedField, equals: .description)
-
-                TextField("Tags (comma separated)", text: $tagsText)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .padding(.horizontal, 12)
-                    .frame(height: 42)
-                    .background(Color.gray.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .focused($focusedField, equals: .tags)
-
-                TextField("Link (optional)", text: $linkText)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-                    .autocorrectionDisabled()
-                    .padding(.horizontal, 12)
-                    .frame(height: 42)
-                    .background(Color.gray.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .focused($focusedField, equals: .link)
-
-                Button("Publish") {
-                    Task {
-                        await startUploadFlow()
-                    }
+            }
+            HStack(spacing: 10) {
+                Button("Preview") {
+                    composerStep = .preview
+                    previewPlayer?.play()
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(state == .uploading || state == .processing)
+                .buttonStyle(.bordered)
+
+                Button("Choose Another Video") {
+                    resetSelectedVideoAndReturnToPicker()
+                    presentPickerIfEligible(triggeredByAutoOpen: false)
+                }
+                .buttonStyle(.bordered)
             }
 
+            Text("Description")
+                .font(.caption.weight(.semibold))
+            TextEditor(text: $descriptionText)
+                .frame(minHeight: 88, maxHeight: 120)
+                .padding(8)
+                .background(Color.gray.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .focused($focusedField, equals: .description)
+
+            TextField("Tags (comma separated)", text: $tagsText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .padding(.horizontal, 12)
+                .frame(height: 42)
+                .background(Color.gray.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .focused($focusedField, equals: .tags)
+
+            TextField("Link (optional)", text: $linkText)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+                .autocorrectionDisabled()
+                .padding(.horizontal, 12)
+                .frame(height: 42)
+                .background(Color.gray.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .focused($focusedField, equals: .link)
+
+            Button("Publish") {
+                Task {
+                    await startUploadFlow()
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(state == .uploading || state == .processing)
+        }
+    }
+
+    private var uploadStatusSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
             if state != .idle || !errorText.isEmpty {
                 statusPill
 
@@ -290,8 +437,7 @@ struct UploadCreateView: View {
                 if session.status == "ready" {
                     state = .ready
                     statusText = "Upload complete. Opening Me > Posts..."
-                    selectedUploadVideo = nil
-                    selectedPickerItem = nil
+                    resetSelectedVideoAndReturnToPicker()
                     onUploadReady()
                     return
                 }
@@ -364,6 +510,7 @@ struct UploadCreateView: View {
         videoId = nil
         statusText = "Not started"
         errorText = ""
+        composerStep = .pick
     }
 
     private func loadSelectedVideo(from pickerItem: PhotosPickerItem?) async {
@@ -387,6 +534,8 @@ struct UploadCreateView: View {
                     contentType: contentType
                 )
                 previewURL = writePreviewFile(data: data, fileName: fileName)
+                configurePreviewPlayer(with: previewURL)
+                composerStep = .preview
                 state = .idle
                 statusText = "Ready to publish"
                 errorText = ""
@@ -395,6 +544,7 @@ struct UploadCreateView: View {
             await MainActor.run {
                 selectedUploadVideo = nil
                 previewURL = nil
+                composerStep = .pick
                 state = .failed
                 statusText = "Video selection failed"
                 errorText = error.localizedDescription
@@ -409,6 +559,43 @@ struct UploadCreateView: View {
         guard state != .uploading && state != .processing else { return }
         awaitingAutoOpenedPickerResult = triggeredByAutoOpen
         isVideoPickerPresented = true
+    }
+
+    private func resetSelectedVideoAndReturnToPicker() {
+        selectedPickerItem = nil
+        selectedUploadVideo = nil
+        previewURL = nil
+        composerStep = .pick
+        if let observer = previewPlaybackObserver {
+            NotificationCenter.default.removeObserver(observer)
+            previewPlaybackObserver = nil
+        }
+        previewPlayer?.pause()
+        previewPlayer = nil
+    }
+
+    private func configurePreviewPlayer(with url: URL?) {
+        if let observer = previewPlaybackObserver {
+            NotificationCenter.default.removeObserver(observer)
+            previewPlaybackObserver = nil
+        }
+        previewPlayer?.pause()
+        guard let url else {
+            previewPlayer = nil
+            return
+        }
+        let player = AVPlayer(url: url)
+        player.actionAtItemEnd = .none
+        previewPlaybackObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: player.currentItem,
+            queue: .main
+        ) { _ in
+            player.seek(to: .zero)
+            player.play()
+        }
+        previewPlayer = player
+        player.play()
     }
 
     private func uniquePseudoSha256() -> String {
@@ -495,6 +682,12 @@ private enum CreateInputField: Hashable {
     case description
     case tags
     case link
+}
+
+private enum CreateComposerStep {
+    case pick
+    case preview
+    case details
 }
 
 private struct SelectedUploadVideo {

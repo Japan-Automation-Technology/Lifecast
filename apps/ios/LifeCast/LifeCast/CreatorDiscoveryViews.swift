@@ -465,54 +465,68 @@ struct CreatorPublicPageView: View {
                                 showNetwork = true
                             }
                         ) {
-                            if viewerContextResolved && isViewingSelfProfile == false {
+                            if isViewingSelfProfile != true {
                                 HStack(spacing: 10) {
-                                    Button(page.viewer_relationship.is_following ? "Following" : "Follow") {
-                                        guard client.hasAuthSession else {
-                                            onRequireAuth()
-                                            return
+                                    if viewerContextResolved {
+                                        Button(page.viewer_relationship.is_following ? "Following" : "Follow") {
+                                            guard client.hasAuthSession else {
+                                                onRequireAuth()
+                                                return
+                                            }
+                                            Task {
+                                                await toggleFollow()
+                                            }
                                         }
-                                        Task {
-                                            await toggleFollow()
-                                        }
-                                    }
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(Color.black.opacity(page.viewer_relationship.is_following ? 0.9 : 0.82))
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 34)
-                                    .background(page.viewer_relationship.is_following ? Color.gray.opacity(0.28) : Color.white)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(
-                                                page.viewer_relationship.is_following ? Color.clear : Color.black.opacity(0.82),
-                                                lineWidth: page.viewer_relationship.is_following ? 0 : 1.4
-                                            )
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .buttonStyle(.plain)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(Color.black.opacity(page.viewer_relationship.is_following ? 0.9 : 0.82))
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 34)
+                                        .background(page.viewer_relationship.is_following ? Color.gray.opacity(0.28) : Color.white)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(
+                                                    page.viewer_relationship.is_following ? Color.clear : Color.black.opacity(0.82),
+                                                    lineWidth: page.viewer_relationship.is_following ? 0 : 1.4
+                                                )
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .buttonStyle(.plain)
 
-                                    Button(page.viewer_relationship.is_supported ? "Supported" : "Support") {
-                                        guard !page.viewer_relationship.is_supported else { return }
-                                        guard client.hasAuthSession else {
-                                            onRequireAuth()
-                                            return
+                                        Button(page.viewer_relationship.is_supported ? "Supported" : "Support") {
+                                            guard !page.viewer_relationship.is_supported else { return }
+                                            guard client.hasAuthSession else {
+                                                onRequireAuth()
+                                                return
+                                            }
+                                            guard let project = page.project else {
+                                                errorText = "No active project to support"
+                                                return
+                                            }
+                                            onSupportTap(project, nil)
                                         }
-                                        guard let project = page.project else {
-                                            errorText = "No active project to support"
-                                            return
-                                        }
-                                        onSupportTap(project, nil)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(page.viewer_relationship.is_supported ? Color.primary : Color.white)
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 34)
+                                        .background(page.viewer_relationship.is_supported ? Color.gray.opacity(0.28) : Color.green)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .buttonStyle(.plain)
+                                        .disabled(!page.viewer_relationship.is_supported && page.project == nil)
+                                    } else {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color.gray.opacity(0.2))
+                                            .frame(maxWidth: .infinity)
+                                            .frame(height: 34)
+
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color.gray.opacity(0.2))
+                                            .frame(maxWidth: .infinity)
+                                            .frame(height: 34)
                                     }
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(page.viewer_relationship.is_supported ? Color.primary : Color.white)
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 34)
-                                    .background(page.viewer_relationship.is_supported ? Color.gray.opacity(0.28) : Color.green)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .buttonStyle(.plain)
-                                    .disabled(!page.viewer_relationship.is_supported && page.project == nil)
                                 }
                                 .padding(.horizontal, 24)
+                                .redacted(reason: viewerContextResolved ? [] : .placeholder)
+                                .animation(.default, value: viewerContextResolved)
                             }
                         }
                     }
