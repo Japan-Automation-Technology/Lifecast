@@ -164,7 +164,6 @@ struct CreatorPostedFeedView: View {
     @State private var postedFeedBackPanOffset: CGSize = .zero
     @State private var isPostedFeedBackPanning = false
     @State private var postedFeedContainerWidth: CGFloat = 1
-    @State private var postedFeedBackProfileCache: [UUID: CreatorPublicPageResult] = [:]
     @State private var feedProjectDetailsById: [UUID: MyProjectResult] = [:]
     @State private var showComments = false
     @State private var showShare = false
@@ -211,62 +210,10 @@ struct CreatorPostedFeedView: View {
                 postedFeedBackProfileBackdrop
                     .allowsHitTesting(false)
 
-                ZStack {
-                    Color.black.ignoresSafeArea()
-
-                    if feedVideos.isEmpty {
-                        Text("No videos")
-                            .foregroundStyle(.white)
-                    } else {
-                        InteractiveVerticalFeedPager(
-                            items: feedVideos,
-                            currentIndex: $currentIndex,
-                            verticalDragDisabled: isPostedFeedBackPanning,
-                            allowHorizontalChildDrag: false,
-                            horizontalActionExclusionBottomInset: 28,
-                            onWillMove: {
-                                player?.pause()
-                            },
-                            onDidMove: {
-                                syncPlayerForCurrentIndex()
-                            },
-                            onHorizontalDragChanged: { _ in },
-                            onNonVerticalEnded: { _ in },
-                            content: { video, isActive in
-                                feedPage(video: video, project: currentProject, useLivePlayer: isActive)
-                            }
-                        )
-                        .accessibilityIdentifier("posted-feed-view")
-                        .ignoresSafeArea(edges: .top)
-                    }
-
-                    VStack {
-                        HStack {
-                            Button {
-                                dismissCreatorFeed()
-                            }
-                            label: {
-                                Image(systemName: "chevron.left")
-                                    .font(.headline.weight(.semibold))
-                                    .padding(10)
-                                    .background(Color.black.opacity(0.45))
-                                    .foregroundStyle(.white)
-                                    .clipShape(Circle())
-                            }
-                            .accessibilityIdentifier("posted-feed-back")
-
-                            Spacer()
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                }
+                postedFeedForeground
+                    .offset(x: postedFeedBackPanOffset.width, y: postedFeedBackPanOffset.height)
+                    .simultaneousGesture(profileFeedBackPanGesture, including: .gesture)
             }
-            .offset(x: postedFeedBackPanOffset.width, y: postedFeedBackPanOffset.height)
-            .simultaneousGesture(profileFeedBackPanGesture, including: .gesture)
             .onAppear {
                 postedFeedContainerWidth = max(geo.size.width, 1)
             }
@@ -276,6 +223,8 @@ struct CreatorPostedFeedView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             postedFeedCommentBar
+                .offset(x: postedFeedBackPanOffset.width, y: postedFeedBackPanOffset.height)
+                .allowsHitTesting(!isPostedFeedBackPanning)
         }
         .sheet(isPresented: $showComments) {
             commentsSheet
@@ -303,14 +252,12 @@ struct CreatorPostedFeedView: View {
             Task {
                 await refreshCurrentVideoEngagement()
                 await refreshOwnCreatorProfileIfNeeded()
-                await prefetchPostedFeedBackProfile(creatorId: currentProject.creatorId)
             }
         }
         .onChange(of: currentIndex) { _, _ in
             syncPlayerForCurrentIndex()
             Task {
                 await refreshCurrentVideoEngagement()
-                await prefetchPostedFeedBackProfile(creatorId: currentProject.creatorId)
             }
         }
         .onChange(of: selectedCreatorRoute) { _, newValue in
@@ -414,91 +361,71 @@ struct CreatorPostedFeedView: View {
         return feedVideos[currentIndex].video_id
     }
 
-    private var postedFeedBackProfileBackdrop: some View {
-        let cached = postedFeedBackProfileCache[currentProject.creatorId]
-        let profile = cached?.profile
-        let stats = cached?.profile_stats
-        let username = profile?.username ?? currentProject.username
-        let displayName = resolveBackdropDisplayName(profile: profile, fallbackUsername: username)
-        let avatarURL = profile?.avatar_url ?? currentProject.creatorAvatarURL
+    private var postedFeedForeground: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
 
-        return ScrollView(showsIndicators: false) {
-            VStack(spacing: 18) {
-                Spacer(minLength: 72)
-
-                Group {
-                    if let avatarURL, let url = URL(string: avatarURL) {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image.resizable().scaledToFill()
-                            default:
-                                Circle().fill(Color.gray.opacity(0.2))
-                            }
-                        }
-                    } else {
-                        Circle().fill(Color.gray.opacity(0.2))
+            if feedVideos.isEmpty {
+                Text("No videos")
+                    .foregroundStyle(.white)
+            } else {
+                InteractiveVerticalFeedPager(
+                    items: feedVideos,
+                    currentIndex: $currentIndex,
+                    verticalDragDisabled: isPostedFeedBackPanning,
+                    allowHorizontalChildDrag: false,
+                    horizontalActionExclusionBottomInset: 28,
+                    onWillMove: {
+                        player?.pause()
+                    },
+                    onDidMove: {
+                        syncPlayerForCurrentIndex()
+                    },
+                    onHorizontalDragChanged: { _ in },
+                    onNonVerticalEnded: { _ in },
+                    content: { video, isActive in
+                        feedPage(video: video, project: currentProject, useLivePlayer: isActive)
                     }
-                }
-                .frame(width: 88, height: 88)
-                .clipShape(Circle())
-                .overlay(
-                    Circle()
-                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
                 )
-
-                VStack(spacing: 4) {
-                    Text(displayName)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.black)
-                    Text("@\(username)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 42) {
-                    backdropStatBlock(value: stats?.following_count ?? 0, label: "Following")
-                    backdropStatBlock(value: stats?.followers_count ?? 0, label: "Followers")
-                    backdropStatBlock(value: stats?.supported_project_count ?? 0, label: "Support")
-                }
-
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.black.opacity(0.06))
-                    .frame(height: 260)
-                    .overlay(
-                        VStack(spacing: 10) {
-                            Image(systemName: "square.grid.3x3.fill")
-                                .font(.title2)
-                                .foregroundStyle(.secondary)
-                            Text("Profile posts")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                    )
-                    .padding(.horizontal, 16)
-
-                Spacer(minLength: 120)
+                .accessibilityIdentifier("posted-feed-view")
+                .ignoresSafeArea(edges: .top)
             }
-            .frame(maxWidth: .infinity)
+
+            VStack {
+                HStack {
+                    Button {
+                        dismissCreatorFeed()
+                    }
+                    label: {
+                        Image(systemName: "chevron.left")
+                            .font(.headline.weight(.semibold))
+                            .padding(10)
+                            .background(Color.black.opacity(0.45))
+                            .foregroundStyle(.white)
+                            .clipShape(Circle())
+                    }
+                    .accessibilityIdentifier("posted-feed-back")
+
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .background(Color.white.ignoresSafeArea())
     }
 
-    private func resolveBackdropDisplayName(profile: CreatorPublicProfile?, fallbackUsername: String) -> String {
-        let candidate = profile?.display_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !candidate.isEmpty { return candidate }
-        return fallbackUsername
-    }
-
-    private func backdropStatBlock(value: Int, label: String) -> some View {
-        VStack(spacing: 4) {
-            Text(feedShortCount(value))
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.black)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
+    private var postedFeedBackProfileBackdrop: some View {
+        CreatorPublicPageView(
+            client: client,
+            creatorId: currentProject.creatorId,
+            onSupportTap: onSupportTap,
+            onBackTap: {}
+        )
+        .id(currentProject.creatorId)
+        .accessibilityHidden(true)
     }
 
     private func feedPage(video: MyVideo, project: FeedProjectSummary, useLivePlayer: Bool) -> some View {
@@ -1239,18 +1166,6 @@ struct CreatorPostedFeedView: View {
             }
         } catch {
             // Keep existing context when profile refresh fails.
-        }
-    }
-
-    private func prefetchPostedFeedBackProfile(creatorId: UUID) async {
-        if postedFeedBackProfileCache[creatorId] != nil { return }
-        do {
-            let page = try await client.getCreatorPage(creatorUserId: creatorId)
-            await MainActor.run {
-                postedFeedBackProfileCache[creatorId] = page
-            }
-        } catch {
-            // Keep fallback backdrop content when prefetch fails.
         }
     }
 
