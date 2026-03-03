@@ -551,7 +551,6 @@ struct CreatorPostedFeedView: View {
         Group {
             if useLivePlayer, let currentPlayer = player {
                 FillVideoPlayerView(player: currentPlayer)
-                    .ignoresSafeArea(edges: .top)
             } else if let thumbnail = video.thumbnail_url, let thumbnailURL = URL(string: thumbnail) {
                 AsyncImage(url: thumbnailURL) { phase in
                     switch phase {
@@ -565,11 +564,9 @@ struct CreatorPostedFeedView: View {
                         Rectangle().fill(Color.gray.opacity(0.3))
                     }
                 }
-                .ignoresSafeArea(edges: .top)
             } else {
                 Rectangle()
                     .fill(Color.gray.opacity(0.3))
-                    .ignoresSafeArea(edges: .top)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

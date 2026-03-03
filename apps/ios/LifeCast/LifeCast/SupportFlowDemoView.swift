@@ -26,6 +26,8 @@ struct SupportFlowDemoView: View {
     @State private var feedProjectDetailsById: [UUID: MyProjectResult] = [:]
     @State private var feedProjectDetailLoadingIds: Set<UUID> = []
     @State private var feedProjectDetailErrorsById: [UUID: String] = [:]
+    @State private var creatorPageCacheById: [UUID: CreatorPublicPageResult] = [:]
+    @State private var creatorPageLoadingIds: Set<UUID> = []
     @State private var showComments = false
     @State private var showShare = false
     @State private var selectedCreatorRoute: CreatorRoute? = nil
@@ -122,6 +124,10 @@ struct SupportFlowDemoView: View {
                                     supportStep = .planSelect
                                 }
                                 showSupportFlow = true
+                            },
+                            initialPage: creatorPageCacheById[route.id],
+                            onPageLoaded: { page in
+                                cacheCreatorPage(page)
                             }
                         )
                     }
@@ -321,6 +327,7 @@ struct SupportFlowDemoView: View {
         .onChange(of: currentFeedIndex) { _, _ in
             syncHomeFeedPlayer()
             Task {
+                await prefetchCreatorPages(around: currentFeedIndex)
                 await prefetchFeedProjectDetails(around: currentFeedIndex)
                 await refreshCurrentVideoEngagement()
             }
@@ -389,6 +396,11 @@ struct SupportFlowDemoView: View {
                                 return
                             }
                             homeFeedPanelDragOffsetX = min(0, dx)
+                            if dx < 0, let project = currentProject {
+                                Task {
+                                    await prefetchCreatorPage(for: project.creatorId)
+                                }
+                            }
                         },
                         onNonVerticalEnded: { value in
                             handleHomeFeedDragEnded(value)
@@ -777,7 +789,9 @@ struct SupportFlowDemoView: View {
     }
 
     private func feedCreatorProfilePanel(project: FeedProjectSummary, width: CGFloat, isActive: Bool) -> some View {
-        Group {
+        let cachedPage = creatorPageCacheById[project.creatorId]
+
+        return Group {
             if isActive {
                 CreatorPublicPageView(
                     client: client,
@@ -810,6 +824,10 @@ struct SupportFlowDemoView: View {
                     },
                     onBackTap: {
                         closeFeedProjectPanel()
+                    },
+                    initialPage: cachedPage,
+                    onPageLoaded: { page in
+                        cacheCreatorPage(page)
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1235,6 +1253,9 @@ struct SupportFlowDemoView: View {
             if let creatorId = supportTargetProject?.creator_user_id,
                creatorId != liveSupportProject?.creator_user_id,
                let refreshedPage = try? await client.getCreatorPage(creatorUserId: creatorId) {
+                await MainActor.run {
+                    cacheCreatorPage(refreshedPage)
+                }
                 supportTargetProject = refreshedPage.project
                 if let updatedProject = refreshedPage.project {
                     feedProjects = feedProjects.map { existing in
@@ -1454,6 +1475,7 @@ struct SupportFlowDemoView: View {
                 return
             }
             await MainActor.run {
+                cacheCreatorPage(page)
                 supportEntryPoint = .feed
                 supportTargetProject = target
                 let chosen = plans.first(where: { $0.id == preferredPlanId }) ?? plans[0]
@@ -1511,6 +1533,7 @@ struct SupportFlowDemoView: View {
             }
             syncHomeFeedPlayer()
         }
+        await prefetchCreatorPages(around: currentFeedIndex)
         await prefetchFeedProjectDetails(around: currentFeedIndex)
         await refreshCurrentVideoEngagement()
     }
@@ -1552,6 +1575,37 @@ struct SupportFlowDemoView: View {
         }
     }
 
+    private func prefetchCreatorPages(around index: Int) async {
+        guard !feedProjects.isEmpty else { return }
+        let indices = [index - 1, index, index + 1].filter { $0 >= 0 && $0 < feedProjects.count }
+        for idx in indices {
+            await prefetchCreatorPage(for: feedProjects[idx].creatorId)
+        }
+    }
+
+    private func prefetchCreatorPage(for creatorId: UUID) async {
+        let shouldSkip = await MainActor.run {
+            creatorPageCacheById[creatorId] != nil || creatorPageLoadingIds.contains(creatorId)
+        }
+        if shouldSkip { return }
+
+        await MainActor.run {
+            _ = creatorPageLoadingIds.insert(creatorId)
+        }
+
+        do {
+            let page = try await client.getCreatorPage(creatorUserId: creatorId)
+            await MainActor.run {
+                cacheCreatorPage(page)
+                _ = creatorPageLoadingIds.remove(creatorId)
+            }
+        } catch {
+            await MainActor.run {
+                _ = creatorPageLoadingIds.remove(creatorId)
+            }
+        }
+    }
+
     private func refreshCurrentVideoEngagement() async {
         guard let videoId = currentProject?.videoId else { return }
         do {
@@ -1571,6 +1625,9 @@ struct SupportFlowDemoView: View {
         for row in rows {
             var appendedForCreator = false
             if let page = try? await client.getCreatorPage(creatorUserId: row.creator_user_id) {
+                await MainActor.run {
+                    cacheCreatorPage(page)
+                }
                 let playableVideos = page.videos
                     .filter { $0.playback_url != nil }
                     .sorted { $0.created_at > $1.created_at }
@@ -2135,6 +2192,7 @@ struct SupportFlowDemoView: View {
         do {
             let page = try await client.getCreatorPage(creatorUserId: project.creatorId)
             await MainActor.run {
+                cacheCreatorPage(page)
                 if let detail = page.project {
                     feedProjectDetailsById[project.id] = detail
                 } else {
@@ -2148,6 +2206,10 @@ struct SupportFlowDemoView: View {
                 feedProjectDetailLoadingIds.remove(project.id)
             }
         }
+    }
+
+    private func cacheCreatorPage(_ page: CreatorPublicPageResult) {
+        creatorPageCacheById[page.profile.creator_user_id] = page
     }
 
 }

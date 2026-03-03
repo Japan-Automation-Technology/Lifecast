@@ -578,6 +578,7 @@ struct CreatorPublicPageView: View {
     let onRequireAuth: () -> Void
     let onSupportTap: (MyProjectResult, UUID?) -> Void
     let onBackTap: (() -> Void)?
+    let onPageLoaded: ((CreatorPublicPageResult) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var page: CreatorPublicPageResult?
@@ -603,6 +604,8 @@ struct CreatorPublicPageView: View {
         onRequireAuth: @escaping () -> Void = {},
         onSupportTap: @escaping (MyProjectResult, UUID?) -> Void,
         onBackTap: (() -> Void)? = nil,
+        initialPage: CreatorPublicPageResult? = nil,
+        onPageLoaded: ((CreatorPublicPageResult) -> Void)? = nil,
         initialSelectedIndex: Int = 0
     ) {
         self.client = client
@@ -610,6 +613,8 @@ struct CreatorPublicPageView: View {
         self.onRequireAuth = onRequireAuth
         self.onSupportTap = onSupportTap
         self.onBackTap = onBackTap
+        self.onPageLoaded = onPageLoaded
+        _page = State(initialValue: initialPage)
         _selectedIndex = State(initialValue: max(0, min(2, initialSelectedIndex)))
     }
 
@@ -1037,6 +1042,7 @@ struct CreatorPublicPageView: View {
             let result = try await client.getCreatorPage(creatorUserId: creatorId)
             await MainActor.run {
                 page = result
+                onPageLoaded?(result)
                 errorText = ""
             }
         } catch {
