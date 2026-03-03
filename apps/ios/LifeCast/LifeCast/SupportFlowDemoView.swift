@@ -1280,19 +1280,85 @@ struct SupportFlowDemoView: View {
     }
 
     private var checkoutView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("3. Checkout")
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Checkout")
                 .font(.headline)
-            Text("WebView / Apple Pay handoff is represented as a single action in this demo.")
+            Text("Review your order and continue to secure payment.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            if let plan = selectedPlan {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 10) {
+                        supportPlanThumbnail(plan: plan, width: 96, height: 68)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(plan.name)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(2)
+                            Text(plan.rewardSummary)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        Spacer(minLength: 0)
+                    }
+
+                    Divider()
+
+                    HStack {
+                        Text("Total")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(supportPlanPrice(plan))
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(.blue)
+                            .monospacedDigit()
+                    }
+                }
+                .padding(14)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 4)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Payment method", systemImage: "creditcard.fill")
+                    .font(.subheadline.weight(.semibold))
+                Text("Apple Pay / Card (will be connected in the next step)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.9))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            Label("Your payment will be processed on a secure provider page.", systemImage: "lock.shield.fill")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            Button("Complete payment") {
+            Button("Continue to payment") {
                 Task {
                     await performSupportRequest()
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.plain)
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 56)
+            .background(
+                LinearGradient(
+                    colors: [Color(red: 0.10, green: 0.58, blue: 1.0), Color(red: 0.00, green: 0.47, blue: 0.95)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Color(red: 0.00, green: 0.47, blue: 0.95).opacity(0.32), radius: 12, x: 0, y: 6)
+            .disabled(selectedPlan == nil)
+            .opacity(selectedPlan == nil ? 0.55 : 1.0)
         }
     }
 
