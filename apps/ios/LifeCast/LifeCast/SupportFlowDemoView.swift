@@ -1152,8 +1152,11 @@ struct SupportFlowDemoView: View {
                 ForEach(realPlans) { plan in
                     let isSelected = selectedPlan?.id == plan.id
                     Button {
-                        selectedPlan = plan
-                        supportStep = .confirm
+                        if isSelected {
+                            supportStep = .confirm
+                        } else {
+                            selectedPlan = plan
+                        }
                     } label: {
                         HStack(spacing: 12) {
                             supportPlanThumbnail(plan: plan, width: 104, height: 72)
