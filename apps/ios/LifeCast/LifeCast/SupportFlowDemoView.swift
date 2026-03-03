@@ -1137,16 +1137,20 @@ struct SupportFlowDemoView: View {
     }
 
     private var planSelectView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Select Plan")
-                .font(.headline)
-
+        VStack(alignment: .leading, spacing: 14) {
             if liveSupportProject == nil || realPlans.isEmpty {
                 Text("No active project/plans available for support yet.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
+                Text("Choose a plan")
+                    .font(.headline)
+                Text("You can review details before checkout.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
                 ForEach(realPlans) { plan in
+                    let isSelected = selectedPlan?.id == plan.id
                     Button {
                         selectedPlan = plan
                         supportStep = .confirm
@@ -1155,24 +1159,36 @@ struct SupportFlowDemoView: View {
                             supportPlanThumbnail(plan: plan, width: 104, height: 72)
 
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(plan.name)
-                                    .font(.subheadline.bold())
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
+                                HStack(spacing: 6) {
+                                    Text(plan.name)
+                                        .font(.subheadline.bold())
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    if isSelected {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.blue)
+                                    }
+                                }
                                 Text(supportPlanPrice(plan))
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.primary)
+                                    .font(.title3.weight(.semibold))
+                                    .foregroundStyle(.blue)
+                                    .monospacedDigit()
                                 Text(plan.rewardSummary)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(2)
                             }
                             Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
-                        .background(Color.secondary.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .background(isSelected ? Color.blue.opacity(0.1) : Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .shadow(color: .black.opacity(0.07), radius: 10, x: 0, y: 4)
                     }
                     .buttonStyle(.plain)
                 }
@@ -1181,53 +1197,64 @@ struct SupportFlowDemoView: View {
     }
 
     private var confirmCardView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Confirm")
-                .font(.headline)
-
+        VStack(alignment: .leading, spacing: 14) {
             if let plan = selectedPlan {
                 VStack(alignment: .leading, spacing: 14) {
-                    supportPlanThumbnail(plan: plan, width: 180, height: 108)
+                    Text("Review your support")
+                        .font(.headline)
+                    Text("Confirm plan details and amount before checkout.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
 
-                    Text(plan.name)
-                        .font(.title3.weight(.bold))
+                    HStack(alignment: .top, spacing: 12) {
+                        supportPlanThumbnail(plan: plan, width: 116, height: 84)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(plan.name)
+                                .font(.title3.weight(.bold))
+                                .lineLimit(2)
+                            Label(plan.rewardSummary, systemImage: "gift.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        Spacer(minLength: 0)
+                        Text(supportPlanPrice(plan))
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(.blue)
+                            .monospacedDigit()
+                    }
 
-                    HStack(spacing: 10) {
+                    if let description = planSummaryDescription(plan) {
+                        Text(description)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                    }
+
+                    Divider()
+
+                    VStack(spacing: 10) {
+                        summaryRow(title: "Estimated delivery", value: (supportTargetProject ?? liveSupportProject).map { feedFormatDate($0.deadline_at) } ?? "-")
+                        summaryRow(title: "Project goal", value: feedFormatJPY((supportTargetProject ?? liveSupportProject)?.goal_amount_minor ?? 0))
                         Label("\((supportTargetProject ?? liveSupportProject)?.supporter_count ?? 0) supporters", systemImage: "person.2.fill")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
-
-                    Label(plan.rewardSummary, systemImage: "gift.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                    if let description = plan.detailDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
-                       !description.isEmpty {
-                        Text(description)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(4)
-                    }
-
-                    Divider()
-
-                    summaryRow(title: "Delivery", value: (supportTargetProject ?? liveSupportProject).map { feedFormatDate($0.deadline_at) } ?? "-")
-                    summaryRow(title: "Goal", value: feedFormatJPY((supportTargetProject ?? liveSupportProject)?.goal_amount_minor ?? 0))
-
                     Divider()
 
                     summaryRow(title: "Support Amount", value: supportPlanPrice(plan), isEmphasized: true)
                 }
-                .padding(14)
-                .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(16)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 4)
             }
 
             Button("Go to checkout") {
                 supportStep = .checkout
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             .disabled(selectedPlan == nil)
         }
     }
@@ -1286,6 +1313,14 @@ struct SupportFlowDemoView: View {
             return feedFormatJPY(plan.priceMinor)
         }
         return "\(plan.priceMinor.formatted()) \(plan.currency.uppercased())"
+    }
+
+    private func planSummaryDescription(_ plan: SupportPlan) -> String? {
+        guard let value = plan.detailDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+        return value
     }
 
     private func supportPlanThumbnail(plan: SupportPlan, width: CGFloat, height: CGFloat) -> some View {
