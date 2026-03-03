@@ -995,12 +995,20 @@ struct CreatorPostedFeedView: View {
             )
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.11) {
-            dismissCreatorFeed()
+            dismissCreatorFeed(animated: false)
         }
     }
 
-    private func dismissCreatorFeed() {
+    private func dismissCreatorFeed(animated: Bool = true) {
         player?.pause()
+        guard animated else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                dismiss()
+            }
+            return
+        }
         dismiss()
     }
 
