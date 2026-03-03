@@ -1214,9 +1214,6 @@ struct SupportFlowDemoView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Review your support")
                         .font(.headline)
-                    Text("Confirm plan details and amount before checkout.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
 
                     supportPlanHeroImage(plan: plan)
 
@@ -1239,11 +1236,6 @@ struct SupportFlowDemoView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    Divider()
-
-                    VStack(spacing: 10) {
-                        summaryRow(title: "Estimated delivery", value: (supportTargetProject ?? liveSupportProject).map { feedFormatDate($0.deadline_at) } ?? "-")
-                    }
                     Divider()
 
                     HStack(alignment: .firstTextBaseline) {
