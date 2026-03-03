@@ -159,6 +159,85 @@ async function loadViewerRelationship(client: PoolClient, viewerUserId: string |
   return { is_following: isFollowing, is_supported: isSupported };
 }
 
+type ViewerProjectSupportContext = {
+  committedSupportAmountMinor: number;
+  supportedPlanPriceMinor: number;
+  supportedPlanId: string | null;
+  hasUpgradeablePlan: boolean;
+};
+
+async function loadViewerProjectSupportContext(
+  client: PoolClient,
+  viewerUserId: string | null,
+  projectId: string,
+): Promise<ViewerProjectSupportContext> {
+  if (!viewerUserId) {
+    return {
+      committedSupportAmountMinor: 0,
+      supportedPlanPriceMinor: 0,
+      supportedPlanId: null,
+      hasUpgradeablePlan: false,
+    };
+  }
+
+  const summary = await client.query<{
+    committed_amount_minor: string | number;
+    supported_plan_price_minor: string | number;
+  }>(
+    `
+      select
+        coalesce(sum(st.amount_minor), 0) as committed_amount_minor,
+        coalesce(max(pp.price_minor), 0) as supported_plan_price_minor
+      from support_transactions st
+      inner join project_plans pp on pp.id = st.plan_id
+      where st.project_id = $1
+        and st.supporter_user_id = $2
+        and st.status in ('pending_confirmation', 'succeeded')
+    `,
+    [projectId, viewerUserId],
+  );
+
+  const committedSupportAmountMinor = Number(summary.rows[0]?.committed_amount_minor ?? 0);
+  const supportedPlanPriceMinor = Number(summary.rows[0]?.supported_plan_price_minor ?? 0);
+
+  let supportedPlanId: string | null = null;
+  if (supportedPlanPriceMinor > 0) {
+    const topPlan = await client.query<{ plan_id: string }>(
+      `
+        select st.plan_id
+        from support_transactions st
+        inner join project_plans pp on pp.id = st.plan_id
+        where st.project_id = $1
+          and st.supporter_user_id = $2
+          and st.status in ('pending_confirmation', 'succeeded')
+        order by pp.price_minor desc, coalesce(st.succeeded_at, st.confirmed_at, st.created_at) desc
+        limit 1
+      `,
+      [projectId, viewerUserId],
+    );
+    supportedPlanId = topPlan.rows[0]?.plan_id ?? null;
+  }
+
+  const hasUpgradeablePlanResult = await client.query<{ has_upgradeable_plan: boolean }>(
+    `
+      select exists(
+        select 1
+        from project_plans pp
+        where pp.project_id = $1
+          and pp.price_minor > $2
+      ) as has_upgradeable_plan
+    `,
+    [projectId, supportedPlanPriceMinor],
+  );
+
+  return {
+    committedSupportAmountMinor,
+    supportedPlanPriceMinor,
+    supportedPlanId,
+    hasUpgradeablePlan: Boolean(hasUpgradeablePlanResult.rows[0]?.has_upgradeable_plan),
+  };
+}
+
 async function loadSupportedProjects(client: PoolClient, supporterUserId: string, limit: number) {
   const rows = await client.query<{
     support_id: string;
@@ -340,6 +419,10 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         comments: string | number;
         is_liked_by_current_user: boolean;
         is_supported_by_current_user: boolean;
+        viewer_committed_support_amount_minor: string | number;
+        viewer_supported_plan_price_minor: string | number;
+        viewer_supported_plan_id: string | null;
+        viewer_has_upgradeable_plan: boolean;
       }>(
         `
         select
@@ -374,6 +457,21 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             from video_comments vc
             where vc.video_id = latest_video.video_id
           ), 0) as comments,
+          coalesce(viewer_support.committed_amount_minor, 0) as viewer_committed_support_amount_minor,
+          coalesce(viewer_support.supported_plan_price_minor, 0) as viewer_supported_plan_price_minor,
+          viewer_supported_plan.plan_id as viewer_supported_plan_id,
+          case
+            when $1::uuid is null then false
+            else exists(
+              select 1
+              from project_plans pp_upgrade
+              where pp_upgrade.project_id = p.id
+                and pp_upgrade.price_minor > greatest(
+                  coalesce(viewer_support.committed_amount_minor, 0),
+                  coalesce(viewer_support.supported_plan_price_minor, 0)
+                )
+            )
+          end as viewer_has_upgradeable_plan,
           case
             when $1::uuid is null then false
             else exists(
@@ -385,13 +483,10 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
           end as is_liked_by_current_user,
           case
             when $1::uuid is null then false
-            else exists(
-              select 1
-              from support_transactions st
-              where st.project_id = p.id
-                and st.supporter_user_id = $1::uuid
-                and st.status = 'succeeded'
-            )
+            else greatest(
+              coalesce(viewer_support.committed_amount_minor, 0),
+              coalesce(viewer_support.supported_plan_price_minor, 0)
+            ) > 0
           end as is_supported_by_current_user
         from projects p
         inner join users u on u.id = p.creator_user_id
@@ -412,6 +507,26 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
           order by price_minor asc, created_at asc
           limit 1
         ) min_plan on true
+        left join lateral (
+          select
+            coalesce(sum(st_viewer.amount_minor), 0) as committed_amount_minor,
+            coalesce(max(pp_viewer.price_minor), 0) as supported_plan_price_minor
+          from support_transactions st_viewer
+          inner join project_plans pp_viewer on pp_viewer.id = st_viewer.plan_id
+          where st_viewer.project_id = p.id
+            and st_viewer.supporter_user_id = $1::uuid
+            and st_viewer.status in ('pending_confirmation', 'succeeded')
+        ) viewer_support on true
+        left join lateral (
+          select st_supported.plan_id
+          from support_transactions st_supported
+          inner join project_plans pp_supported on pp_supported.id = st_supported.plan_id
+          where st_supported.project_id = p.id
+            and st_supported.supporter_user_id = $1::uuid
+            and st_supported.status in ('pending_confirmation', 'succeeded')
+          order by pp_supported.price_minor desc, coalesce(st_supported.succeeded_at, st_supported.confirmed_at, st_supported.created_at) desc
+          limit 1
+        ) viewer_supported_plan on true
         where p.status in ('active', 'draft')
           and latest_video.video_id is not null
           and ($1::uuid is null or p.creator_user_id <> $1::uuid)
@@ -440,6 +555,10 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
             comments: Number(row.comments),
             is_liked_by_current_user: row.is_liked_by_current_user,
             is_supported_by_current_user: row.is_supported_by_current_user,
+            viewer_committed_support_amount_minor: Number(row.viewer_committed_support_amount_minor),
+            viewer_supported_plan_price_minor: Number(row.viewer_supported_plan_price_minor),
+            viewer_supported_plan_id: row.viewer_supported_plan_id,
+            viewer_has_upgradeable_plan: row.viewer_has_upgradeable_plan,
           })),
         }),
       );
@@ -1032,6 +1151,10 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
                 urls: project.urls,
                 detail_blocks: project.detailBlocks,
                 created_at: project.createdAt,
+                viewer_committed_support_amount_minor: 0,
+                viewer_supported_plan_price_minor: 0,
+                viewer_supported_plan_id: null,
+                viewer_has_upgradeable_plan: false,
                 minimum_plan: project.minimumPlan
                   ? {
                       id: project.minimumPlan.id,
@@ -1092,6 +1215,9 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
       const profileStats = await loadProfileStats(client, creatorUserId);
 
       const project = await store.getProjectByCreator(creatorUserId);
+      const projectViewerSupport = project
+        ? await loadViewerProjectSupportContext(client, viewerUserId, project.id)
+        : null;
       const videos = await store.listCreatorVideos(creatorUserId, 30);
 
       return reply.send(
@@ -1124,6 +1250,10 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
                 urls: project.urls,
                 detail_blocks: project.detailBlocks,
                 created_at: project.createdAt,
+                viewer_committed_support_amount_minor: projectViewerSupport?.committedSupportAmountMinor ?? 0,
+                viewer_supported_plan_price_minor: projectViewerSupport?.supportedPlanPriceMinor ?? 0,
+                viewer_supported_plan_id: projectViewerSupport?.supportedPlanId ?? null,
+                viewer_has_upgradeable_plan: projectViewerSupport?.hasUpgradeablePlan ?? false,
                 minimum_plan: project.minimumPlan
                   ? {
                       id: project.minimumPlan.id,

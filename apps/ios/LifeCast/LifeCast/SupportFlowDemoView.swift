@@ -41,6 +41,7 @@ struct SupportFlowDemoView: View {
     @State private var liveSupportProject: MyProjectResult?
     @State private var supportTargetProject: MyProjectResult?
     @State private var feedProjects: [FeedProjectSummary] = []
+    @State private var supportedAmountByProjectId: [UUID: Int] = [:]
     @State private var myProfile: CreatorPublicProfile?
     @State private var myProfileStats: CreatorProfileStats?
     @State private var myVideos: [MyVideo] = []
@@ -115,26 +116,16 @@ struct SupportFlowDemoView: View {
                                     showAuthSheet = true
                                     return
                                 }
-                                supportEntryPoint = .feed
-                                supportTargetProject = project
-                                if let preferredPlanId,
-                                   let plans = project.plans,
-                                   let chosen = plans.first(where: { $0.id == preferredPlanId }) {
-                                    selectedPlan = SupportPlan(
-                                        id: chosen.id,
-                                        name: chosen.name,
-                                        priceMinor: chosen.price_minor,
-                                        currency: chosen.currency,
-                                        rewardSummary: chosen.reward_summary,
-                                        detailDescription: chosen.description,
-                                        imageURL: chosen.image_url
-                                    )
-                                    supportStep = .confirm
-                                } else {
-                                    selectedPlan = nil
-                                    supportStep = .planSelect
+                                Task {
+                                    await refreshSupportedAmountFallbacks()
+                                    await MainActor.run {
+                                        openSupportFlowIfEligible(
+                                            target: project,
+                                            preferredPlanId: preferredPlanId,
+                                            startAtConfirm: preferredPlanId != nil
+                                        )
+                                    }
                                 }
-                                showSupportFlow = true
                             },
                             initialPage: creatorPageCacheById[route.id],
                             onPageLoaded: { page in
@@ -147,26 +138,20 @@ struct SupportFlowDemoView: View {
                 .tag(0)
 
             DiscoverSearchView(client: client, onSupportTap: { project, preferredPlanId in
-                supportEntryPoint = .feed
-                supportTargetProject = project
-                if let preferredPlanId,
-                   let plans = project.plans,
-                   let chosen = plans.first(where: { $0.id == preferredPlanId }) {
-                    selectedPlan = SupportPlan(
-                        id: chosen.id,
-                        name: chosen.name,
-                        priceMinor: chosen.price_minor,
-                        currency: chosen.currency,
-                        rewardSummary: chosen.reward_summary,
-                        detailDescription: chosen.description,
-                        imageURL: chosen.image_url
-                    )
-                    supportStep = .confirm
-                } else {
-                    selectedPlan = nil
-                    supportStep = .planSelect
+                guard isAuthenticated else {
+                    showAuthSheet = true
+                    return
                 }
-                showSupportFlow = true
+                Task {
+                    await refreshSupportedAmountFallbacks()
+                    await MainActor.run {
+                        openSupportFlowIfEligible(
+                            target: project,
+                            preferredPlanId: preferredPlanId,
+                            startAtConfirm: preferredPlanId != nil
+                        )
+                    }
+                }
             })
                 .safeAreaPadding(.bottom, bottomBarInset)
                 .tabItem { Image(systemName: "magnifyingglass") }
@@ -563,12 +548,28 @@ struct SupportFlowDemoView: View {
                 VStack(spacing: 8) {
                     HStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 10) {
+                            let cachedProject = creatorPageCacheById[project.creatorId]?.project
+                            let fallbackCommittedMinor = supportedAmountByProjectId[project.id] ?? 0
+                            let committedSupportMinor = cachedProject?.viewer_committed_support_amount_minor
+                                ?? project.viewerCommittedSupportAmountMinor
+                                ?? fallbackCommittedMinor
+                            let supportedPlanPriceMinor = cachedProject?.viewer_supported_plan_price_minor
+                                ?? project.viewerSupportedPlanPriceMinor
+                                ?? fallbackCommittedMinor
+                            let committedBaselineMinor = max(max(committedSupportMinor, supportedPlanPriceMinor), fallbackCommittedMinor)
+                            let canUpgrade = (cachedProject?.viewer_has_upgradeable_plan == true)
+                                || project.viewerHasUpgradeablePlan
+                                || (
+                                    committedBaselineMinor > 0
+                                        && (cachedProject?.plans ?? []).contains(where: { $0.price_minor > committedBaselineMinor })
+                                )
+                            let isSupported = committedBaselineMinor > 0 || project.isSupportedByCurrentUser
                             FeedPrimaryActionButton(
-                                title: project.isSupportedByCurrentUser ? "Supported" : "Support",
-                                isChecked: project.isSupportedByCurrentUser,
+                                title: canUpgrade ? "Upgrade" : (isSupported ? "Supported" : "Support"),
+                                isChecked: !canUpgrade && isSupported,
                                 isNeutral: false
                             ) {
-                                if project.isSupportedByCurrentUser { return }
+                                if !canUpgrade && isSupported { return }
                                 Task {
                                     await presentSupportFlow(for: project)
                                 }
@@ -818,26 +819,11 @@ struct SupportFlowDemoView: View {
                             showAuthSheet = true
                             return
                         }
-                        supportEntryPoint = .feed
-                        supportTargetProject = project
-                        if let preferredPlanId,
-                           let plans = project.plans,
-                           let chosen = plans.first(where: { $0.id == preferredPlanId }) {
-                            selectedPlan = SupportPlan(
-                                id: chosen.id,
-                                name: chosen.name,
-                                priceMinor: chosen.price_minor,
-                                currency: chosen.currency,
-                                rewardSummary: chosen.reward_summary,
-                                detailDescription: chosen.description,
-                                imageURL: chosen.image_url
-                            )
-                            supportStep = .confirm
-                        } else {
-                            selectedPlan = nil
-                            supportStep = .planSelect
-                        }
-                        showSupportFlow = true
+                        openSupportFlowIfEligible(
+                            target: project,
+                            preferredPlanId: preferredPlanId,
+                            startAtConfirm: preferredPlanId != nil
+                        )
                     },
                     onBackTap: {
                         closeFeedProjectPanel()
@@ -1113,7 +1099,7 @@ struct SupportFlowDemoView: View {
                     resultView
                 }
 
-                if !errorText.isEmpty {
+                if !errorText.isEmpty && supportStep != .result {
                     Text(errorText)
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -1147,7 +1133,7 @@ struct SupportFlowDemoView: View {
 
     private var planSelectView: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if liveSupportProject == nil || realPlans.isEmpty {
+            if (supportTargetProject ?? liveSupportProject) == nil || realPlans.isEmpty {
                 Text("No active project/plans available for support yet.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -1160,7 +1146,14 @@ struct SupportFlowDemoView: View {
 
                 ForEach(realPlans) { plan in
                     let isSelected = selectedPlan?.id == plan.id
+                    let additionalPaymentMinor = payableAmount(for: plan)
+                    let isEligible = additionalPaymentMinor > 0
                     Button {
+                        if !isEligible {
+                            errorText = "Already supported at this tier. Choose a higher plan to upgrade."
+                            return
+                        }
+                        errorText = ""
                         if isSelected {
                             supportStep = .confirm
                         } else {
@@ -1186,6 +1179,11 @@ struct SupportFlowDemoView: View {
                                     .font(.title3.weight(.semibold))
                                     .foregroundStyle(.blue)
                                     .monospacedDigit()
+                                if currentCommittedSupportMinor > 0 {
+                                    Text("Pay now \(supportMinorPrice(additionalPaymentMinor, currency: plan.currency))")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(isEligible ? .green : .secondary)
+                                }
                                 Text(plan.rewardSummary)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -1198,7 +1196,7 @@ struct SupportFlowDemoView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
-                        .background(isSelected ? Color.blue.opacity(0.1) : Color.white)
+                        .background((isSelected ? Color.blue.opacity(0.1) : Color.white).opacity(isEligible ? 1.0 : 0.6))
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .shadow(color: .black.opacity(0.07), radius: 10, x: 0, y: 4)
                     }
@@ -1239,7 +1237,7 @@ struct SupportFlowDemoView: View {
                     Divider()
 
                     HStack(alignment: .firstTextBaseline) {
-                        Text("Support Amount")
+                        Text("Plan Amount")
                             .font(.headline)
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -1249,6 +1247,28 @@ struct SupportFlowDemoView: View {
                             .monospacedDigit()
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)
+                    }
+                    if currentCommittedSupportMinor > 0 {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Already Supported")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(supportMinorPrice(currentCommittedSupportMinor, currency: plan.currency))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Pay Now")
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(supportMinorPrice(selectedPlanPayableMinor, currency: plan.currency))
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(.green)
+                                .monospacedDigit()
+                        }
                     }
                 }
                 .padding(16)
@@ -1274,8 +1294,8 @@ struct SupportFlowDemoView: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .shadow(color: Color(red: 0.00, green: 0.47, blue: 0.95).opacity(0.32), radius: 12, x: 0, y: 6)
-            .disabled(selectedPlan == nil)
-            .opacity(selectedPlan == nil ? 0.55 : 1.0)
+            .disabled(selectedPlan == nil || selectedPlanPayableMinor <= 0)
+            .opacity((selectedPlan == nil || selectedPlanPayableMinor <= 0) ? 0.55 : 1.0)
         }
     }
 
@@ -1304,7 +1324,7 @@ struct SupportFlowDemoView: View {
                     Divider()
 
                     HStack {
-                        Text("Total")
+                        Text(currentCommittedSupportMinor > 0 ? "Selected plan value" : "Total")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -1312,6 +1332,28 @@ struct SupportFlowDemoView: View {
                             .font(.title3.weight(.bold))
                             .foregroundStyle(.blue)
                             .monospacedDigit()
+                    }
+                    if currentCommittedSupportMinor > 0 {
+                        HStack {
+                            Text("Already supported")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(supportMinorPrice(currentCommittedSupportMinor, currency: plan.currency))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        HStack {
+                            Text("Charge now")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(supportMinorPrice(selectedPlanPayableMinor, currency: plan.currency))
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(.green)
+                                .monospacedDigit()
+                        }
                     }
                 }
                 .padding(14)
@@ -1355,40 +1397,156 @@ struct SupportFlowDemoView: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .shadow(color: Color(red: 0.00, green: 0.47, blue: 0.95).opacity(0.32), radius: 12, x: 0, y: 6)
-            .disabled(selectedPlan == nil)
-            .opacity(selectedPlan == nil ? 0.55 : 1.0)
+            .disabled(selectedPlan == nil || selectedPlanPayableMinor <= 0)
+            .opacity((selectedPlan == nil || selectedPlanPayableMinor <= 0) ? 0.55 : 1.0)
         }
     }
 
     private var resultView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("4. Result")
-                .font(.headline)
-            Text("Status: \(supportResultStatus)")
-                .font(.body)
-            if !supportResultMessage.isEmpty {
-                Text(supportResultMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Payment result")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 12) {
+                    Image(systemName: supportResultSymbolName)
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(supportResultTint)
+                        .frame(width: 34, height: 34)
+                        .background(supportResultTint.opacity(0.14))
+                        .clipShape(Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(supportResultHeadline)
+                            .font(.headline)
+                        Text("Status: \(supportResultStatus)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+
+                if let plan = selectedPlan {
+                    summaryRow(title: "Plan", value: plan.name)
+                    summaryRow(
+                        title: "Amount",
+                        value: supportMinorPrice(selectedPlanPayableMinor, currency: plan.currency),
+                        isEmphasized: true
+                    )
+                }
+
+                if !supportResultMessage.isEmpty {
+                    Text(supportResultMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(nil)
+                }
+
+                if !errorText.isEmpty {
+                    Text(errorText)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .lineLimit(nil)
+                }
+            }
+            .padding(14)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 4)
+
+            if supportResultStatus == "failed" {
+                Button("Back to checkout") {
+                    supportStep = .checkout
+                }
+                .buttonStyle(.plain)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.gray.opacity(0.24), lineWidth: 1)
+                )
             }
 
             Button("Close") {
                 showSupportFlow = false
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.plain)
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 56)
+            .background(
+                LinearGradient(
+                    colors: [Color(red: 0.10, green: 0.58, blue: 1.0), Color(red: 0.00, green: 0.47, blue: 0.95)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Color(red: 0.00, green: 0.47, blue: 0.95).opacity(0.32), radius: 12, x: 0, y: 6)
+        }
+    }
+
+    private var supportResultSymbolName: String {
+        switch supportResultStatus {
+        case "succeeded":
+            return "checkmark.circle.fill"
+        case "refunded":
+            return "arrow.uturn.backward.circle.fill"
+        case "pending_confirmation":
+            return "clock.badge.checkmark.fill"
+        case "failed":
+            return "xmark.octagon.fill"
+        default:
+            return "info.circle.fill"
+        }
+    }
+
+    private var supportResultHeadline: String {
+        switch supportResultStatus {
+        case "succeeded":
+            return "Support completed"
+        case "refunded":
+            return "Support refunded"
+        case "pending_confirmation":
+            return "Payment processing"
+        case "failed":
+            return "Payment failed"
+        default:
+            return "Support updated"
+        }
+    }
+
+    private var supportResultTint: Color {
+        switch supportResultStatus {
+        case "succeeded":
+            return .green
+        case "refunded":
+            return .orange
+        case "pending_confirmation":
+            return .blue
+        case "failed":
+            return .red
+        default:
+            return .secondary
         }
     }
 
     private var supportFlowTitle: String {
         switch supportStep {
         case .planSelect:
-            return "Select Plan"
+            return currentCommittedSupportMinor > 0 ? "Select Upgrade Plan" : "Select Plan"
         case .confirm:
-            return "Confirm"
+            return currentCommittedSupportMinor > 0 ? "Confirm Upgrade" : "Confirm"
         case .checkout:
             return "Checkout"
         case .result:
-            return "Result"
+            return "Payment Result"
         }
     }
 
@@ -1405,11 +1563,33 @@ struct SupportFlowDemoView: View {
         }
     }
 
-    private func supportPlanPrice(_ plan: SupportPlan) -> String {
-        if plan.currency.uppercased() == "JPY" {
-            return feedFormatJPY(plan.priceMinor)
+    private var currentCommittedSupportMinor: Int {
+        let committed = supportTargetProject?.viewer_committed_support_amount_minor ?? 0
+        let supportedPlanPrice = supportTargetProject?.viewer_supported_plan_price_minor ?? 0
+        return max(0, max(committed, supportedPlanPrice))
+    }
+
+    private var selectedPlanPayableMinor: Int {
+        guard let plan = selectedPlan else { return 0 }
+        return payableAmount(for: plan)
+    }
+
+    private func payableAmount(for plan: SupportPlan) -> Int {
+        if currentCommittedSupportMinor <= 0 {
+            return plan.priceMinor
         }
-        return "\(plan.priceMinor.formatted()) \(plan.currency.uppercased())"
+        return max(plan.priceMinor - currentCommittedSupportMinor, 0)
+    }
+
+    private func supportPlanPrice(_ plan: SupportPlan) -> String {
+        supportMinorPrice(plan.priceMinor, currency: plan.currency)
+    }
+
+    private func supportMinorPrice(_ amountMinor: Int, currency: String) -> String {
+        if currency.uppercased() == "JPY" {
+            return feedFormatJPY(amountMinor)
+        }
+        return "\(amountMinor.formatted()) \(currency.uppercased())"
     }
 
     private func planSummaryDescription(_ plan: SupportPlan) -> String? {
@@ -1487,6 +1667,10 @@ struct SupportFlowDemoView: View {
             errorText = "Select plan first"
             return
         }
+        guard selectedPlanPayableMinor > 0 else {
+            errorText = "Choose a higher plan to upgrade."
+            return
+        }
         guard let targetProject = supportTargetProject ?? liveSupportProject else {
             errorText = "No active project available for support"
             return
@@ -1507,8 +1691,12 @@ struct SupportFlowDemoView: View {
             )
             let canonical = await pollCanonicalSupportStatus(supportId: confirmed.support_id)
             supportResultStatus = canonical?.support_status ?? confirmed.support_status
-            supportResultMessage = "Support recorded: \(confirmed.support_id.uuidString)"
+            let settledCurrency = canonical?.currency ?? confirmed.currency ?? plan.currency
+            let chargedMinor = prepare.amount_minor ?? selectedPlanPayableMinor
+            let chargedText = supportMinorPrice(chargedMinor, currency: settledCurrency)
+            supportResultMessage = "Payment recorded: \(chargedText) (\(confirmed.support_id.uuidString))"
             await refreshLiveSupportProject()
+            await refreshSupportedAmountFallbacks()
             if let creatorId = supportTargetProject?.creator_user_id,
                creatorId != liveSupportProject?.creator_user_id,
                let refreshedPage = try? await client.getCreatorPage(creatorUserId: creatorId) {
@@ -1519,6 +1707,11 @@ struct SupportFlowDemoView: View {
                 if let updatedProject = refreshedPage.project {
                     feedProjects = feedProjects.map { existing in
                         guard existing.creatorId == creatorId else { return existing }
+                        let fallbackSupportMinor = supportedAmountByProjectId[updatedProject.id] ?? 0
+                        let committedBaselineMinor = max(
+                            max(updatedProject.viewer_committed_support_amount_minor ?? 0, updatedProject.viewer_supported_plan_price_minor ?? 0),
+                            fallbackSupportMinor
+                        )
                         return FeedProjectSummary(
                             id: existing.id,
                             creatorId: existing.creatorId,
@@ -1535,7 +1728,11 @@ struct SupportFlowDemoView: View {
                             likes: existing.likes,
                             comments: existing.comments,
                             isLikedByCurrentUser: existing.isLikedByCurrentUser,
-                            isSupportedByCurrentUser: refreshedPage.viewer_relationship.is_supported
+                            isSupportedByCurrentUser: committedBaselineMinor > 0,
+                            viewerCommittedSupportAmountMinor: updatedProject.viewer_committed_support_amount_minor ?? (fallbackSupportMinor > 0 ? fallbackSupportMinor : nil),
+                            viewerSupportedPlanPriceMinor: updatedProject.viewer_supported_plan_price_minor ?? (fallbackSupportMinor > 0 ? fallbackSupportMinor : nil),
+                            viewerHasUpgradeablePlan: (updatedProject.viewer_has_upgradeable_plan == true)
+                                || (committedBaselineMinor > 0 && (updatedProject.plans ?? []).contains(where: { $0.price_minor > committedBaselineMinor }))
                         )
                     }
                 }
@@ -1645,6 +1842,7 @@ struct SupportFlowDemoView: View {
         if !client.hasAuthSession {
             await MainActor.run {
                 isAuthenticated = false
+                supportedAmountByProjectId = [:]
             }
             return
         }
@@ -1653,10 +1851,33 @@ struct SupportFlowDemoView: View {
             await MainActor.run {
                 isAuthenticated = true
             }
+            await refreshSupportedAmountFallbacks()
         } catch {
             await MainActor.run {
                 isAuthenticated = false
+                supportedAmountByProjectId = [:]
             }
+        }
+    }
+
+    private func refreshSupportedAmountFallbacks() async {
+        guard client.hasAuthSession else {
+            await MainActor.run {
+                supportedAmountByProjectId = [:]
+            }
+            return
+        }
+        do {
+            let rows = try await client.getMySupportedProjects(limit: 100)
+            var mapped: [UUID: Int] = [:]
+            for row in rows {
+                mapped[row.project_id, default: 0] += row.amount_minor
+            }
+            await MainActor.run {
+                supportedAmountByProjectId = mapped
+            }
+        } catch {
+            // Keep existing cache on transient failures.
         }
     }
 
@@ -1705,32 +1926,22 @@ struct SupportFlowDemoView: View {
             }
             return
         }
+        await refreshSupportedAmountFallbacks()
 
-        if let detail = prefetchedDetail,
-           let plans = detail.plans,
-           !plans.isEmpty {
-            let chosen = plans.first(where: { $0.id == preferredPlanId }) ?? plans[0]
+        if let detail = prefetchedDetail {
             await MainActor.run {
-                supportEntryPoint = .feed
-                supportTargetProject = detail
-                selectedPlan = SupportPlan(
-                    id: chosen.id,
-                    name: chosen.name,
-                    priceMinor: chosen.price_minor,
-                    currency: chosen.currency,
-                    rewardSummary: chosen.reward_summary,
-                    detailDescription: chosen.description,
-                    imageURL: chosen.image_url
+                openSupportFlowIfEligible(
+                    target: detail,
+                    preferredPlanId: preferredPlanId,
+                    startAtConfirm: startAtConfirm
                 )
-                supportStep = startAtConfirm ? .confirm : .planSelect
-                showSupportFlow = true
             }
             return
         }
 
         do {
             let page = try await client.getCreatorPage(creatorUserId: project.creatorId)
-            guard let target = page.project, let plans = target.plans, !plans.isEmpty else {
+            guard let target = page.project else {
                 await MainActor.run {
                     errorText = "This creator has no support plans yet."
                 }
@@ -1738,20 +1949,11 @@ struct SupportFlowDemoView: View {
             }
             await MainActor.run {
                 cacheCreatorPage(page)
-                supportEntryPoint = .feed
-                supportTargetProject = target
-                let chosen = plans.first(where: { $0.id == preferredPlanId }) ?? plans[0]
-                selectedPlan = SupportPlan(
-                    id: chosen.id,
-                    name: chosen.name,
-                    priceMinor: chosen.price_minor,
-                    currency: chosen.currency,
-                    rewardSummary: chosen.reward_summary,
-                    detailDescription: chosen.description,
-                    imageURL: chosen.image_url
+                openSupportFlowIfEligible(
+                    target: target,
+                    preferredPlanId: preferredPlanId,
+                    startAtConfirm: startAtConfirm
                 )
-                supportStep = startAtConfirm ? .confirm : .planSelect
-                showSupportFlow = true
             }
         } catch {
             await MainActor.run {
@@ -1760,7 +1962,70 @@ struct SupportFlowDemoView: View {
         }
     }
 
+    private func openSupportFlowIfEligible(
+        target: MyProjectResult,
+        preferredPlanId: UUID?,
+        startAtConfirm: Bool
+    ) {
+        var resolvedTarget = target
+        let plans = target.plans ?? []
+        guard !plans.isEmpty else {
+            errorText = "This creator has no support plans yet."
+            return
+        }
+
+        let fallbackSupportMinor = supportedAmountByProjectId[target.id] ?? 0
+        if fallbackSupportMinor > 0 {
+            if (resolvedTarget.viewer_committed_support_amount_minor ?? 0) <= 0 {
+                resolvedTarget.viewer_committed_support_amount_minor = fallbackSupportMinor
+            }
+            if (resolvedTarget.viewer_supported_plan_price_minor ?? 0) <= 0 {
+                resolvedTarget.viewer_supported_plan_price_minor = fallbackSupportMinor
+            }
+        }
+
+        let committedSupportMinor = max(
+            resolvedTarget.viewer_committed_support_amount_minor ?? 0,
+            resolvedTarget.viewer_supported_plan_price_minor ?? 0
+        )
+        let canUpgrade = (resolvedTarget.viewer_has_upgradeable_plan == true)
+            || (committedSupportMinor > 0 && plans.contains(where: { $0.price_minor > committedSupportMinor }))
+        if resolvedTarget.viewer_has_upgradeable_plan == nil {
+            resolvedTarget.viewer_has_upgradeable_plan = canUpgrade
+        }
+        if committedSupportMinor > 0 && !canUpgrade {
+            errorText = "Already supported at the highest available tier."
+            return
+        }
+
+        let eligiblePlans = plans.filter { plan in
+            committedSupportMinor <= 0 || plan.price_minor > committedSupportMinor
+        }
+        guard !eligiblePlans.isEmpty else {
+            errorText = "No higher plan available to upgrade."
+            return
+        }
+
+        supportEntryPoint = .feed
+        supportTargetProject = resolvedTarget
+        let chosen = plans.first(where: { $0.id == preferredPlanId && (committedSupportMinor <= 0 || $0.price_minor > committedSupportMinor) })
+            ?? eligiblePlans[0]
+        selectedPlan = SupportPlan(
+            id: chosen.id,
+            name: chosen.name,
+            priceMinor: chosen.price_minor,
+            currency: chosen.currency,
+            rewardSummary: chosen.reward_summary,
+            detailDescription: chosen.description,
+            imageURL: chosen.image_url
+        )
+        supportStep = startAtConfirm ? .confirm : .planSelect
+        showSupportFlow = true
+        errorText = ""
+    }
+
     private func refreshFeedProjectsFromAPI() async {
+        await refreshSupportedAmountFallbacks()
         let baseRows = (try? await client.listFeedProjects(limit: 20)) ?? []
         let rows: [FeedProjectRow]
         switch feedMode {
@@ -1806,6 +2071,11 @@ struct SupportFlowDemoView: View {
     private func buildFastFeedProjects(from rows: [FeedProjectRow]) -> [FeedProjectSummary] {
         rows.compactMap { row in
             guard row.playback_url != nil else { return nil }
+            let fallbackSupportMinor = supportedAmountByProjectId[row.project_id] ?? 0
+            let committedSupportMinor = max(
+                row.viewer_committed_support_amount_minor ?? 0,
+                max(row.viewer_supported_plan_price_minor ?? 0, fallbackSupportMinor)
+            )
             return FeedProjectSummary(
                 id: row.project_id,
                 creatorId: row.creator_user_id,
@@ -1822,7 +2092,10 @@ struct SupportFlowDemoView: View {
                 likes: row.likes,
                 comments: row.comments,
                 isLikedByCurrentUser: row.is_liked_by_current_user,
-                isSupportedByCurrentUser: row.is_supported_by_current_user
+                isSupportedByCurrentUser: committedSupportMinor > 0 || row.is_supported_by_current_user,
+                viewerCommittedSupportAmountMinor: row.viewer_committed_support_amount_minor ?? (fallbackSupportMinor > 0 ? fallbackSupportMinor : nil),
+                viewerSupportedPlanPriceMinor: row.viewer_supported_plan_price_minor ?? (fallbackSupportMinor > 0 ? fallbackSupportMinor : nil),
+                viewerHasUpgradeablePlan: row.viewer_has_upgradeable_plan ?? false
             )
         }
     }
@@ -1902,6 +2175,23 @@ struct SupportFlowDemoView: View {
                     seenVideoIds.insert(video.video_id)
                     appendedForCreator = true
                     let isRowPrimaryVideo = row.video_id == video.video_id
+                    let fallbackSupportMinor = supportedAmountByProjectId[row.project_id] ?? 0
+                    let resolvedCommittedSupportMinor = max(
+                        page.project?.viewer_committed_support_amount_minor
+                            ?? row.viewer_committed_support_amount_minor
+                            ?? 0,
+                        page.project?.viewer_supported_plan_price_minor
+                            ?? row.viewer_supported_plan_price_minor
+                            ?? fallbackSupportMinor
+                    )
+                    let resolvedCanUpgrade = (page.project?.viewer_has_upgradeable_plan == true)
+                        || (row.viewer_has_upgradeable_plan == true)
+                        || (
+                            resolvedCommittedSupportMinor > 0
+                                && (page.project?.plans ?? []).contains(where: { $0.price_minor > resolvedCommittedSupportMinor })
+                        )
+                    let resolvedSupported = resolvedCommittedSupportMinor > 0
+                        || row.is_supported_by_current_user
                     expanded.append(
                         FeedProjectSummary(
                             id: row.project_id,
@@ -1919,13 +2209,21 @@ struct SupportFlowDemoView: View {
                             likes: isRowPrimaryVideo ? row.likes : 0,
                             comments: isRowPrimaryVideo ? row.comments : 0,
                             isLikedByCurrentUser: isRowPrimaryVideo ? row.is_liked_by_current_user : false,
-                            isSupportedByCurrentUser: row.is_supported_by_current_user
+                            isSupportedByCurrentUser: resolvedSupported,
+                            viewerCommittedSupportAmountMinor: page.project?.viewer_committed_support_amount_minor ?? (fallbackSupportMinor > 0 ? fallbackSupportMinor : nil),
+                            viewerSupportedPlanPriceMinor: page.project?.viewer_supported_plan_price_minor ?? (fallbackSupportMinor > 0 ? fallbackSupportMinor : nil),
+                            viewerHasUpgradeablePlan: resolvedCanUpgrade
                         )
                     )
                 }
             }
 
             if !appendedForCreator {
+                let fallbackSupportMinor = supportedAmountByProjectId[row.project_id] ?? 0
+                let resolvedCommittedSupportMinor = max(
+                    row.viewer_committed_support_amount_minor ?? 0,
+                    max(row.viewer_supported_plan_price_minor ?? 0, fallbackSupportMinor)
+                )
                 expanded.append(
                     FeedProjectSummary(
                         id: row.project_id,
@@ -1940,14 +2238,17 @@ struct SupportFlowDemoView: View {
                         goalAmountMinor: row.goal_amount_minor,
                         fundedAmountMinor: row.funded_amount_minor,
                         remainingDays: row.remaining_days,
-                        likes: row.likes,
-                        comments: row.comments,
-                        isLikedByCurrentUser: row.is_liked_by_current_user,
-                        isSupportedByCurrentUser: row.is_supported_by_current_user
+                            likes: row.likes,
+                            comments: row.comments,
+                            isLikedByCurrentUser: row.is_liked_by_current_user,
+                            isSupportedByCurrentUser: resolvedCommittedSupportMinor > 0 || row.is_supported_by_current_user,
+                            viewerCommittedSupportAmountMinor: row.viewer_committed_support_amount_minor ?? (fallbackSupportMinor > 0 ? fallbackSupportMinor : nil),
+                            viewerSupportedPlanPriceMinor: row.viewer_supported_plan_price_minor ?? (fallbackSupportMinor > 0 ? fallbackSupportMinor : nil),
+                            viewerHasUpgradeablePlan: row.viewer_has_upgradeable_plan ?? false
+                        )
                     )
-                )
+                }
             }
-        }
 
         return expanded
     }
@@ -2161,7 +2462,10 @@ struct SupportFlowDemoView: View {
                 likes: engagement.likes,
                 comments: engagement.comments,
                 isLikedByCurrentUser: engagement.is_liked_by_current_user,
-                isSupportedByCurrentUser: item.isSupportedByCurrentUser
+                isSupportedByCurrentUser: item.isSupportedByCurrentUser,
+                viewerCommittedSupportAmountMinor: item.viewerCommittedSupportAmountMinor,
+                viewerSupportedPlanPriceMinor: item.viewerSupportedPlanPriceMinor,
+                viewerHasUpgradeablePlan: item.viewerHasUpgradeablePlan
             )
         }
     }
@@ -2470,7 +2774,25 @@ struct SupportFlowDemoView: View {
             await MainActor.run {
                 cacheCreatorPage(page)
                 if let detail = page.project {
-                    feedProjectDetailsById[project.id] = detail
+                    var resolvedDetail = detail
+                    let fallbackSupportMinor = supportedAmountByProjectId[detail.id] ?? 0
+                    if fallbackSupportMinor > 0 {
+                        if (resolvedDetail.viewer_committed_support_amount_minor ?? 0) <= 0 {
+                            resolvedDetail.viewer_committed_support_amount_minor = fallbackSupportMinor
+                        }
+                        if (resolvedDetail.viewer_supported_plan_price_minor ?? 0) <= 0 {
+                            resolvedDetail.viewer_supported_plan_price_minor = fallbackSupportMinor
+                        }
+                    }
+                    let baselineMinor = max(
+                        resolvedDetail.viewer_committed_support_amount_minor ?? 0,
+                        resolvedDetail.viewer_supported_plan_price_minor ?? 0
+                    )
+                    if resolvedDetail.viewer_has_upgradeable_plan == nil {
+                        resolvedDetail.viewer_has_upgradeable_plan = baselineMinor > 0
+                            && (resolvedDetail.plans ?? []).contains(where: { $0.price_minor > baselineMinor })
+                    }
+                    feedProjectDetailsById[project.id] = resolvedDetail
                 } else {
                     feedProjectDetailErrorsById[project.id] = "No project detail found."
                 }
@@ -2485,7 +2807,34 @@ struct SupportFlowDemoView: View {
     }
 
     private func cacheCreatorPage(_ page: CreatorPublicPageResult) {
-        creatorPageCacheById[page.profile.creator_user_id] = page
+        var resolvedPage = page
+        if var project = page.project {
+            let fallbackSupportMinor = supportedAmountByProjectId[project.id] ?? 0
+            if fallbackSupportMinor > 0 {
+                if (project.viewer_committed_support_amount_minor ?? 0) <= 0 {
+                    project.viewer_committed_support_amount_minor = fallbackSupportMinor
+                }
+                if (project.viewer_supported_plan_price_minor ?? 0) <= 0 {
+                    project.viewer_supported_plan_price_minor = fallbackSupportMinor
+                }
+            }
+            let baselineMinor = max(
+                project.viewer_committed_support_amount_minor ?? 0,
+                project.viewer_supported_plan_price_minor ?? 0
+            )
+            if project.viewer_has_upgradeable_plan == nil {
+                project.viewer_has_upgradeable_plan = baselineMinor > 0
+                    && (project.plans ?? []).contains(where: { $0.price_minor > baselineMinor })
+            }
+            resolvedPage = CreatorPublicPageResult(
+                profile: page.profile,
+                viewer_relationship: page.viewer_relationship,
+                profile_stats: page.profile_stats,
+                project: project,
+                videos: page.videos
+            )
+        }
+        creatorPageCacheById[page.profile.creator_user_id] = resolvedPage
     }
 
 }

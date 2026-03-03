@@ -29,8 +29,36 @@ export class SupportsService {
         return null;
       }
 
-      const amountMinor = Number(planRow.rows[0].price_minor) * input.quantity;
+      const targetAmountMinor = Number(planRow.rows[0].price_minor) * input.quantity;
       const currency = planRow.rows[0].currency;
+      const committedResult = await client.query<{
+        committed_amount_minor: string | number;
+        supported_plan_price_minor: string | number;
+      }>(
+        `
+        select
+          coalesce(sum(st.amount_minor), 0) as committed_amount_minor,
+          coalesce(max(pp.price_minor), 0) as supported_plan_price_minor
+        from support_transactions st
+        inner join project_plans pp on pp.id = st.plan_id
+        where st.project_id = $1
+          and st.supporter_user_id = $2
+          and st.status in ('pending_confirmation', 'succeeded')
+      `,
+        [input.projectId, input.supporterUserId],
+      );
+
+      const committedAmountMinor = Number(committedResult.rows[0]?.committed_amount_minor ?? 0);
+      const supportedPlanPriceMinor = Number(committedResult.rows[0]?.supported_plan_price_minor ?? 0);
+      const baselineCommittedMinor = Math.max(committedAmountMinor, supportedPlanPriceMinor);
+      if (baselineCommittedMinor > 0 && targetAmountMinor <= baselineCommittedMinor) {
+        return "already_supported_or_higher_plan" as const;
+      }
+
+      const amountMinor = baselineCommittedMinor > 0 ? targetAmountMinor - baselineCommittedMinor : targetAmountMinor;
+      if (amountMinor <= 0) {
+        return "already_supported_or_higher_plan" as const;
+      }
       const supportId = randomUUID();
       const checkoutSessionId = randomUUID();
 

@@ -23,6 +23,7 @@ struct PrepareSupportRequest: Encodable {
 struct PrepareSupportResult: Decodable {
     let support_id: UUID
     let support_status: String
+    let amount_minor: Int?
     let checkout_url: String
 }
 
@@ -35,10 +36,10 @@ struct ConfirmSupportRequest: Encodable {
 struct SupportStatusResult: Decodable {
     let support_id: UUID
     let support_status: String
-    let amount_minor: Int
-    let currency: String
-    let project_id: UUID
-    let plan_id: UUID
+    let amount_minor: Int?
+    let currency: String?
+    let project_id: UUID?
+    let plan_id: UUID?
 }
 
 struct UploadCreateRequest: Encodable {
@@ -127,6 +128,10 @@ struct MyProjectResult: Decodable {
     let created_at: String
     let minimum_plan: ProjectPlanResult?
     let plans: [ProjectPlanResult]?
+    var viewer_committed_support_amount_minor: Int? = nil
+    var viewer_supported_plan_price_minor: Int? = nil
+    var viewer_supported_plan_id: UUID? = nil
+    var viewer_has_upgradeable_plan: Bool? = nil
 }
 
 struct MyProjectsResult: Decodable {
@@ -181,6 +186,10 @@ struct FeedProjectRow: Decodable, Identifiable {
     let comments: Int
     let is_liked_by_current_user: Bool
     let is_supported_by_current_user: Bool
+    let viewer_committed_support_amount_minor: Int?
+    let viewer_supported_plan_price_minor: Int?
+    let viewer_supported_plan_id: UUID?
+    let viewer_has_upgradeable_plan: Bool?
 
     var id: UUID { project_id }
 }
@@ -1483,6 +1492,44 @@ final class LifeCastAPIClient {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    private func decodingNSError(path: String, responseData: Data, statusCode: Int, decodingError: DecodingError) -> NSError {
+        let payloadPreview = String(data: responseData, encoding: .utf8)?
+            .replacingOccurrences(of: "\n", with: "")
+            .prefix(240) ?? ""
+        let detail: String
+        switch decodingError {
+        case .keyNotFound(let key, let context):
+            detail = "missing key '\(key.stringValue)' at \(codingPathString(context.codingPath))"
+        case .typeMismatch(_, let context):
+            detail = "type mismatch at \(codingPathString(context.codingPath))"
+        case .valueNotFound(_, let context):
+            detail = "missing value at \(codingPathString(context.codingPath))"
+        case .dataCorrupted(let context):
+            detail = "corrupted payload at \(codingPathString(context.codingPath)): \(context.debugDescription)"
+        @unknown default:
+            detail = "unknown decoding error"
+        }
+        return NSError(
+            domain: "LifeCastAPI",
+            code: statusCode,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Response format mismatch for \(path): \(detail).",
+                "payload_preview": String(payloadPreview)
+            ]
+        )
+    }
+
+    private func codingPathString(_ path: [CodingKey]) -> String {
+        guard !path.isEmpty else { return "result root" }
+        let rendered = path.map { key in
+            if let intValue = key.intValue {
+                return "[\(intValue)]"
+            }
+            return key.stringValue
+        }
+        return rendered.joined(separator: ".")
+    }
+
     private func send<T: Decodable, B: Encodable>(
         path: String,
         method: String,
@@ -1530,8 +1577,12 @@ final class LifeCastAPIClient {
             throw NSError(domain: "LifeCastAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: payloadText])
         }
 
-        let envelope = try JSONDecoder().decode(APIEnvelope<T>.self, from: data)
-        return envelope.result
+        do {
+            let envelope = try JSONDecoder().decode(APIEnvelope<T>.self, from: data)
+            return envelope.result
+        } catch let decodingError as DecodingError {
+            throw decodingNSError(path: path, responseData: data, statusCode: http.statusCode, decodingError: decodingError)
+        }
     }
 }
 

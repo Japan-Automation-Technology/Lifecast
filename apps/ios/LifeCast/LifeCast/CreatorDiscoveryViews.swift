@@ -591,6 +591,7 @@ struct CreatorPublicPageView: View {
     @State private var selectedNetworkTab: CreatorNetworkTab = .following
     @State private var isViewingSelfProfile: Bool? = nil
     @State private var viewerContextResolved = false
+    @State private var supportedAmountFallbackByProjectId: [UUID: Int] = [:]
     @State private var supportedProjects: [SupportedProjectRow] = []
     @State private var supportedProjectsLoading = false
     @State private var supportedProjectsError = ""
@@ -626,6 +627,7 @@ struct CreatorPublicPageView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
                     if let page {
+                        let supportContext = resolvedProjectSupportContext(for: page)
                         VStack(spacing: 8) {
                             ProfileOverviewSection(
                                 avatarURL: page.profile.avatar_url,
@@ -674,26 +676,26 @@ struct CreatorPublicPageView: View {
                                             .clipShape(RoundedRectangle(cornerRadius: 8))
                                             .buttonStyle(.plain)
 
-                                            Button(page.viewer_relationship.is_supported ? "Supported" : "Support") {
-                                                guard !page.viewer_relationship.is_supported else { return }
+                                            Button(supportContext.canUpgrade ? "Upgrade" : (supportContext.isSupported ? "Supported" : "Support")) {
+                                                guard supportContext.canUpgrade || !supportContext.isSupported else { return }
                                                 guard client.hasAuthSession else {
                                                     onRequireAuth()
                                                     return
                                                 }
-                                                guard let project = page.project else {
+                                                guard let project = supportContext.project ?? page.project else {
                                                     errorText = "No active project to support"
                                                     return
                                                 }
                                                 onSupportTap(project, nil)
                                             }
                                             .font(.system(size: 15, weight: .semibold))
-                                            .foregroundStyle(page.viewer_relationship.is_supported ? Color.primary : Color.white)
+                                            .foregroundStyle((supportContext.canUpgrade || !supportContext.isSupported) ? Color.white : Color.primary)
                                             .frame(maxWidth: .infinity)
                                             .frame(height: 34)
-                                            .background(page.viewer_relationship.is_supported ? Color.gray.opacity(0.28) : Color.green)
+                                            .background((supportContext.canUpgrade || !supportContext.isSupported) ? Color.green : Color.gray.opacity(0.28))
                                             .clipShape(RoundedRectangle(cornerRadius: 8))
                                             .buttonStyle(.plain)
-                                            .disabled(!page.viewer_relationship.is_supported && page.project == nil)
+                                            .disabled((!supportContext.canUpgrade && !supportContext.isSupported && supportContext.project == nil) || (!supportContext.canUpgrade && supportContext.isSupported))
                                         } else {
                                             RoundedRectangle(cornerRadius: 8)
                                                 .fill(Color.gray.opacity(0.2))
@@ -861,17 +863,18 @@ struct CreatorPublicPageView: View {
     }
 
     private func creatorProjectSection(page: CreatorPublicPageResult) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let supportContext = resolvedProjectSupportContext(for: page)
+        return VStack(alignment: .leading, spacing: 12) {
             if let project = page.project {
                 ProfileProjectDetailView(
-                    project: project,
+                    project: supportContext.project ?? project,
                     supportButtonTitle: viewerContextResolved && isViewingSelfProfile == false
-                        ? (page.viewer_relationship.is_supported ? "Supported" : "Support")
+                        ? (supportContext.canUpgrade ? "Upgrade" : (supportContext.isSupported ? "Supported" : "Support"))
                         : nil,
-                    supportButtonDisabled: page.viewer_relationship.is_supported,
+                    supportButtonDisabled: !supportContext.canUpgrade && supportContext.isSupported,
                     onTapSupport: { preferredPlanId in
-                        if page.viewer_relationship.is_supported { return }
-                        onSupportTap(project, preferredPlanId)
+                        if !supportContext.canUpgrade && supportContext.isSupported { return }
+                        onSupportTap(supportContext.project ?? project, preferredPlanId)
                     }
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -967,6 +970,8 @@ struct CreatorPublicPageView: View {
     private func makeCreatorFeedProject(_ page: CreatorPublicPageResult) -> FeedProjectSummary {
         let latestVideo = page.videos.sorted { $0.created_at > $1.created_at }.first
         if let project = page.project {
+            let supportContext = resolvedProjectSupportContext(for: page)
+            let resolvedProject = supportContext.project ?? project
             let minPlanPrice = project.minimum_plan?.price_minor ?? project.plans?.first?.price_minor ?? 1000
             let remainingDays = max(0, daysUntil(iso: project.deadline_at))
             let trimmedDescription = project.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -987,7 +992,10 @@ struct CreatorPublicPageView: View {
                 likes: 0,
                 comments: 0,
                 isLikedByCurrentUser: false,
-                isSupportedByCurrentUser: page.viewer_relationship.is_supported
+                isSupportedByCurrentUser: supportContext.isSupported,
+                viewerCommittedSupportAmountMinor: resolvedProject.viewer_committed_support_amount_minor,
+                viewerSupportedPlanPriceMinor: resolvedProject.viewer_supported_plan_price_minor,
+                viewerHasUpgradeablePlan: supportContext.canUpgrade
             )
         }
 
@@ -1007,7 +1015,7 @@ struct CreatorPublicPageView: View {
             likes: 0,
             comments: 0,
             isLikedByCurrentUser: false,
-            isSupportedByCurrentUser: page.viewer_relationship.is_supported
+            isSupportedByCurrentUser: false
         )
     }
 
@@ -1042,9 +1050,11 @@ struct CreatorPublicPageView: View {
             let result = try await client.getCreatorPage(creatorUserId: creatorId)
             await MainActor.run {
                 page = result
+                supportedAmountFallbackByProjectId = [:]
                 onPageLoaded?(result)
                 errorText = ""
             }
+            await hydrateSupportFallbackIfNeeded(page: result)
         } catch {
             await MainActor.run {
                 page = nil
@@ -1072,6 +1082,59 @@ struct CreatorPublicPageView: View {
                 supportedProjectsError = error.localizedDescription
             }
         }
+    }
+
+    private func hydrateSupportFallbackIfNeeded(page: CreatorPublicPageResult) async {
+        guard client.hasAuthSession else { return }
+        guard let project = page.project else { return }
+        guard page.viewer_relationship.is_supported else { return }
+        let baselineMinor = max(
+            project.viewer_committed_support_amount_minor ?? 0,
+            project.viewer_supported_plan_price_minor ?? 0
+        )
+        guard baselineMinor <= 0 else { return }
+        do {
+            let rows = try await client.getMySupportedProjects(limit: 100)
+            let fallbackMinor = rows
+                .filter { $0.project_id == project.id }
+                .reduce(0) { partialResult, row in
+                    partialResult + row.amount_minor
+                }
+            guard fallbackMinor > 0 else { return }
+            await MainActor.run {
+                supportedAmountFallbackByProjectId[project.id] = fallbackMinor
+            }
+        } catch {
+            // Keep UI usable even when fallback lookup fails.
+        }
+    }
+
+    private func resolvedProjectSupportContext(for page: CreatorPublicPageResult) -> (project: MyProjectResult?, isSupported: Bool, canUpgrade: Bool) {
+        guard let project = page.project else {
+            return (project: nil, isSupported: false, canUpgrade: false)
+        }
+        let fallbackMinor = supportedAmountFallbackByProjectId[project.id] ?? 0
+        let baselineMinor = max(
+            max(project.viewer_committed_support_amount_minor ?? 0, project.viewer_supported_plan_price_minor ?? 0),
+            fallbackMinor
+        )
+        let isSupported = baselineMinor > 0 || page.viewer_relationship.is_supported
+        let hasHigherPlan = baselineMinor > 0 && (project.plans ?? []).contains(where: { $0.price_minor > baselineMinor })
+        let canUpgrade = (project.viewer_has_upgradeable_plan == true) || hasHigherPlan
+
+        var resolvedProject = project
+        if fallbackMinor > 0 {
+            if (resolvedProject.viewer_committed_support_amount_minor ?? 0) <= 0 {
+                resolvedProject.viewer_committed_support_amount_minor = fallbackMinor
+            }
+            if (resolvedProject.viewer_supported_plan_price_minor ?? 0) <= 0 {
+                resolvedProject.viewer_supported_plan_price_minor = fallbackMinor
+            }
+        }
+        if resolvedProject.viewer_has_upgradeable_plan == nil {
+            resolvedProject.viewer_has_upgradeable_plan = canUpgrade
+        }
+        return (project: resolvedProject, isSupported: isSupported, canUpgrade: canUpgrade)
     }
 
     private func toggleFollow() async {

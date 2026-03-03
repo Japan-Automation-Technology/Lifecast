@@ -332,7 +332,10 @@ struct CreatorPostedFeedView: View {
                 likes: projectContext.likes,
                 comments: projectContext.comments,
                 isLikedByCurrentUser: projectContext.isLikedByCurrentUser,
-                isSupportedByCurrentUser: projectContext.isSupportedByCurrentUser
+                isSupportedByCurrentUser: projectContext.isSupportedByCurrentUser,
+                viewerCommittedSupportAmountMinor: projectContext.viewerCommittedSupportAmountMinor,
+                viewerSupportedPlanPriceMinor: projectContext.viewerSupportedPlanPriceMinor,
+                viewerHasUpgradeablePlan: projectContext.viewerHasUpgradeablePlan
             )
         }
         let engagement = engagementByVideoId[videoId]
@@ -352,7 +355,10 @@ struct CreatorPostedFeedView: View {
             likes: engagement?.likes ?? projectContext.likes,
             comments: engagement?.comments ?? projectContext.comments,
             isLikedByCurrentUser: engagement?.is_liked_by_current_user ?? projectContext.isLikedByCurrentUser,
-            isSupportedByCurrentUser: projectContext.isSupportedByCurrentUser
+            isSupportedByCurrentUser: projectContext.isSupportedByCurrentUser,
+            viewerCommittedSupportAmountMinor: projectContext.viewerCommittedSupportAmountMinor,
+            viewerSupportedPlanPriceMinor: projectContext.viewerSupportedPlanPriceMinor,
+            viewerHasUpgradeablePlan: projectContext.viewerHasUpgradeablePlan
         )
     }
 
@@ -622,14 +628,17 @@ struct CreatorPostedFeedView: View {
 
     private func projectPrimaryAction(project: FeedProjectSummary) -> some View {
         let isNeutralState = isCurrentUserVideo
+        let isSupported = (project.viewerCommittedSupportAmountMinor ?? 0) > 0 || project.isSupportedByCurrentUser
+        let canUpgrade = project.viewerHasUpgradeablePlan
         return FeedPrimaryActionButton(
-            title: isNeutralState ? "Project" : (project.isSupportedByCurrentUser ? "Supported" : "Support"),
-            isChecked: project.isSupportedByCurrentUser,
+            title: isNeutralState ? "Project" : (canUpgrade ? "Upgrade" : (isSupported ? "Supported" : "Support")),
+            isChecked: !canUpgrade && isSupported,
             isNeutral: isNeutralState
         ) {
             if isCurrentUserVideo {
                 dismissCreatorFeed()
             } else {
+                if !canUpgrade && isSupported { return }
                 Task {
                     await triggerSupportFromPanel(project: project, preferredPlanId: nil)
                 }
@@ -1105,17 +1114,17 @@ struct CreatorPostedFeedView: View {
 
     private func triggerSupportFromPanel(project: FeedProjectSummary, preferredPlanId: UUID?) async {
         guard !isCurrentUserVideo else { return }
-        if let cached = feedProjectDetailsById[project.id] {
-            await MainActor.run {
-                onSupportTap(cached, preferredPlanId)
-            }
-            return
-        }
         do {
             let page = try await client.getCreatorPage(creatorUserId: project.creatorId)
             if let detail = page.project {
                 await MainActor.run {
                     feedProjectDetailsById[project.id] = detail
+                    let committedMinor = detail.viewer_committed_support_amount_minor ?? 0
+                    let canUpgrade = detail.viewer_has_upgradeable_plan ?? false
+                    if committedMinor > 0 && !canUpgrade {
+                        deleteErrorText = "Already supported at the highest available tier."
+                        return
+                    }
                     onSupportTap(detail, preferredPlanId)
                 }
             } else {

@@ -53,6 +53,9 @@ struct FeedProjectSummary: Identifiable {
     let comments: Int
     let isLikedByCurrentUser: Bool
     let isSupportedByCurrentUser: Bool
+    var viewerCommittedSupportAmountMinor: Int? = nil
+    var viewerSupportedPlanPriceMinor: Int? = nil
+    var viewerHasUpgradeablePlan: Bool = false
 }
 
 struct FeedComment: Identifiable {

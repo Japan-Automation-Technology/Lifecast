@@ -48,6 +48,19 @@ export async function registerSupportRoutes(app: FastifyInstance) {
       quantity: body.data.quantity,
       supporterUserId,
     });
+    if (support === "already_supported_or_higher_plan") {
+      const conflict = fail("STATE_CONFLICT", "Already supported at this tier. Choose a higher plan to upgrade.");
+      if (idempotencyKey) {
+        await storeIdempotentResponse({
+          routeKey,
+          idempotencyKey,
+          fingerprint,
+          statusCode: 409,
+          payload: conflict,
+        });
+      }
+      return reply.code(409).send(conflict);
+    }
     if (!support) {
       const notFound = fail("RESOURCE_NOT_FOUND", "Project or plan not found");
       if (idempotencyKey) {
@@ -65,6 +78,7 @@ export async function registerSupportRoutes(app: FastifyInstance) {
     const response = ok({
       support_id: support.supportId,
       support_status: support.status,
+      amount_minor: support.amountMinor,
       checkout_url: `https://checkout.lifecast.jp/session/${support.checkoutSessionId}`,
       policy_snapshot: {
         reward_type: "physical",
