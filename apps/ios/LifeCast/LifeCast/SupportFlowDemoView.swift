@@ -2127,9 +2127,12 @@ struct SupportFlowDemoView: View {
         let threshold: CGFloat = 50
 
         if showFeedProjectPanel {
-            defer { homeFeedPanelDragOffsetX = 0 }
             if abs(dx) > abs(dy), abs(dx) > threshold, dx > 0, homeFeedPanelPageIndex == 0 {
                 closeFeedProjectPanel()
+            } else {
+                withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.9)) {
+                    homeFeedPanelDragOffsetX = 0
+                }
             }
             return
         }
@@ -2148,11 +2151,19 @@ struct SupportFlowDemoView: View {
         case .closePanel:
             closeFeedProjectPanel()
         case .nextItem:
+            withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.9)) {
+                homeFeedPanelDragOffsetX = 0
+            }
             nextFeed()
         case .previousItem:
+            withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.9)) {
+                homeFeedPanelDragOffsetX = 0
+            }
             previousFeed()
         case .none:
-            break
+            withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.9)) {
+                homeFeedPanelDragOffsetX = 0
+            }
         }
     }
 

@@ -817,19 +817,20 @@ struct InteractiveVerticalFeedPager<Item: Identifiable, ItemView: View>: View {
     }
 
     private func handleDragEnded(_ value: DragGesture.Value) {
-        onHorizontalDragChanged(0)
         guard dragDirection != 0 else {
             let startedInBottomExclusionZone =
                 horizontalActionExclusionBottomInset > 0 &&
                 value.startLocation.y >= (containerHeight - horizontalActionExclusionBottomInset)
             let isHorizontal = abs(value.translation.width) > abs(value.translation.height)
             if startedInBottomExclusionZone && isHorizontal {
+                onHorizontalDragChanged(0)
                 return
             }
             onNonVerticalEnded(value)
             return
         }
 
+        onHorizontalDragChanged(0)
         let direction = dragDirection
         let threshold = min(140, max(70, containerHeight * 0.18))
         let shouldAdvance = abs(dragOffset) > threshold
