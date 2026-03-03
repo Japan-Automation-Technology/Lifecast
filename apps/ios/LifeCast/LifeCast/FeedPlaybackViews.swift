@@ -161,12 +161,9 @@ struct CreatorPostedFeedView: View {
     @State private var showPostedPauseIndicator = false
     @State private var postedPauseIndicatorToken = UUID()
     @State private var isPostedFeedEdgeBoosting = false
-    @State private var showFeedProjectPanel = false
-    @State private var feedPanelPageIndex = 0
-    @State private var postedFeedPanelDragOffsetX: CGFloat = 0
+    @State private var postedFeedBackDragOffsetX: CGFloat = 0
+    @State private var postedFeedContainerWidth: CGFloat = 1
     @State private var feedProjectDetailsById: [UUID: MyProjectResult] = [:]
-    @State private var feedProjectDetailLoadingIds: Set<UUID> = []
-    @State private var feedProjectDetailErrorsById: [UUID: String] = [:]
     @State private var showComments = false
     @State private var showShare = false
     @State private var showActions = false
@@ -207,64 +204,71 @@ struct CreatorPostedFeedView: View {
     }
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
+        GeometryReader { geo in
+            ZStack {
+                Color.black.ignoresSafeArea()
 
-            if feedVideos.isEmpty {
-                Text("No videos")
-                    .foregroundStyle(.white)
-            } else {
-                InteractiveVerticalFeedPager(
-                    items: feedVideos,
-                    currentIndex: $currentIndex,
-                    verticalDragDisabled: false,
-                    allowHorizontalChildDrag: showFeedProjectPanel,
-                    horizontalActionExclusionBottomInset: 28,
-                    onWillMove: {
-                        player?.pause()
-                        closePostedFeedProjectPanelForVerticalMove()
-                    },
-                    onDidMove: {
-                        syncPlayerForCurrentIndex()
-                    },
-                    onHorizontalDragChanged: { dx in
-                        guard !showFeedProjectPanel else { return }
-                        postedFeedPanelDragOffsetX = min(0, dx)
-                    },
-                    onNonVerticalEnded: { value in
-                        handlePostedFeedDragEnded(value, project: currentProject)
-                    },
-                    content: { video, isActive in
-                        feedPage(video: video, project: currentProject, useLivePlayer: isActive)
-                    }
-                )
-                .accessibilityIdentifier("posted-feed-view")
-                .ignoresSafeArea(edges: .top)
-            }
+                if feedVideos.isEmpty {
+                    Text("No videos")
+                        .foregroundStyle(.white)
+                } else {
+                    InteractiveVerticalFeedPager(
+                        items: feedVideos,
+                        currentIndex: $currentIndex,
+                        verticalDragDisabled: false,
+                        allowHorizontalChildDrag: false,
+                        horizontalActionExclusionBottomInset: 28,
+                        onWillMove: {
+                            player?.pause()
+                        },
+                        onDidMove: {
+                            syncPlayerForCurrentIndex()
+                        },
+                        onHorizontalDragChanged: { dx in
+                            updatePostedFeedBackDragOffset(with: dx)
+                        },
+                        onNonVerticalEnded: { value in
+                            handlePostedFeedDragEnded(value)
+                        },
+                        content: { video, isActive in
+                            feedPage(video: video, project: currentProject, useLivePlayer: isActive)
+                        }
+                    )
+                    .accessibilityIdentifier("posted-feed-view")
+                    .ignoresSafeArea(edges: .top)
+                }
 
-            VStack {
-                HStack {
-                    Button {
-                        dismiss()
+                VStack {
+                    HStack {
+                        Button {
+                            dismissCreatorFeed()
+                        }
+                        label: {
+                            Image(systemName: "chevron.left")
+                                .font(.headline.weight(.semibold))
+                                .padding(10)
+                                .background(Color.black.opacity(0.45))
+                                .foregroundStyle(.white)
+                                .clipShape(Circle())
+                        }
+                        .accessibilityIdentifier("posted-feed-back")
+
+                        Spacer()
                     }
-                    label: {
-                        Image(systemName: "chevron.left")
-                            .font(.headline.weight(.semibold))
-                            .padding(10)
-                            .background(Color.black.opacity(0.45))
-                            .foregroundStyle(.white)
-                            .clipShape(Circle())
-                    }
-                    .accessibilityIdentifier("posted-feed-back")
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
 
                     Spacer()
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-
-                Spacer()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .offset(x: postedFeedBackDragOffsetX)
+            .onAppear {
+                postedFeedContainerWidth = max(geo.size.width, 1)
+            }
+            .onChange(of: geo.size.width) { _, newValue in
+                postedFeedContainerWidth = max(newValue, 1)
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             postedFeedCommentBar
@@ -293,7 +297,6 @@ struct CreatorPostedFeedView: View {
         .onAppear {
             syncPlayerForCurrentIndex()
             Task {
-                await prefetchPostedFeedProjectDetails(around: currentIndex)
                 await refreshCurrentVideoEngagement()
                 await refreshOwnCreatorProfileIfNeeded()
             }
@@ -301,14 +304,13 @@ struct CreatorPostedFeedView: View {
         .onChange(of: currentIndex) { _, _ in
             syncPlayerForCurrentIndex()
             Task {
-                await prefetchPostedFeedProjectDetails(around: currentIndex)
                 await refreshCurrentVideoEngagement()
             }
         }
         .onChange(of: selectedCreatorRoute) { _, newValue in
             if newValue != nil {
                 player?.pause()
-            } else if !showFeedProjectPanel {
+            } else {
                 syncPlayerForCurrentIndex()
             }
         }
@@ -328,9 +330,7 @@ struct CreatorPostedFeedView: View {
                 }
             }
             current.seek(to: .zero)
-            if !showFeedProjectPanel {
-                current.play()
-            }
+            current.play()
         }
         .onDisappear {
             flushTrackedPlaybackProgress()
@@ -338,6 +338,7 @@ struct CreatorPostedFeedView: View {
             player?.pause()
             detachPostedFeedPlayerObserver()
             player = nil
+            postedFeedBackDragOffsetX = 0
             trackedVideoId = nil
             trackedProjectId = nil
             trackedDurationMs = 0
@@ -408,24 +409,15 @@ struct CreatorPostedFeedView: View {
 
     private func feedPage(video: MyVideo, project: FeedProjectSummary, useLivePlayer: Bool) -> some View {
         ZStack(alignment: .bottom) {
-            SlidingFeedPanelLayer(
-                isPanelOpen: showFeedProjectPanel && useLivePlayer,
-                cornerRadius: 0,
-                dragOffsetX: useLivePlayer ? postedFeedPanelDragOffsetX : 0
-            ) {
-                feedVideoLayer(video: video, useLivePlayer: useLivePlayer)
-            } panelLayer: { width in
-                feedProjectPanel(project: project, width: width)
-            }
+            feedVideoLayer(video: video, useLivePlayer: useLivePlayer)
 
             LinearGradient(
                 colors: [Color.black.opacity(0.0), Color.black.opacity(0.7)],
                 startPoint: .center,
                 endPoint: .bottom
             )
-            .opacity(showFeedProjectPanel ? 0.34 : 1.0)
 
-            if useLivePlayer && !showFeedProjectPanel {
+            if useLivePlayer {
                 GeometryReader { geo in
                     HStack(spacing: 0) {
                         Color.clear
@@ -501,8 +493,8 @@ struct CreatorPostedFeedView: View {
                 }
 
                 FeedPageIndicatorDots(
-                    currentIndex: showFeedProjectPanel ? (clampedFeedPanelPageIndex(for: project) + 1) : 0,
-                    totalCount: feedPanelPageCount(for: project) + 1
+                    currentIndex: 0,
+                    totalCount: 1
                 )
                     .frame(maxWidth: .infinity, alignment: .center)
             }
@@ -561,82 +553,6 @@ struct CreatorPostedFeedView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func feedProjectPanel(project: FeedProjectSummary, width: CGFloat) -> some View {
-        let cachedDetail = feedProjectDetailsById[project.id]
-        let isLoading = feedProjectDetailLoadingIds.contains(project.id)
-        let errorText = feedProjectDetailErrorsById[project.id] ?? ""
-        let plans = cachedDetail?.plans ?? []
-        let pageCount = max(1, plans.count + 1)
-        let panelPageSelection = Binding<Int>(
-            get: { min(max(feedPanelPageIndex, 0), pageCount - 1) },
-            set: { feedPanelPageIndex = min(max($0, 0), pageCount - 1) }
-        )
-
-        return VStack(alignment: .leading, spacing: 12) {
-            InteractiveHorizontalPager(
-                pageCount: pageCount,
-                currentIndex: panelPageSelection,
-                onSwipeBeyondLeadingEdge: {
-                    closePostedFeedProjectPanel()
-                },
-                onLeadingEdgeDragChanged: { dx in
-                    guard showFeedProjectPanel, feedPanelPageIndex == 0 else {
-                        postedFeedPanelDragOffsetX = 0
-                        return
-                    }
-                    postedFeedPanelDragOffsetX = max(0, dx)
-                }
-            ) { idx in
-                let tappedPlan = idx > 0 ? plans[idx - 1] : nil
-                VStack(alignment: .leading, spacing: 12) {
-                    if idx == 0 {
-                        FeedProjectOverviewPanelContentView(project: project, detail: cachedDetail, isLoading: isLoading)
-                    } else {
-                        FeedPlanPanelContentView(plan: plans[idx - 1])
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .contentShape(Rectangle())
-                .gesture(
-                    TapGesture(count: 2)
-                        .onEnded {
-                            Task {
-                                await likeOnDoubleTapInPostedFeed(project: project)
-                            }
-                        }
-                        .exclusively(before: TapGesture(count: 1).onEnded {
-                            guard !isCurrentUserVideo else { return }
-                            Task {
-                                await triggerSupportFromPanel(project: project, preferredPlanId: tappedPlan?.id)
-                            }
-                        })
-                )
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-            if !errorText.isEmpty {
-                Text(errorText)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, feedPanelTopPadding)
-        .padding(.bottom, 18)
-        .frame(width: width, alignment: .leading)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(FeedProjectPanelBackground())
-    }
-
-
-    private func feedPanelPageCount(for project: FeedProjectSummary) -> Int {
-        1 + (feedProjectDetailsById[project.id]?.plans?.count ?? 0)
-    }
-
-    private func clampedFeedPanelPageIndex(for project: FeedProjectSummary) -> Int {
-        min(max(feedPanelPageIndex, 0), max(feedPanelPageCount(for: project) - 1, 0))
-    }
-
     private func rightRail(project: FeedProjectSummary) -> some View {
         VStack(spacing: 16) {
             FeedMetricButton(
@@ -693,9 +609,7 @@ struct CreatorPostedFeedView: View {
             isNeutral: isNeutralState
         ) {
             if isCurrentUserVideo {
-                if !showFeedProjectPanel {
-                    openPostedFeedProjectPanel(for: project)
-                }
+                dismissCreatorFeed()
             } else {
                 Task {
                     await triggerSupportFromPanel(project: project, preferredPlanId: nil)
@@ -858,11 +772,7 @@ struct CreatorPostedFeedView: View {
             attachPostedFeedPlayerObserver(to: targetPlayer)
         }
 
-        if showFeedProjectPanel {
-            targetPlayer.pause()
-        } else {
-            targetPlayer.play()
-        }
+        targetPlayer.play()
 
         warmPostedFeedPlayerCache(around: currentIndex)
     }
@@ -922,7 +832,7 @@ struct CreatorPostedFeedView: View {
         if targetPlayer.timeControlStatus == .playing {
             targetPlayer.pause()
             showPostedPauseIndicatorTemporarily()
-        } else if !showFeedProjectPanel {
+        } else {
             targetPlayer.play()
             if isPostedFeedEdgeBoosting {
                 targetPlayer.rate = 2.0
@@ -955,7 +865,6 @@ struct CreatorPostedFeedView: View {
     private func showOlder() {
         guard currentIndex < feedVideos.count - 1 else { return }
         player?.pause()
-        closePostedFeedProjectPanel()
         currentIndex += 1
         syncPlayerForCurrentIndex()
     }
@@ -963,7 +872,6 @@ struct CreatorPostedFeedView: View {
     private func showNewer() {
         guard currentIndex > 0 else { return }
         player?.pause()
-        closePostedFeedProjectPanel()
         currentIndex -= 1
         syncPlayerForCurrentIndex()
     }
@@ -1018,92 +926,51 @@ struct CreatorPostedFeedView: View {
         }
     }
 
-    private func handlePostedFeedDragEnded(_ value: DragGesture.Value, project: FeedProjectSummary) {
+    private func handlePostedFeedDragEnded(_ value: DragGesture.Value) {
         let dx = value.translation.width
         let dy = value.translation.height
-        let threshold: CGFloat = 50
+        let isHorizontal = abs(dx) > abs(dy)
 
-        if showFeedProjectPanel, abs(dx) > abs(dy), abs(dx) > threshold {
-            if dx > 0, feedPanelPageIndex == 0 {
-                closePostedFeedProjectPanel()
-            }
+        guard isHorizontal else {
+            resetPostedFeedBackDragOffset()
             return
         }
 
-        let action = resolveFeedSwipeAction(
-            dx: dx,
-            dy: dy,
-            isPanelOpen: showFeedProjectPanel,
-            canMoveNext: currentIndex < feedVideos.count - 1,
-            canMovePrevious: currentIndex > 0
-        )
+        let threshold = min(max(postedFeedContainerWidth * 0.18, 44), 120)
+        guard dx > threshold else {
+            resetPostedFeedBackDragOffset()
+            return
+        }
 
-        switch action {
-        case .openPanel:
-            openPostedFeedProjectPanel(for: project)
-        case .closePanel:
-            closePostedFeedProjectPanel()
-        case .nextItem:
-            showOlder()
-        case .previousItem:
-            showNewer()
-        case .none:
-            break
+        completePostedFeedBackSwipeDismiss()
+    }
+
+    private func updatePostedFeedBackDragOffset(with translationX: CGFloat) {
+        if translationX <= 0 || selectedCreatorRoute != nil {
+            postedFeedBackDragOffsetX = 0
+            return
+        }
+        postedFeedBackDragOffsetX = min(translationX, postedFeedContainerWidth)
+    }
+
+    private func resetPostedFeedBackDragOffset() {
+        withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.9)) {
+            postedFeedBackDragOffsetX = 0
         }
     }
 
-    private func openPostedFeedProjectPanel(for project: FeedProjectSummary) {
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-            showFeedProjectPanel = true
-            feedPanelPageIndex = 0
-            postedFeedPanelDragOffsetX = 0
+    private func completePostedFeedBackSwipeDismiss() {
+        withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.92)) {
+            postedFeedBackDragOffsetX = postedFeedContainerWidth
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.11) {
+            dismissCreatorFeed()
+        }
+    }
+
+    private func dismissCreatorFeed() {
         player?.pause()
-        Task {
-            await loadPostedFeedProjectDetail(for: project, forceRefresh: false)
-        }
-    }
-
-    private func closePostedFeedProjectPanel() {
-        guard showFeedProjectPanel else { return }
-        withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
-            showFeedProjectPanel = false
-            feedPanelPageIndex = 0
-            postedFeedPanelDragOffsetX = 0
-        }
-        syncPlayerForCurrentIndex()
-    }
-
-    private func closePostedFeedProjectPanelForVerticalMove() {
-        guard showFeedProjectPanel else { return }
-        showFeedProjectPanel = false
-        postedFeedPanelDragOffsetX = 0
-    }
-
-    private func loadPostedFeedProjectDetail(for project: FeedProjectSummary, forceRefresh: Bool) async {
-        if !forceRefresh, feedProjectDetailsById[project.id] != nil { return }
-        if feedProjectDetailLoadingIds.contains(project.id) { return }
-
-        await MainActor.run {
-            feedProjectDetailLoadingIds.insert(project.id)
-            feedProjectDetailErrorsById[project.id] = nil
-        }
-        do {
-            let page = try await client.getCreatorPage(creatorUserId: project.creatorId)
-            await MainActor.run {
-                if let detail = page.project {
-                    feedProjectDetailsById[project.id] = detail
-                } else {
-                    feedProjectDetailErrorsById[project.id] = "No project detail found."
-                }
-                feedProjectDetailLoadingIds.remove(project.id)
-            }
-        } catch {
-            await MainActor.run {
-                feedProjectDetailErrorsById[project.id] = error.localizedDescription
-                feedProjectDetailLoadingIds.remove(project.id)
-            }
-        }
+        dismiss()
     }
 
     private var videoActionsSheet: some View {
@@ -1200,16 +1067,6 @@ struct CreatorPostedFeedView: View {
         .presentationBackground(.ultraThinMaterial)
     }
 
-    private func prefetchPostedFeedProjectDetails(around index: Int) async {
-        guard !feedVideos.isEmpty else { return }
-        let indices = [index - 1, index, index + 1].filter { $0 >= 0 && $0 < feedVideos.count }
-        for idx in indices {
-            let videoId = feedVideos[idx].video_id
-            let context = resolvedProjectContext(for: videoId)
-            await loadPostedFeedProjectDetail(for: context, forceRefresh: false)
-        }
-    }
-
     private func triggerSupportFromPanel(project: FeedProjectSummary, preferredPlanId: UUID?) async {
         guard !isCurrentUserVideo else { return }
         if let cached = feedProjectDetailsById[project.id] {
@@ -1235,31 +1092,6 @@ struct CreatorPostedFeedView: View {
                 deleteErrorText = "Failed to load support plans: \(error.localizedDescription)"
             }
         }
-    }
-
-    private func resolvedProjectContext(for videoId: UUID) -> FeedProjectSummary {
-        let resolvedCreatorId = isCurrentUserVideo ? (creatorProfileOverride?.creator_user_id ?? projectContext.creatorId) : projectContext.creatorId
-        let resolvedUsername = isCurrentUserVideo ? (creatorProfileOverride?.username ?? projectContext.username) : projectContext.username
-        let resolvedAvatarURL = isCurrentUserVideo ? (creatorProfileOverride?.avatar_url ?? projectContext.creatorAvatarURL) : projectContext.creatorAvatarURL
-        let engagement = engagementByVideoId[videoId]
-        return FeedProjectSummary(
-            id: projectContext.id,
-            creatorId: resolvedCreatorId,
-            username: resolvedUsername,
-            creatorAvatarURL: resolvedAvatarURL,
-            caption: projectContext.caption,
-            videoId: videoId,
-            playbackURL: projectContext.playbackURL,
-            thumbnailURL: projectContext.thumbnailURL,
-            minPlanPriceMinor: projectContext.minPlanPriceMinor,
-            goalAmountMinor: projectContext.goalAmountMinor,
-            fundedAmountMinor: projectContext.fundedAmountMinor,
-            remainingDays: projectContext.remainingDays,
-            likes: engagement?.likes ?? projectContext.likes,
-            comments: engagement?.comments ?? projectContext.comments,
-            isLikedByCurrentUser: engagement?.is_liked_by_current_user ?? projectContext.isLikedByCurrentUser,
-            isSupportedByCurrentUser: projectContext.isSupportedByCurrentUser
-        )
     }
 
     private func deleteCurrentVideo() async {

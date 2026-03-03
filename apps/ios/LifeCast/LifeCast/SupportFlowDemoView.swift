@@ -85,6 +85,10 @@ struct SupportFlowDemoView: View {
         return feedProjects[max(0, min(currentFeedIndex, feedProjects.count - 1))]
     }
 
+    private var isHomeProfileSwipeTransitioning: Bool {
+        showFeedProjectPanel || homeFeedPanelDragOffsetX < 0
+    }
+
     var body: some View {
         TabView(selection: $selectedTab) {
             NavigationStack {
@@ -330,6 +334,7 @@ struct SupportFlowDemoView: View {
             if newValue != nil {
                 homeFeedPlayer?.pause()
             } else if selectedTab == 0 && !showFeedProjectPanel {
+                homeFeedPanelDragOffsetX = 0
                 syncHomeFeedPlayer()
             }
         }
@@ -364,7 +369,7 @@ struct SupportFlowDemoView: View {
                     InteractiveVerticalFeedPager(
                         items: feedProjects,
                         currentIndex: $currentFeedIndex,
-                        verticalDragDisabled: false,
+                        verticalDragDisabled: showFeedProjectPanel,
                         allowHorizontalChildDrag: showFeedProjectPanel,
                         horizontalActionExclusionBottomInset: 28,
                         onWillMove: {
@@ -375,12 +380,18 @@ struct SupportFlowDemoView: View {
                             syncHomeFeedPlayer()
                         },
                         onHorizontalDragChanged: { dx in
-                            guard !showFeedProjectPanel else { return }
+                            if showFeedProjectPanel {
+                                guard homeFeedPanelPageIndex == 0 else {
+                                    homeFeedPanelDragOffsetX = 0
+                                    return
+                                }
+                                homeFeedPanelDragOffsetX = max(0, dx)
+                                return
+                            }
                             homeFeedPanelDragOffsetX = min(0, dx)
                         },
                         onNonVerticalEnded: { value in
-                            guard let project = currentProject else { return }
-                            handleHomeFeedDragEnded(value, project: project)
+                            handleHomeFeedDragEnded(value)
                         },
                         content: { project, isActive in
                             feedCard(project: project, useLivePlayer: isActive)
@@ -408,7 +419,9 @@ struct SupportFlowDemoView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea(edges: .top)
             .overlay(alignment: .top) {
-                homeFeedHeader
+                if !isHomeProfileSwipeTransitioning {
+                    homeFeedHeader
+                }
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -444,7 +457,11 @@ struct SupportFlowDemoView: View {
     }
 
     private func feedCard(project: FeedProjectSummary, useLivePlayer: Bool = true) -> some View {
-        ZStack(alignment: .bottom) {
+        let isProfilePanelPresented = useLivePlayer && showFeedProjectPanel
+        let isProfileSwipeTransition = useLivePlayer && homeFeedPanelDragOffsetX < 0
+        let shouldHideFeedChrome = isProfilePanelPresented || isProfileSwipeTransition
+
+        return ZStack(alignment: .bottom) {
             SlidingFeedPanelLayer(
                 isPanelOpen: showFeedProjectPanel && useLivePlayer,
                 cornerRadius: 0,
@@ -452,18 +469,23 @@ struct SupportFlowDemoView: View {
             ) {
                 feedVideoLayer(project: project, useLivePlayer: useLivePlayer)
             } panelLayer: { width in
-                feedProjectPanel(project: project, width: width)
+                feedCreatorProfilePanel(
+                    project: project,
+                    width: width,
+                    isActive: useLivePlayer && (showFeedProjectPanel || homeFeedPanelDragOffsetX < 0)
+                )
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            LinearGradient(
-                colors: [Color.black.opacity(0.0), Color.black.opacity(0.55)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .opacity(showFeedProjectPanel ? 0.34 : 1.0)
+            if !shouldHideFeedChrome {
+                LinearGradient(
+                    colors: [Color.black.opacity(0.0), Color.black.opacity(0.55)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
 
-            if useLivePlayer && !showFeedProjectPanel {
+            if useLivePlayer && !shouldHideFeedChrome {
                 GeometryReader { geo in
                     HStack(spacing: 0) {
                         Color.clear
@@ -500,7 +522,7 @@ struct SupportFlowDemoView: View {
                 }
             }
 
-            if useLivePlayer && showHomePauseIndicator {
+            if useLivePlayer && showHomePauseIndicator && !shouldHideFeedChrome {
                 Image(systemName: "pause.fill")
                     .font(.system(size: 30, weight: .semibold))
                     .foregroundStyle(.white)
@@ -511,53 +533,55 @@ struct SupportFlowDemoView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
 
-            VStack(spacing: 8) {
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        FeedPrimaryActionButton(
-                            title: project.isSupportedByCurrentUser ? "Supported" : "Support",
-                            isChecked: project.isSupportedByCurrentUser,
-                            isNeutral: false
-                        ) {
-                            if project.isSupportedByCurrentUser { return }
-                            Task {
-                                await presentSupportFlow(for: project)
+            if !shouldHideFeedChrome {
+                VStack(spacing: 8) {
+                    HStack(alignment: .bottom) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            FeedPrimaryActionButton(
+                                title: project.isSupportedByCurrentUser ? "Supported" : "Support",
+                                isChecked: project.isSupportedByCurrentUser,
+                                isNeutral: false
+                            ) {
+                                if project.isSupportedByCurrentUser { return }
+                                Task {
+                                    await presentSupportFlow(for: project)
+                                }
                             }
+
+                            Button("@\(project.username)") {
+                                if project.creatorId == myProfile?.creator_user_id {
+                                    selectedTab = 3
+                                } else {
+                                    selectedCreatorRoute = CreatorRoute(id: project.creatorId)
+                                }
+                            }
+                            .font(.headline)
+                            .foregroundStyle(.white)
+
+                            Text(project.caption)
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.9))
+
+                            fundingMeta(project: project)
                         }
 
-                        Button("@\(project.username)") {
-                            if project.creatorId == myProfile?.creator_user_id {
-                                selectedTab = 3
-                            } else {
-                                selectedCreatorRoute = CreatorRoute(id: project.creatorId)
-                            }
-                        }
-                        .font(.headline)
-                        .foregroundStyle(.white)
+                        Spacer(minLength: 12)
 
-                        Text(project.caption)
-                            .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.9))
-
-                        fundingMeta(project: project)
+                        rightRail(project: project)
                     }
 
-                    Spacer(minLength: 12)
-
-                    rightRail(project: project)
+                    FeedPageIndicatorDots(
+                        currentIndex: 0,
+                        totalCount: 1
+                    )
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
-
-                FeedPageIndicatorDots(
-                    currentIndex: showFeedProjectPanel ? (clampedHomeFeedPanelPageIndex(for: project) + 1) : 0,
-                    totalCount: homeFeedPanelPageCount(for: project) + 1
-                )
-                    .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 16)
+                .padding(.bottom, appBottomBarHeight - 14)
+                .offset(y: 22)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, appBottomBarHeight - 14)
-            .offset(y: 22)
 
-            if useLivePlayer {
+            if useLivePlayer && !shouldHideFeedChrome {
                 FeedPlaybackScrubber(
                     progress: homeFeedPlaybackProgress,
                     onScrubBegan: {
@@ -737,6 +761,52 @@ struct SupportFlowDemoView: View {
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .contentShape(Rectangle())
         .background(FeedProjectPanelBackground())
+    }
+
+    private func feedCreatorProfilePanel(project: FeedProjectSummary, width: CGFloat, isActive: Bool) -> some View {
+        Group {
+            if isActive {
+                CreatorPublicPageView(
+                    client: client,
+                    creatorId: project.creatorId,
+                    onRequireAuth: {
+                        showAuthSheet = true
+                    },
+                    onSupportTap: { project, preferredPlanId in
+                        guard isAuthenticated else {
+                            showAuthSheet = true
+                            return
+                        }
+                        supportEntryPoint = .feed
+                        supportTargetProject = project
+                        if let preferredPlanId,
+                           let plans = project.plans,
+                           let chosen = plans.first(where: { $0.id == preferredPlanId }) {
+                            selectedPlan = SupportPlan(
+                                id: chosen.id,
+                                name: chosen.name,
+                                priceMinor: chosen.price_minor,
+                                rewardSummary: chosen.reward_summary
+                            )
+                            supportStep = .confirm
+                        } else {
+                            selectedPlan = nil
+                            supportStep = .planSelect
+                        }
+                        showSupportFlow = true
+                    },
+                    onBackTap: {
+                        closeFeedProjectPanel()
+                    }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                Color.white
+            }
+        }
+        .frame(width: width, alignment: .leading)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.white)
     }
 
 
@@ -1981,13 +2051,14 @@ struct SupportFlowDemoView: View {
         }
     }
 
-    private func handleHomeFeedDragEnded(_ value: DragGesture.Value, project: FeedProjectSummary) {
+    private func handleHomeFeedDragEnded(_ value: DragGesture.Value) {
         let dx = value.translation.width
         let dy = value.translation.height
         let threshold: CGFloat = 50
 
-        if showFeedProjectPanel, abs(dx) > abs(dy), abs(dx) > threshold {
-            if dx > 0, homeFeedPanelPageIndex == 0 {
+        if showFeedProjectPanel {
+            defer { homeFeedPanelDragOffsetX = 0 }
+            if abs(dx) > abs(dy), abs(dx) > threshold, dx > 0, homeFeedPanelPageIndex == 0 {
                 closeFeedProjectPanel()
             }
             return
@@ -2003,7 +2074,7 @@ struct SupportFlowDemoView: View {
 
         switch action {
         case .openPanel:
-            openFeedProjectPanel(for: project)
+            openFeedProjectPanel()
         case .closePanel:
             closeFeedProjectPanel()
         case .nextItem:
@@ -2015,16 +2086,13 @@ struct SupportFlowDemoView: View {
         }
     }
 
-    private func openFeedProjectPanel(for project: FeedProjectSummary) {
+    private func openFeedProjectPanel() {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
             showFeedProjectPanel = true
             homeFeedPanelPageIndex = 0
             homeFeedPanelDragOffsetX = 0
         }
         homeFeedPlayer?.pause()
-        Task {
-            await loadFeedProjectDetail(for: project, forceRefresh: false)
-        }
     }
 
     private func closeFeedProjectPanel() {

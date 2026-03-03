@@ -442,9 +442,11 @@ export class ProjectsService {
   async updateProjectForCreator(input: {
     creatorUserId: string;
     projectId: string;
+    title?: string;
     subtitle?: string | null;
     description?: string | null;
     imageUrls?: string[];
+    deletedPlanIds?: string[];
     detailBlocks?: ProjectDetailBlock[];
     urls?: string[];
     plans?: Array<{
@@ -468,6 +470,7 @@ export class ProjectsService {
         id: string;
         creator_user_id: string;
         status: string;
+        title: string;
         subtitle: string | null;
         description: string | null;
         cover_image_url: string | null;
@@ -475,7 +478,7 @@ export class ProjectsService {
         project_detail_blocks: unknown;
         external_urls: unknown;
       }>(
-        `select id, creator_user_id, status, subtitle, description, cover_image_url, project_image_urls, project_detail_blocks, external_urls from projects where id = $1 limit 1`,
+        `select id, creator_user_id, status, title, subtitle, description, cover_image_url, project_image_urls, project_detail_blocks, external_urls from projects where id = $1 limit 1`,
         [input.projectId],
       );
       if ((existing.rowCount ?? 0) === 0) {
@@ -492,6 +495,7 @@ export class ProjectsService {
       }
 
       const current = existing.rows[0];
+      const mergedTitle = input.title === undefined ? current.title : input.title;
       const mergedSubtitle = input.subtitle === undefined ? current.subtitle : input.subtitle;
       const mergedDescription = input.description === undefined ? current.description : input.description;
       const currentImageUrls = Array.isArray(current.project_image_urls)
@@ -509,18 +513,20 @@ export class ProjectsService {
       await client.query(
         `
         update projects
-        set subtitle = $3,
-            description = $4,
-            cover_image_url = $5,
-            project_image_urls = $6::jsonb,
-            external_urls = $7::jsonb,
-            project_detail_blocks = $8::jsonb,
+        set title = $3,
+            subtitle = $4,
+            description = $5,
+            cover_image_url = $6,
+            project_image_urls = $7::jsonb,
+            external_urls = $8::jsonb,
+            project_detail_blocks = $9::jsonb,
             updated_at = now()
         where id = $1 and creator_user_id = $2
       `,
         [
           input.projectId,
           input.creatorUserId,
+          mergedTitle,
           mergedSubtitle,
           mergedDescription,
           mergedCoverImageUrl,
@@ -530,15 +536,29 @@ export class ProjectsService {
         ],
       );
 
+      if (input.deletedPlanIds && input.deletedPlanIds.length > 0) {
+        await client.query(
+          `
+          delete from project_plans
+          where project_id = $1
+            and id = any($2::uuid[])
+        `,
+          [input.projectId, input.deletedPlanIds],
+        );
+      }
+
       if (input.plans && input.plans.length > 0) {
         const planRows = await client.query<{
           id: string;
+          name: string;
           price_minor: number;
+          reward_summary: string;
+          currency: string;
           description: string | null;
           image_url: string | null;
         }>(
           `
-          select id, price_minor, description, image_url
+          select id, name, price_minor, reward_summary, currency, description, image_url
           from project_plans
           where project_id = $1
         `,
@@ -555,17 +575,42 @@ export class ProjectsService {
               await client.query("rollback");
               return "validation_error" as const;
             }
+            const mergedPlanName = plan.name === undefined ? currentPlan.name : plan.name;
+            const mergedPlanRewardSummary = plan.rewardSummary === undefined ? currentPlan.reward_summary : plan.rewardSummary;
+            const mergedPlanPrice = plan.priceMinor === undefined ? currentPlan.price_minor : plan.priceMinor;
+            const mergedPlanCurrency = plan.currency === undefined ? currentPlan.currency : plan.currency;
             const mergedPlanDescription = plan.description === undefined ? currentPlan.description : plan.description;
             const mergedPlanImageUrl = plan.imageUrl === undefined ? currentPlan.image_url : plan.imageUrl;
+            if (!mergedPlanName || !mergedPlanRewardSummary || !mergedPlanCurrency || !mergedPlanPrice || mergedPlanPrice <= 0) {
+              await client.query("rollback");
+              return "validation_error" as const;
+            }
+            if (mergedPlanPrice < currentPlan.price_minor) {
+              await client.query("rollback");
+              return "invalid_plan_price" as const;
+            }
             await client.query(
               `
               update project_plans
-              set description = $2,
-                  image_url = $3,
+              set name = $2,
+                  reward_summary = $3,
+                  price_minor = $4,
+                  currency = $5,
+                  description = $6,
+                  image_url = $7,
                   updated_at = now()
-              where id = $1 and project_id = $4
+              where id = $1 and project_id = $8
             `,
-              [plan.id, mergedPlanDescription, mergedPlanImageUrl, input.projectId],
+              [
+                plan.id,
+                mergedPlanName,
+                mergedPlanRewardSummary,
+                mergedPlanPrice,
+                mergedPlanCurrency,
+                mergedPlanDescription,
+                mergedPlanImageUrl,
+                input.projectId,
+              ],
             );
             continue;
           }
@@ -599,6 +644,15 @@ export class ProjectsService {
             ],
           );
         }
+      }
+
+      const remainingPlanCount = await client.query<{ count: string }>(
+        `select count(*)::text as count from project_plans where project_id = $1`,
+        [input.projectId],
+      );
+      if (Number(remainingPlanCount.rows[0]?.count ?? 0) <= 0) {
+        await client.query("rollback");
+        return "validation_error" as const;
       }
 
       await client.query("commit");

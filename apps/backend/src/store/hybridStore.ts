@@ -1056,9 +1056,11 @@ export class HybridStore {
   async updateProjectForCreator(input: {
     creatorUserId: string;
     projectId: string;
+    title?: string;
     subtitle?: string | null;
     description?: string | null;
     imageUrls?: string[];
+    deletedPlanIds?: string[];
     detailBlocks?: Array<
       | { type: "heading"; text: string }
       | { type: "text"; text: string }

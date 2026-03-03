@@ -13,6 +13,11 @@ enum FeedSwipeAction {
     case none
 }
 
+enum FeedPanelOpenDirection {
+    case leading
+    case trailing
+}
+
 enum VerticalFeedMotionDirection {
     case next
     case previous
@@ -33,6 +38,7 @@ func resolveFeedSwipeAction(
     isPanelOpen: Bool,
     canMoveNext: Bool,
     canMovePrevious: Bool,
+    panelOpenDirection: FeedPanelOpenDirection = .trailing,
     panelVerticalThreshold: CGFloat = 36,
     gestureThreshold: CGFloat = 50
 ) -> FeedSwipeAction {
@@ -44,8 +50,14 @@ func resolveFeedSwipeAction(
     }
 
     if abs(dx) > abs(dy) {
-        if dx < -gestureThreshold { return .openPanel }
-        if dx > gestureThreshold { return .closePanel }
+        switch panelOpenDirection {
+        case .trailing:
+            if dx < -gestureThreshold { return .openPanel }
+            if dx > gestureThreshold { return .closePanel }
+        case .leading:
+            if dx > gestureThreshold { return .openPanel }
+            if dx < -gestureThreshold { return .closePanel }
+        }
         return .none
     }
 
@@ -56,6 +68,7 @@ func resolveFeedSwipeAction(
 
 struct SlidingFeedPanelLayer<VideoLayer: View, PanelLayer: View>: View {
     let isPanelOpen: Bool
+    let panelOpenDirection: FeedPanelOpenDirection
     let cornerRadius: CGFloat
     let dragOffsetX: CGFloat
     @ViewBuilder let videoLayer: () -> VideoLayer
@@ -63,12 +76,14 @@ struct SlidingFeedPanelLayer<VideoLayer: View, PanelLayer: View>: View {
 
     init(
         isPanelOpen: Bool,
+        panelOpenDirection: FeedPanelOpenDirection = .trailing,
         cornerRadius: CGFloat,
         dragOffsetX: CGFloat = 0,
         @ViewBuilder videoLayer: @escaping () -> VideoLayer,
         @ViewBuilder panelLayer: @escaping (_ width: CGFloat) -> PanelLayer
     ) {
         self.isPanelOpen = isPanelOpen
+        self.panelOpenDirection = panelOpenDirection
         self.cornerRadius = cornerRadius
         self.dragOffsetX = dragOffsetX
         self.videoLayer = videoLayer
@@ -79,19 +94,38 @@ struct SlidingFeedPanelLayer<VideoLayer: View, PanelLayer: View>: View {
         GeometryReader { geo in
             let panelWidth = geo.size.width
             let clampedDrag: CGFloat = {
-                if isPanelOpen {
+                switch panelOpenDirection {
+                case .trailing:
+                    if isPanelOpen {
+                        return min(max(dragOffsetX, 0), panelWidth)
+                    }
+                    return max(min(dragOffsetX, 0), -panelWidth)
+                case .leading:
+                    if isPanelOpen {
+                        return min(max(dragOffsetX, -panelWidth), 0)
+                    }
                     return min(max(dragOffsetX, 0), panelWidth)
                 }
-                return max(min(dragOffsetX, 0), -panelWidth)
             }()
             ZStack(alignment: .leading) {
-                videoLayer()
-                    .offset(x: (isPanelOpen ? -panelWidth : 0) + clampedDrag)
-                    .animation(.spring(response: 0.28, dampingFraction: 0.9), value: isPanelOpen)
+                switch panelOpenDirection {
+                case .trailing:
+                    videoLayer()
+                        .offset(x: (isPanelOpen ? -panelWidth : 0) + clampedDrag)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: isPanelOpen)
 
-                panelLayer(panelWidth)
-                    .offset(x: geo.size.width - (isPanelOpen ? panelWidth : 0) + clampedDrag)
-                    .animation(.spring(response: 0.28, dampingFraction: 0.9), value: isPanelOpen)
+                    panelLayer(panelWidth)
+                        .offset(x: geo.size.width - (isPanelOpen ? panelWidth : 0) + clampedDrag)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: isPanelOpen)
+                case .leading:
+                    videoLayer()
+                        .offset(x: (isPanelOpen ? panelWidth : 0) + clampedDrag)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: isPanelOpen)
+
+                    panelLayer(panelWidth)
+                        .offset(x: -geo.size.width + (isPanelOpen ? panelWidth : 0) + clampedDrag)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.9), value: isPanelOpen)
+                }
             }
             .if(cornerRadius > 0) { view in
                 view.clipShape(RoundedRectangle(cornerRadius: cornerRadius))

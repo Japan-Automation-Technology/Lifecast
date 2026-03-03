@@ -15,6 +15,22 @@ private struct DiscoverCreatorDestination: Identifiable, Hashable {
     let id: UUID
 }
 
+private struct DiscoverBrowseHeroCategory: Identifiable {
+    let id = UUID()
+    let title: String
+    let subtitle: String
+    let icon: String
+    let colors: [Color]
+}
+
+private struct DiscoverBrowseListCategory: Identifiable {
+    let id = UUID()
+    let title: String
+    let subtitle: String
+    let icon: String
+    let colors: [Color]
+}
+
 struct DiscoverSearchView: View {
     let client: LifeCastAPIClient
     let onSupportTap: (MyProjectResult, UUID?) -> Void
@@ -26,38 +42,81 @@ struct DiscoverSearchView: View {
 
     private static let historyKey = "discover.search.history.v1"
     private let historyLimit = 10
+    private let bottomScrollInset: CGFloat = 120
+    private let heroColumns: [GridItem] = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+
+    private let heroCategories: [DiscoverBrowseHeroCategory] = [
+        DiscoverBrowseHeroCategory(title: "Gadgets", subtitle: "Devices, tools, and smart tech", icon: "desktopcomputer", colors: [Color(red: 0.16, green: 0.34, blue: 0.58), Color(red: 0.40, green: 0.62, blue: 0.82)]),
+        DiscoverBrowseHeroCategory(title: "Food", subtitle: "Meals, craft snacks, and local picks", icon: "fork.knife", colors: [Color(red: 0.62, green: 0.35, blue: 0.20), Color(red: 0.84, green: 0.57, blue: 0.41)]),
+        DiscoverBrowseHeroCategory(title: "Outdoors", subtitle: "Camping, hiking, and field gear", icon: "mountain.2", colors: [Color(red: 0.20, green: 0.38, blue: 0.22), Color(red: 0.45, green: 0.64, blue: 0.32)]),
+        DiscoverBrowseHeroCategory(title: "Fashion", subtitle: "Bags, accessories, and apparel", icon: "tshirt", colors: [Color(red: 0.28, green: 0.30, blue: 0.40), Color(red: 0.51, green: 0.54, blue: 0.64)])
+    ]
+
+    private let listCategories: [DiscoverBrowseListCategory] = [
+        DiscoverBrowseListCategory(title: "Interior", subtitle: "Storage, kitchen, and tableware", icon: "chair.lounge.fill", colors: [Color(red: 0.79, green: 0.67, blue: 0.56), Color(red: 0.90, green: 0.83, blue: 0.76)]),
+        DiscoverBrowseListCategory(title: "Beauty", subtitle: "Skincare, cosmetics, and scents", icon: "sparkles", colors: [Color(red: 0.90, green: 0.64, blue: 0.71), Color(red: 0.98, green: 0.83, blue: 0.86)]),
+        DiscoverBrowseListCategory(title: "Entertainment", subtitle: "Subculture, games, and media", icon: "gamecontroller.fill", colors: [Color(red: 0.66, green: 0.52, blue: 0.72), Color(red: 0.82, green: 0.72, blue: 0.87)]),
+        DiscoverBrowseListCategory(title: "Pets", subtitle: "Dogs, cats, and companion life", icon: "pawprint.fill", colors: [Color(red: 0.78, green: 0.64, blue: 0.50), Color(red: 0.89, green: 0.80, blue: 0.70)]),
+        DiscoverBrowseListCategory(title: "Feature Tags", subtitle: "Made in Japan, utility, memberships", icon: "tag.fill", colors: [Color(red: 0.42, green: 0.52, blue: 0.57), Color(red: 0.64, green: 0.73, blue: 0.77)]),
+        DiscoverBrowseListCategory(title: "Function", subtitle: "Multi-use, eco, and compact tools", icon: "wrench.and.screwdriver.fill", colors: [Color(red: 0.72, green: 0.61, blue: 0.24), Color(red: 0.89, green: 0.80, blue: 0.42)])
+    ]
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isTypingQuery: Bool {
+        !trimmedQuery.isEmpty
+    }
+
+    private var filteredHistory: [DiscoverSearchHistoryEntry] {
+        guard isTypingQuery else { return searchHistory }
+        return searchHistory.filter { $0.query.localizedCaseInsensitiveContains(trimmedQuery) }
+    }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                HStack {
-                    TextField("Search creators", text: $query)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isSearchFieldFocused)
-                        .submitLabel(.search)
-                        .onSubmit {
-                            submitSearch()
-                        }
-                    Button("Search") {
-                        submitSearch()
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding(.horizontal, 16)
+            ScrollView {
+                VStack(spacing: 18) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
 
-                if !searchHistory.isEmpty {
-                    HStack {
-                        Spacer()
-                        Button("Clear History") {
-                            clearSearchHistory()
+                        TextField("Search keywords", text: $query)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .focused($isSearchFieldFocused)
+                            .submitLabel(.search)
+                            .onSubmit {
+                                submitSearch()
+                            }
+
+                        if !query.isEmpty {
+                            Button {
+                                query = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Clear query")
                         }
-                        .font(.caption)
-                        .buttonStyle(.plain)
                     }
+                    .padding(.horizontal, 14)
+                    .frame(height: 50)
+                    .background(Color.gray.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
                     .padding(.horizontal, 16)
-                }
 
-                historySection
+                    if isTypingQuery {
+                        searchInputStateSection
+                    } else {
+                        browseDiscoverySection
+                    }
+                }
+                .padding(.top, 12)
+                .padding(.bottom, bottomScrollInset)
             }
             .navigationTitle("Discover")
             .navigationDestination(item: $destination) { target in
@@ -83,8 +142,8 @@ struct DiscoverSearchView: View {
     }
 
     @ViewBuilder
-    private var historySection: some View {
-        if searchHistory.isEmpty {
+    private var searchInputStateSection: some View {
+        if filteredHistory.isEmpty {
             ContentUnavailableView(
                 "No recent searches",
                 systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
@@ -92,46 +151,153 @@ struct DiscoverSearchView: View {
             )
             .padding(.horizontal, 16)
         } else {
-            List {
-                Section {
-                    ForEach(searchHistory) { entry in
-                        HStack(spacing: 10) {
-                            Image(systemName: "clock")
-                                .foregroundStyle(.secondary)
-
-                            Button {
-                                query = entry.query
-                                submitSearch()
-                            } label: {
-                                Text(entry.query)
-                                    .foregroundStyle(.primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .buttonStyle(.plain)
-
-                            Button {
-                                removeSearchHistoryEntry(entry)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Delete \(entry.query) from search history")
-                        }
+            VStack(spacing: 10) {
+                HStack {
+                    Text("Recent searches")
+                        .font(.headline)
+                    Spacer()
+                    Button("Clear") {
+                        clearSearchHistory()
                     }
-                } header: {
-                    HStack {
-                        Text("Recent searches")
-                        Spacer()
-                        Button("Clear") {
-                            clearSearchHistory()
-                        }
-                        .font(.caption)
-                        .buttonStyle(.plain)
+                    .font(.caption)
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+
+                VStack(spacing: 8) {
+                    ForEach(filteredHistory) { entry in
+                        historyRow(entry)
                     }
                 }
+                .padding(.horizontal, 16)
             }
-            .listStyle(.plain)
+        }
+    }
+
+    private var browseDiscoverySection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Browse by genre and traits")
+                .font(.title3.weight(.bold))
+                .padding(.horizontal, 16)
+
+            LazyVGrid(columns: heroColumns, spacing: 12) {
+                ForEach(heroCategories) { category in
+                    Button {
+                        query = category.title
+                        submitSearch()
+                    } label: {
+                        browseHeroCard(category)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            VStack(spacing: 10) {
+                ForEach(listCategories) { category in
+                    Button {
+                        query = category.title
+                        submitSearch()
+                    } label: {
+                        browseListRow(category)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    private func historyRow(_ entry: DiscoverSearchHistoryEntry) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "clock")
+                .foregroundStyle(.secondary)
+
+            Button {
+                query = entry.query
+                submitSearch()
+            } label: {
+                Text(entry.query)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                removeSearchHistoryEntry(entry)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Delete \(entry.query) from search history")
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 44)
+        .background(Color.gray.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func browseHeroCard(_ category: DiscoverBrowseHeroCategory) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: category.colors,
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(height: 110)
+                .overlay {
+                    Image(systemName: category.icon)
+                        .font(.system(size: 40, weight: .light))
+                        .foregroundStyle(.white.opacity(0.22))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .padding(10)
+                }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(category.title)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(category.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+            }
+            .padding(10)
+        }
+    }
+
+    private func browseListRow(_ category: DiscoverBrowseListCategory) -> some View {
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: category.colors,
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 68, height: 68)
+                .overlay {
+                    Image(systemName: category.icon)
+                        .font(.title2)
+                        .foregroundStyle(.white.opacity(0.95))
+                }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(category.title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(category.subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer()
         }
     }
 
@@ -411,6 +577,7 @@ struct CreatorPublicPageView: View {
     let creatorId: UUID
     let onRequireAuth: () -> Void
     let onSupportTap: (MyProjectResult, UUID?) -> Void
+    let onBackTap: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var page: CreatorPublicPageResult?
@@ -427,213 +594,222 @@ struct CreatorPublicPageView: View {
     @State private var supportedProjectsLoading = false
     @State private var supportedProjectsError = ""
     @State private var selectedCreatorRoute: CreatorRoute? = nil
+    private let creatorHeaderTopTargetFromScreen: CGFloat = 58
+    private let creatorBottomInsetTargetFromScreen: CGFloat = appBottomBarHeight + 38
 
     init(
         client: LifeCastAPIClient,
         creatorId: UUID,
         onRequireAuth: @escaping () -> Void = {},
-        onSupportTap: @escaping (MyProjectResult, UUID?) -> Void
+        onSupportTap: @escaping (MyProjectResult, UUID?) -> Void,
+        onBackTap: (() -> Void)? = nil
     ) {
         self.client = client
         self.creatorId = creatorId
         self.onRequireAuth = onRequireAuth
         self.onSupportTap = onSupportTap
+        self.onBackTap = onBackTap
     }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
-                if let page {
-                    VStack(spacing: 8) {
-                        ProfileOverviewSection(
-                            avatarURL: page.profile.avatar_url,
-                            displayName: creatorDisplayName(profile: page.profile),
-                            bioText: creatorBioText(profile: page.profile),
-                            followingCount: page.profile_stats.following_count,
-                            followersCount: page.profile_stats.followers_count,
-                            supportCount: page.profile_stats.supported_project_count,
-                            onTapFollowing: {
-                                selectedNetworkTab = .following
-                                showNetwork = true
-                            },
-                            onTapFollowers: {
-                                selectedNetworkTab = .followers
-                                showNetwork = true
-                            },
-                            onTapSupport: {
-                                selectedNetworkTab = .support
-                                showNetwork = true
-                            }
-                        ) {
-                            if isViewingSelfProfile != true {
-                                HStack(spacing: 10) {
-                                    if viewerContextResolved {
-                                        Button(page.viewer_relationship.is_following ? "Following" : "Follow") {
-                                            guard client.hasAuthSession else {
-                                                onRequireAuth()
-                                                return
-                                            }
-                                            Task {
-                                                await toggleFollow()
-                                            }
-                                        }
-                                        .font(.system(size: 15, weight: .semibold))
-                                        .foregroundStyle(Color.black.opacity(page.viewer_relationship.is_following ? 0.9 : 0.82))
-                                        .frame(maxWidth: .infinity)
-                                        .frame(height: 34)
-                                        .background(page.viewer_relationship.is_following ? Color.gray.opacity(0.28) : Color.white)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .stroke(
-                                                    page.viewer_relationship.is_following ? Color.clear : Color.black.opacity(0.82),
-                                                    lineWidth: page.viewer_relationship.is_following ? 0 : 1.4
-                                                )
-                                        )
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        .buttonStyle(.plain)
+        GeometryReader { geo in
+            let headerTopPadding = max(0, creatorHeaderTopTargetFromScreen - geo.safeAreaInsets.top)
+            let bottomSpacerHeight = max(20, creatorBottomInsetTargetFromScreen - geo.safeAreaInsets.bottom)
 
-                                        Button(page.viewer_relationship.is_supported ? "Supported" : "Support") {
-                                            guard !page.viewer_relationship.is_supported else { return }
-                                            guard client.hasAuthSession else {
-                                                onRequireAuth()
-                                                return
-                                            }
-                                            guard let project = page.project else {
-                                                errorText = "No active project to support"
-                                                return
-                                            }
-                                            onSupportTap(project, nil)
-                                        }
-                                        .font(.system(size: 15, weight: .semibold))
-                                        .foregroundStyle(page.viewer_relationship.is_supported ? Color.primary : Color.white)
-                                        .frame(maxWidth: .infinity)
-                                        .frame(height: 34)
-                                        .background(page.viewer_relationship.is_supported ? Color.gray.opacity(0.28) : Color.green)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        .buttonStyle(.plain)
-                                        .disabled(!page.viewer_relationship.is_supported && page.project == nil)
-                                    } else {
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color.gray.opacity(0.2))
-                                            .frame(maxWidth: .infinity)
-                                            .frame(height: 34)
-
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color.gray.opacity(0.2))
-                                            .frame(maxWidth: .infinity)
-                                            .frame(height: 34)
-                                    }
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
+                    if let page {
+                        VStack(spacing: 8) {
+                            ProfileOverviewSection(
+                                avatarURL: page.profile.avatar_url,
+                                displayName: creatorDisplayName(profile: page.profile),
+                                bioText: creatorBioText(profile: page.profile),
+                                followingCount: page.profile_stats.following_count,
+                                followersCount: page.profile_stats.followers_count,
+                                supportCount: page.profile_stats.supported_project_count,
+                                onTapFollowing: {
+                                    selectedNetworkTab = .following
+                                    showNetwork = true
+                                },
+                                onTapFollowers: {
+                                    selectedNetworkTab = .followers
+                                    showNetwork = true
+                                },
+                                onTapSupport: {
+                                    selectedNetworkTab = .support
+                                    showNetwork = true
                                 }
-                                .padding(.horizontal, 24)
-                                .redacted(reason: viewerContextResolved ? [] : .placeholder)
-                                .animation(.default, value: viewerContextResolved)
-                            }
-                        }
-                    }
-                    .padding(.top, 6)
+                            ) {
+                                if isViewingSelfProfile != true {
+                                    HStack(spacing: 10) {
+                                        if viewerContextResolved {
+                                            Button(page.viewer_relationship.is_following ? "Following" : "Follow") {
+                                                guard client.hasAuthSession else {
+                                                    onRequireAuth()
+                                                    return
+                                                }
+                                                Task {
+                                                    await toggleFollow()
+                                                }
+                                            }
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(Color.black.opacity(page.viewer_relationship.is_following ? 0.9 : 0.82))
+                                            .frame(maxWidth: .infinity)
+                                            .frame(height: 34)
+                                            .background(page.viewer_relationship.is_following ? Color.gray.opacity(0.28) : Color.white)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .stroke(
+                                                        page.viewer_relationship.is_following ? Color.clear : Color.black.opacity(0.82),
+                                                        lineWidth: page.viewer_relationship.is_following ? 0 : 1.4
+                                                    )
+                                            )
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            .buttonStyle(.plain)
 
-                    Section {
-                        Group {
-                            if selectedIndex == 0 {
-                                creatorProjectSection(page: page)
-                            } else if selectedIndex == 1 {
-                                creatorPostsSection(page: page)
-                            } else {
-                                SupportedProjectsListView(
-                                    rows: supportedProjects,
-                                    isLoading: supportedProjectsLoading,
-                                    errorText: supportedProjectsError,
-                                    emptyText: "No supported projects yet",
-                                    onRefresh: {
-                                        Task { await loadSupportedProjects() }
-                                    },
-                                    onTapProject: { row in
-                                        if row.creator_user_id == creatorId {
-                                            selectedIndex = 0
+                                            Button(page.viewer_relationship.is_supported ? "Supported" : "Support") {
+                                                guard !page.viewer_relationship.is_supported else { return }
+                                                guard client.hasAuthSession else {
+                                                    onRequireAuth()
+                                                    return
+                                                }
+                                                guard let project = page.project else {
+                                                    errorText = "No active project to support"
+                                                    return
+                                                }
+                                                onSupportTap(project, nil)
+                                            }
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(page.viewer_relationship.is_supported ? Color.primary : Color.white)
+                                            .frame(maxWidth: .infinity)
+                                            .frame(height: 34)
+                                            .background(page.viewer_relationship.is_supported ? Color.gray.opacity(0.28) : Color.green)
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            .buttonStyle(.plain)
+                                            .disabled(!page.viewer_relationship.is_supported && page.project == nil)
                                         } else {
-                                            selectedCreatorRoute = CreatorRoute(id: row.creator_user_id)
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(Color.gray.opacity(0.2))
+                                                .frame(maxWidth: .infinity)
+                                                .frame(height: 34)
+
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(Color.gray.opacity(0.2))
+                                                .frame(maxWidth: .infinity)
+                                                .frame(height: 34)
                                         }
                                     }
-                                )
+                                    .padding(.horizontal, 24)
+                                    .redacted(reason: viewerContextResolved ? [] : .placeholder)
+                                    .animation(.default, value: viewerContextResolved)
+                                }
                             }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    } header: {
-                        ProfileTabIconStrip(selectedIndex: $selectedIndex, style: .fullWidthUnderline)
-                            .background(Color.white)
+                        .padding(.top, 6)
+
+                        Section {
+                            Group {
+                                if selectedIndex == 0 {
+                                    creatorProjectSection(page: page)
+                                } else if selectedIndex == 1 {
+                                    creatorPostsSection(page: page)
+                                } else {
+                                    SupportedProjectsListView(
+                                        rows: supportedProjects,
+                                        isLoading: supportedProjectsLoading,
+                                        errorText: supportedProjectsError,
+                                        emptyText: "No supported projects yet",
+                                        onRefresh: {
+                                            Task { await loadSupportedProjects() }
+                                        },
+                                        onTapProject: { row in
+                                            if row.creator_user_id == creatorId {
+                                                selectedIndex = 0
+                                            } else {
+                                                selectedCreatorRoute = CreatorRoute(id: row.creator_user_id)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } header: {
+                            ProfileTabIconStrip(selectedIndex: $selectedIndex, style: .fullWidthUnderline)
+                                .background(Color.white)
+                        }
+                    } else if loading {
+                        ProfileCenteredLoadingView(title: nil)
+                    } else if !errorText.isEmpty {
+                        Text(errorText)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 16)
                     }
-                } else if loading {
-                    ProfileCenteredLoadingView(title: nil)
-                } else if !errorText.isEmpty {
-                    Text(errorText)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .padding(.horizontal, 16)
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: bottomSpacerHeight)
+            }
+            .refreshable {
+                await load()
+                if selectedIndex == 2 {
+                    await loadSupportedProjects()
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: appBottomBarHeight + 20)
-        }
-        .refreshable {
-            await load()
-            if selectedIndex == 2 {
+            .task(id: creatorId) {
+                await MainActor.run {
+                    isViewingSelfProfile = nil
+                    viewerContextResolved = false
+                    supportedProjects = []
+                    supportedProjectsError = ""
+                }
+                await refreshViewerContext()
+                await load()
                 await loadSupportedProjects()
             }
-        }
-        .task(id: creatorId) {
-            await MainActor.run {
-                isViewingSelfProfile = nil
-                viewerContextResolved = false
-                supportedProjects = []
-                supportedProjectsError = ""
+            .onChange(of: selectedIndex) { _, newValue in
+                if newValue == 2 {
+                    Task { await loadSupportedProjects() }
+                }
             }
-            await refreshViewerContext()
-            await load()
-            await loadSupportedProjects()
-        }
-        .onChange(of: selectedIndex) { _, newValue in
-            if newValue == 2 {
-                Task { await loadSupportedProjects() }
+            .onReceive(NotificationCenter.default.publisher(for: .lifecastRelationshipChanged)) { notification in
+                guard let creatorUserId = notification.userInfo?["creatorUserId"] as? String else { return }
+                guard creatorUserId.lowercased() == creatorId.uuidString.lowercased() else { return }
+                Task {
+                    await load()
+                }
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .lifecastRelationshipChanged)) { notification in
-            guard let creatorUserId = notification.userInfo?["creatorUserId"] as? String else { return }
-            guard creatorUserId.lowercased() == creatorId.uuidString.lowercased() else { return }
-            Task {
-                await load()
+            .navigationDestination(isPresented: $showNetwork) {
+                if let page {
+                    CreatorNetworkView(
+                        client: client,
+                        creatorUserId: page.profile.creator_user_id,
+                        creatorUsername: page.profile.username,
+                        initialTab: selectedNetworkTab
+                    )
+                } else {
+                    Text("Creator not loaded")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
-        }
-        .navigationDestination(isPresented: $showNetwork) {
-            if let page {
-                CreatorNetworkView(
+            .navigationDestination(item: $selectedCreatorRoute) { route in
+                CreatorPublicPageView(
                     client: client,
-                    creatorUserId: page.profile.creator_user_id,
-                    creatorUsername: page.profile.username,
-                    initialTab: selectedNetworkTab
+                    creatorId: route.id,
+                    onRequireAuth: onRequireAuth,
+                    onSupportTap: onSupportTap
                 )
-            } else {
-                Text("Creator not loaded")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-        }
-        .navigationDestination(item: $selectedCreatorRoute) { route in
-            CreatorPublicPageView(
-                client: client,
-                creatorId: route.id,
-                onRequireAuth: onRequireAuth,
-                onSupportTap: onSupportTap
-            )
-        }
-        .toolbar(.hidden, for: .navigationBar)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            creatorPinnedHeader
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                creatorPinnedHeader(topPadding: headerTopPadding)
+            }
         }
     }
 
-    private var creatorPinnedHeader: some View {
+    private func creatorPinnedHeader(topPadding: CGFloat) -> some View {
         ZStack {
             Text(page.map { "@\($0.profile.username)" } ?? "")
                 .font(.headline)
@@ -643,7 +819,11 @@ struct CreatorPublicPageView: View {
 
             HStack {
                 Button {
-                    dismiss()
+                    if let onBackTap {
+                        onBackTap()
+                    } else {
+                        dismiss()
+                    }
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 22, weight: .semibold))
@@ -651,15 +831,14 @@ struct CreatorPublicPageView: View {
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
-                .padding(.top, 4)
 
                 Spacer()
                 Color.clear.frame(width: 28, height: 28)
             }
         }
-        .frame(height: 36)
+        .frame(height: 44)
         .padding(.horizontal, 16)
-        .padding(.top, 4)
+        .padding(.top, topPadding)
         .padding(.bottom, 2)
         .background(Color.white)
     }

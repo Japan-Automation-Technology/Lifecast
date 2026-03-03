@@ -78,12 +78,14 @@ const endProjectBody = z
   .optional();
 
 const updateProjectBody = z.object({
+  title: z.string().min(1).max(120).optional(),
   subtitle: z.string().max(160).nullable().optional(),
   description: z.string().max(5000).nullable().optional(),
   image_url: z.string().url().max(2048).nullable().optional(),
   image_urls: z.array(z.string().url().max(2048)).min(1).max(5).optional(),
   urls: z.array(z.string().url().max(2048)).max(10).optional(),
   detail_blocks: z.array(projectDetailBlockSchema).max(120).optional(),
+  deleted_plan_ids: z.array(z.string().uuid()).max(50).optional(),
   plans: z
     .array(
       z.object({
@@ -365,17 +367,23 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     if (!body.success) {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid project payload"));
     }
+    const normalizedTitle = body.data.title === undefined ? undefined : body.data.title.trim();
+    if (normalizedTitle !== undefined && normalizedTitle.length === 0) {
+      return reply.code(400).send(fail("VALIDATION_ERROR", "Project title is required"));
+    }
 
     const mergedImageUrls = body.data.image_urls
       ?? (body.data.image_url ? [body.data.image_url] : undefined);
     const updated = await store.updateProjectForCreator({
       creatorUserId,
       projectId,
+      title: normalizedTitle,
       subtitle: body.data.subtitle === undefined ? undefined : body.data.subtitle?.trim() ?? null,
       description: body.data.description === undefined ? undefined : body.data.description?.trim() ?? null,
       imageUrls: mergedImageUrls?.map((v) => v.trim()).filter((v) => v.length > 0),
       urls: body.data.urls,
       detailBlocks: body.data.detail_blocks,
+      deletedPlanIds: body.data.deleted_plan_ids,
       plans: body.data.plans?.map((plan) => ({
         id: plan.id,
         name: plan.name,
@@ -399,7 +407,7 @@ export async function registerProjectRoutes(app: FastifyInstance) {
     if (updated === "invalid_plan_price") {
       return reply
         .code(409)
-        .send(fail("STATE_CONFLICT", "New plans cannot be cheaper than existing plans"));
+        .send(fail("STATE_CONFLICT", "Plan price cannot be decreased below existing constraints"));
     }
     if (updated === "validation_error") {
       return reply.code(400).send(fail("VALIDATION_ERROR", "Invalid plan payload"));

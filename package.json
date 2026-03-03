@@ -18,6 +18,7 @@
     "db:reset-videos:backend": "pnpm --filter @lifecast/backend db:reset-dev-videos",
     "verify:cloudflare-stream:backend": "pnpm --filter @lifecast/backend verify:cloudflare-stream",
     "dev:backend:worker:video-processing": "pnpm --filter @lifecast/backend dev:worker:video-processing",
+    "build:ios:clean": "xcodebuild -project apps/ios/LifeCast/LifeCast.xcodeproj -scheme LifeCast -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath .tmp/ios-derived-data clean build",
     "smoke:ios:appium": "node -e \"console.error('Deprecated: do not use smoke:ios:appium for UI validation. Use smoke:ios:upload-profile or smoke:ios:posted-feed. For explicit create-upload checks only, run smoke:ios:create-upload.'); process.exit(1)\"",
     "dev:backend:worker:video-maintenance": "pnpm --filter @lifecast/backend dev:worker:video-maintenance"
   }

@@ -386,6 +386,7 @@ struct UpdateProjectRequest: Encodable {
         let currency: String?
     }
 
+    let title: String?
     let subtitle: String?
     let description: String?
     let image_url: String?
@@ -393,6 +394,7 @@ struct UpdateProjectRequest: Encodable {
     let urls: [String]?
     let detail_blocks: [ProjectDetailBlockResult]?
     let plans: [Plan]?
+    let deleted_plan_ids: [UUID]?
 }
 
 struct UploadProjectImageRequest: Encodable {
@@ -1281,21 +1283,26 @@ final class LifeCastAPIClient {
 
     func updateProject(
         projectId: UUID,
+        title: String? = nil,
         subtitle: String?,
         description: String?,
         imageURL: String?,
         imageURLs: [String]?,
         urls: [String]?,
-        plans: [UpdateProjectRequest.Plan]?
+        detailBlocks: [ProjectDetailBlockResult]? = nil,
+        plans: [UpdateProjectRequest.Plan]?,
+        deletedPlanIds: [UUID]? = nil
     ) async throws -> MyProjectResult {
         let body = UpdateProjectRequest(
+            title: title,
             subtitle: subtitle,
             description: description,
             image_url: imageURLs?.first ?? imageURL,
             image_urls: imageURLs,
             urls: urls,
-            detail_blocks: nil,
-            plans: plans
+            detail_blocks: detailBlocks,
+            plans: plans,
+            deleted_plan_ids: deletedPlanIds
         )
         return try await send(
             path: "/v1/projects/\(projectId.uuidString)",

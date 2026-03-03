@@ -201,9 +201,11 @@ export class InMemoryStore {
   updateProjectForCreator(input: {
     creatorUserId: string;
     projectId: string;
+    title?: string;
     subtitle?: string | null;
     description?: string | null;
     imageUrls?: string[];
+    deletedPlanIds?: string[];
     detailBlocks?: ProjectDetailBlock[];
     urls?: string[];
     plans?: Array<{
@@ -221,17 +223,39 @@ export class InMemoryStore {
     if (existing.creatorUserId !== input.creatorUserId) return "forbidden" as const;
     if (["stopped", "failed", "succeeded"].includes(existing.status)) return "invalid_state" as const;
 
-    const nextPlans = [...existing.plans];
+    let nextPlans = [...existing.plans];
+    if (input.deletedPlanIds && input.deletedPlanIds.length > 0) {
+      const deletedSet = new Set(input.deletedPlanIds);
+      nextPlans = nextPlans.filter((plan) => !deletedSet.has(plan.id));
+      if (nextPlans.length === 0) {
+        return "validation_error" as const;
+      }
+    }
     const minExistingPrice = nextPlans.reduce((acc, row) => Math.min(acc, row.priceMinor), Number.POSITIVE_INFINITY);
     if (input.plans && input.plans.length > 0) {
       for (const plan of input.plans) {
         if (plan.id) {
           const idx = nextPlans.findIndex((p) => p.id === plan.id);
           if (idx < 0) return "validation_error" as const;
+          const current = nextPlans[idx];
+          const mergedName = plan.name === undefined ? current.name : plan.name;
+          const mergedRewardSummary = plan.rewardSummary === undefined ? current.rewardSummary : plan.rewardSummary;
+          const mergedPrice = plan.priceMinor === undefined ? current.priceMinor : plan.priceMinor;
+          const mergedCurrency = plan.currency === undefined ? current.currency : plan.currency;
+          if (!mergedName || !mergedRewardSummary || !mergedCurrency || !mergedPrice || mergedPrice <= 0) {
+            return "validation_error" as const;
+          }
+          if (mergedPrice < current.priceMinor) {
+            return "invalid_plan_price" as const;
+          }
           nextPlans[idx] = {
-            ...nextPlans[idx],
-            description: plan.description === undefined ? nextPlans[idx].description : (plan.description ?? null),
-            imageUrl: plan.imageUrl === undefined ? nextPlans[idx].imageUrl : (plan.imageUrl ?? null),
+            ...current,
+            name: mergedName,
+            rewardSummary: mergedRewardSummary,
+            priceMinor: mergedPrice,
+            currency: mergedCurrency,
+            description: plan.description === undefined ? current.description : (plan.description ?? null),
+            imageUrl: plan.imageUrl === undefined ? current.imageUrl : (plan.imageUrl ?? null),
           };
           continue;
         }
@@ -256,6 +280,7 @@ export class InMemoryStore {
 
     const nextProject = {
       ...existing,
+      title: input.title === undefined ? existing.title : input.title,
       subtitle: input.subtitle === undefined ? existing.subtitle : input.subtitle,
       description: input.description === undefined ? existing.description : input.description,
       imageUrls: input.imageUrls === undefined ? existing.imageUrls : input.imageUrls,
