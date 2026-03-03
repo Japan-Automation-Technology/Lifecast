@@ -583,7 +583,7 @@ struct CreatorPublicPageView: View {
     @State private var page: CreatorPublicPageResult?
     @State private var loading = false
     @State private var errorText = ""
-    @State private var selectedIndex = 0
+    @State private var selectedIndex: Int
     @State private var selectedVideo: CreatorPublicVideo?
     @State private var thumbnailCacheBust = UUID().uuidString
     @State private var showNetwork = false
@@ -602,13 +602,15 @@ struct CreatorPublicPageView: View {
         creatorId: UUID,
         onRequireAuth: @escaping () -> Void = {},
         onSupportTap: @escaping (MyProjectResult, UUID?) -> Void,
-        onBackTap: (() -> Void)? = nil
+        onBackTap: (() -> Void)? = nil,
+        initialSelectedIndex: Int = 0
     ) {
         self.client = client
         self.creatorId = creatorId
         self.onRequireAuth = onRequireAuth
         self.onSupportTap = onSupportTap
         self.onBackTap = onBackTap
+        _selectedIndex = State(initialValue: max(0, min(2, initialSelectedIndex)))
     }
 
     var body: some View {

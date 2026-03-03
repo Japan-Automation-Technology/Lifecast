@@ -422,7 +422,8 @@ struct CreatorPostedFeedView: View {
             client: client,
             creatorId: currentProject.creatorId,
             onSupportTap: onSupportTap,
-            onBackTap: {}
+            onBackTap: {},
+            initialSelectedIndex: 1
         )
         .id(currentProject.creatorId)
         .accessibilityHidden(true)
