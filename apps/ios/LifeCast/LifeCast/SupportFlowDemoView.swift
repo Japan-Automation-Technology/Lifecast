@@ -1218,43 +1218,46 @@ struct SupportFlowDemoView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    HStack(alignment: .top, spacing: 12) {
-                        supportPlanThumbnail(plan: plan, width: 116, height: 84)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(plan.name)
-                                .font(.title3.weight(.bold))
-                                .lineLimit(2)
-                            Label(plan.rewardSummary, systemImage: "gift.fill")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                        Spacer(minLength: 0)
-                        Text(supportPlanPrice(plan))
-                            .font(.title3.weight(.bold))
-                            .foregroundStyle(.blue)
-                            .monospacedDigit()
-                    }
+                    supportPlanHeroImage(plan: plan)
+
+                    Text(plan.name)
+                        .font(.title2.weight(.bold))
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Label(plan.rewardSummary, systemImage: "gift.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     if let description = planSummaryDescription(plan) {
                         Text(description)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .lineLimit(3)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Divider()
 
                     VStack(spacing: 10) {
                         summaryRow(title: "Estimated delivery", value: (supportTargetProject ?? liveSupportProject).map { feedFormatDate($0.deadline_at) } ?? "-")
-                        summaryRow(title: "Project goal", value: feedFormatJPY((supportTargetProject ?? liveSupportProject)?.goal_amount_minor ?? 0))
-                        Label("\((supportTargetProject ?? liveSupportProject)?.supporter_count ?? 0) supporters", systemImage: "person.2.fill")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
                     }
                     Divider()
 
-                    summaryRow(title: "Support Amount", value: supportPlanPrice(plan), isEmphasized: true)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Support Amount")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(supportPlanPrice(plan))
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(.blue)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                    }
                 }
                 .padding(16)
                 .background(Color.white)
@@ -1349,6 +1352,19 @@ struct SupportFlowDemoView: View {
     }
 
     private func supportPlanThumbnail(plan: SupportPlan, width: CGFloat, height: CGFloat) -> some View {
+        supportPlanImageContent(plan: plan)
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func supportPlanHeroImage(plan: SupportPlan) -> some View {
+        supportPlanImageContent(plan: plan)
+            .frame(maxWidth: .infinity)
+            .frame(height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func supportPlanImageContent(plan: SupportPlan) -> some View {
         Group {
             if let raw = plan.imageURL, let url = URL(string: raw) {
                 AsyncImage(url: url) { phase in
@@ -1369,8 +1385,6 @@ struct SupportFlowDemoView: View {
                 placeholderThumbnail
             }
         }
-        .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var placeholderThumbnail: some View {
