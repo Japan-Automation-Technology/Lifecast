@@ -630,11 +630,16 @@ struct SupportFlowDemoView: View {
     }
 
     private func requestAppTabSelection(_ tab: Int) {
+        if tab == 0 {
+            resetHomeTabToFeedRoot()
+        }
         if tab == 2 && selectedTab == 2 {
             createPickerAutoOpenNonce += 1
             return
         }
-        guard selectedTab != tab else { return }
+        if selectedTab == tab {
+            return
+        }
         if tab == 2 && !isAuthenticated {
             showAuthSheet = true
             return
@@ -648,6 +653,14 @@ struct SupportFlowDemoView: View {
             tabBeforeCreate = selectedTab
         }
         selectedTab = tab
+    }
+
+    private func resetHomeTabToFeedRoot() {
+        selectedCreatorRoute = nil
+        closeFeedProjectPanel()
+        showComments = false
+        showShare = false
+        showFeedActions = false
     }
 
     private func feedVideoLayer(project: FeedProjectSummary, useLivePlayer: Bool) -> some View {
