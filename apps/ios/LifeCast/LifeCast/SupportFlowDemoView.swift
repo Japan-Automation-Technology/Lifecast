@@ -1281,8 +1281,6 @@ struct SupportFlowDemoView: View {
 
     private var checkoutView: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Checkout")
-                .font(.headline)
             Text("Review your order and continue to secure payment.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
