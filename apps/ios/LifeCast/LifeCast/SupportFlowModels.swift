@@ -30,7 +30,10 @@ struct SupportPlan: Identifiable, Hashable {
     let id: UUID
     let name: String
     let priceMinor: Int
+    let currency: String
     let rewardSummary: String
+    let detailDescription: String?
+    let imageURL: String?
 }
 
 struct FeedProjectSummary: Identifiable {

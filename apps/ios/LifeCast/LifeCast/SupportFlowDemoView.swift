@@ -78,7 +78,15 @@ struct SupportFlowDemoView: View {
     private var realPlans: [SupportPlan] {
         guard let target = supportTargetProject ?? liveSupportProject else { return [] }
         return (target.plans ?? []).map {
-            SupportPlan(id: $0.id, name: $0.name, priceMinor: $0.price_minor, rewardSummary: $0.reward_summary)
+            SupportPlan(
+                id: $0.id,
+                name: $0.name,
+                priceMinor: $0.price_minor,
+                currency: $0.currency,
+                rewardSummary: $0.reward_summary,
+                detailDescription: $0.description,
+                imageURL: $0.image_url
+            )
         }
     }
 
@@ -116,7 +124,10 @@ struct SupportFlowDemoView: View {
                                         id: chosen.id,
                                         name: chosen.name,
                                         priceMinor: chosen.price_minor,
-                                        rewardSummary: chosen.reward_summary
+                                        currency: chosen.currency,
+                                        rewardSummary: chosen.reward_summary,
+                                        detailDescription: chosen.description,
+                                        imageURL: chosen.image_url
                                     )
                                     supportStep = .confirm
                                 } else {
@@ -145,7 +156,10 @@ struct SupportFlowDemoView: View {
                         id: chosen.id,
                         name: chosen.name,
                         priceMinor: chosen.price_minor,
-                        rewardSummary: chosen.reward_summary
+                        currency: chosen.currency,
+                        rewardSummary: chosen.reward_summary,
+                        detailDescription: chosen.description,
+                        imageURL: chosen.image_url
                     )
                     supportStep = .confirm
                 } else {
@@ -813,7 +827,10 @@ struct SupportFlowDemoView: View {
                                 id: chosen.id,
                                 name: chosen.name,
                                 priceMinor: chosen.price_minor,
-                                rewardSummary: chosen.reward_summary
+                                currency: chosen.currency,
+                                rewardSummary: chosen.reward_summary,
+                                detailDescription: chosen.description,
+                                imageURL: chosen.image_url
                             )
                             supportStep = .confirm
                         } else {
@@ -1105,7 +1122,7 @@ struct SupportFlowDemoView: View {
                 Spacer(minLength: 0)
             }
             .padding(16)
-            .navigationTitle("Support")
+            .navigationTitle(supportFlowTitle)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Close") {
@@ -1121,7 +1138,7 @@ struct SupportFlowDemoView: View {
 
     private var planSelectView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("1. Select plan")
+            Text("Select Plan")
                 .font(.headline)
 
             if liveSupportProject == nil || realPlans.isEmpty {
@@ -1134,14 +1151,23 @@ struct SupportFlowDemoView: View {
                         selectedPlan = plan
                         supportStep = .confirm
                     } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(plan.name)
-                                .font(.subheadline.bold())
-                            Text(feedFormatJPY(plan.priceMinor))
-                                .font(.subheadline)
-                            Text(plan.rewardSummary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        HStack(spacing: 12) {
+                            supportPlanThumbnail(plan: plan, width: 104, height: 72)
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(plan.name)
+                                    .font(.subheadline.bold())
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                Text(supportPlanPrice(plan))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                Text(plan.rewardSummary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer(minLength: 0)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
@@ -1156,15 +1182,46 @@ struct SupportFlowDemoView: View {
 
     private var confirmCardView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("2. Confirm")
+            Text("Confirm")
                 .font(.headline)
 
-            cardRow(title: "Goal", value: feedFormatJPY((supportTargetProject ?? liveSupportProject)?.goal_amount_minor ?? 0))
-            cardRow(title: "Delivery", value: (supportTargetProject ?? liveSupportProject).map { feedFormatDate($0.deadline_at) } ?? "-")
-            cardRow(title: "Prototype", value: "Available")
-
             if let plan = selectedPlan {
-                cardRow(title: "Plan", value: "\(plan.name) / \(feedFormatJPY(plan.priceMinor))")
+                VStack(alignment: .leading, spacing: 14) {
+                    supportPlanThumbnail(plan: plan, width: 180, height: 108)
+
+                    Text(plan.name)
+                        .font(.title3.weight(.bold))
+
+                    HStack(spacing: 10) {
+                        Label("\((supportTargetProject ?? liveSupportProject)?.supporter_count ?? 0) supporters", systemImage: "person.2.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Label(plan.rewardSummary, systemImage: "gift.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    if let description = plan.detailDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !description.isEmpty {
+                        Text(description)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(4)
+                    }
+
+                    Divider()
+
+                    summaryRow(title: "Delivery", value: (supportTargetProject ?? liveSupportProject).map { feedFormatDate($0.deadline_at) } ?? "-")
+                    summaryRow(title: "Goal", value: feedFormatJPY((supportTargetProject ?? liveSupportProject)?.goal_amount_minor ?? 0))
+
+                    Divider()
+
+                    summaryRow(title: "Support Amount", value: supportPlanPrice(plan), isEmphasized: true)
+                }
+                .padding(14)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
             Button("Go to checkout") {
@@ -1211,13 +1268,72 @@ struct SupportFlowDemoView: View {
         }
     }
 
-    private func cardRow(title: String, value: String) -> some View {
+    private var supportFlowTitle: String {
+        switch supportStep {
+        case .planSelect:
+            return "Select Plan"
+        case .confirm:
+            return "Confirm"
+        case .checkout:
+            return "Checkout"
+        case .result:
+            return "Result"
+        }
+    }
+
+    private func supportPlanPrice(_ plan: SupportPlan) -> String {
+        if plan.currency.uppercased() == "JPY" {
+            return feedFormatJPY(plan.priceMinor)
+        }
+        return "\(plan.priceMinor.formatted()) \(plan.currency.uppercased())"
+    }
+
+    private func supportPlanThumbnail(plan: SupportPlan, width: CGFloat, height: CGFloat) -> some View {
+        Group {
+            if let raw = plan.imageURL, let url = URL(string: raw) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        placeholderThumbnail
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        placeholderThumbnail
+                    @unknown default:
+                        placeholderThumbnail
+                    }
+                }
+            } else {
+                placeholderThumbnail
+            }
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var placeholderThumbnail: some View {
+        LinearGradient(
+            colors: [Color.gray.opacity(0.25), Color.gray.opacity(0.12)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .overlay {
+            Image(systemName: "photo")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func summaryRow(title: String, value: String, isEmphasized: Bool = false) -> some View {
         HStack {
             Text(title)
                 .foregroundStyle(.secondary)
             Spacer()
             Text(value)
                 .multilineTextAlignment(.trailing)
+                .fontWeight(isEmphasized ? .semibold : .regular)
         }
         .font(.subheadline)
     }
@@ -1458,7 +1574,10 @@ struct SupportFlowDemoView: View {
                     id: chosen.id,
                     name: chosen.name,
                     priceMinor: chosen.price_minor,
-                    rewardSummary: chosen.reward_summary
+                    currency: chosen.currency,
+                    rewardSummary: chosen.reward_summary,
+                    detailDescription: chosen.description,
+                    imageURL: chosen.image_url
                 )
                 supportStep = startAtConfirm ? .confirm : .planSelect
                 showSupportFlow = true
@@ -1483,7 +1602,10 @@ struct SupportFlowDemoView: View {
                     id: chosen.id,
                     name: chosen.name,
                     priceMinor: chosen.price_minor,
-                    rewardSummary: chosen.reward_summary
+                    currency: chosen.currency,
+                    rewardSummary: chosen.reward_summary,
+                    detailDescription: chosen.description,
+                    imageURL: chosen.image_url
                 )
                 supportStep = startAtConfirm ? .confirm : .planSelect
                 showSupportFlow = true
