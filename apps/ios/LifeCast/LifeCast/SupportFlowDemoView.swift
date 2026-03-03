@@ -1260,9 +1260,22 @@ struct SupportFlowDemoView: View {
             Button("Go to checkout") {
                 supportStep = .checkout
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .buttonStyle(.plain)
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 56)
+            .background(
+                LinearGradient(
+                    colors: [Color(red: 0.10, green: 0.58, blue: 1.0), Color(red: 0.00, green: 0.47, blue: 0.95)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Color(red: 0.00, green: 0.47, blue: 0.95).opacity(0.32), radius: 12, x: 0, y: 6)
             .disabled(selectedPlan == nil)
+            .opacity(selectedPlan == nil ? 0.55 : 1.0)
         }
     }
 
