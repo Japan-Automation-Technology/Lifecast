@@ -1124,6 +1124,15 @@ struct SupportFlowDemoView: View {
             .padding(16)
             .navigationTitle(supportFlowTitle)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if let previousStep = previousSupportStep {
+                        Button {
+                            supportStep = previousStep
+                        } label: {
+                            Label("Back", systemImage: "chevron.left")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button("Close") {
                         showSupportFlow = false
@@ -1308,6 +1317,19 @@ struct SupportFlowDemoView: View {
             return "Checkout"
         case .result:
             return "Result"
+        }
+    }
+
+    private var previousSupportStep: SupportStep? {
+        switch supportStep {
+        case .planSelect:
+            return nil
+        case .confirm:
+            return .planSelect
+        case .checkout:
+            return .confirm
+        case .result:
+            return .checkout
         }
     }
 
