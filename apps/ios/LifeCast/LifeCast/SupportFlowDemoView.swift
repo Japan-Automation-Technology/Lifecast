@@ -38,6 +38,8 @@ struct SupportFlowDemoView: View {
     @State private var selectedPlan: SupportPlan? = nil
     @State private var supportResultStatus = "idle"
     @State private var supportResultMessage = ""
+    @State private var supportResultAmountMinor: Int? = nil
+    @State private var supportResultCurrency: String? = nil
     @State private var liveSupportProject: MyProjectResult?
     @State private var supportTargetProject: MyProjectResult?
     @State private var feedProjects: [FeedProjectSummary] = []
@@ -1428,19 +1430,14 @@ struct SupportFlowDemoView: View {
                 Divider()
 
                 if let plan = selectedPlan {
+                    let resultAmountMinor = supportResultAmountMinor ?? selectedPlanPayableMinor
+                    let resultCurrency = supportResultCurrency ?? plan.currency
                     summaryRow(title: "Plan", value: plan.name)
                     summaryRow(
                         title: "Amount",
-                        value: supportMinorPrice(selectedPlanPayableMinor, currency: plan.currency),
+                        value: supportMinorPrice(resultAmountMinor, currency: resultCurrency),
                         isEmphasized: true
                     )
-                }
-
-                if !supportResultMessage.isEmpty {
-                    Text(supportResultMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(nil)
                 }
 
                 if !errorText.isEmpty {
@@ -1663,6 +1660,8 @@ struct SupportFlowDemoView: View {
 
     private func performSupportRequest() async {
         errorText = ""
+        supportResultAmountMinor = nil
+        supportResultCurrency = nil
         guard let plan = selectedPlan else {
             errorText = "Select plan first"
             return
@@ -1693,6 +1692,8 @@ struct SupportFlowDemoView: View {
             supportResultStatus = canonical?.support_status ?? confirmed.support_status
             let settledCurrency = canonical?.currency ?? confirmed.currency ?? plan.currency
             let chargedMinor = prepare.amount_minor ?? selectedPlanPayableMinor
+            supportResultAmountMinor = chargedMinor
+            supportResultCurrency = settledCurrency
             let chargedText = supportMinorPrice(chargedMinor, currency: settledCurrency)
             supportResultMessage = "Payment recorded: \(chargedText) (\(confirmed.support_id.uuidString))"
             await refreshLiveSupportProject()
@@ -1745,6 +1746,8 @@ struct SupportFlowDemoView: View {
         } catch {
             supportResultStatus = "failed"
             supportResultMessage = ""
+            supportResultAmountMinor = nil
+            supportResultCurrency = nil
             errorText = "Support failed: \(error.localizedDescription)"
         }
 
@@ -1770,6 +1773,8 @@ struct SupportFlowDemoView: View {
         supportStep = .planSelect
         selectedPlan = nil
         errorText = ""
+        supportResultAmountMinor = nil
+        supportResultCurrency = nil
         supportTargetProject = nil
     }
 
