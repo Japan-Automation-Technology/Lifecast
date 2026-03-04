@@ -1660,10 +1660,8 @@ struct ProjectPageView: View {
     private func projectDetailsView(project: MyProjectResult) -> some View {
         ProfileProjectDetailView(
             project: project,
-            headerActionTitle: canEditProject(project) ? "Edit Project" : nil,
-            onTapHeaderAction: canEditProject(project) ? {
-                onOpenProjectEditPage()
-            } : nil
+            headerActionTitle: nil,
+            onTapHeaderAction: nil
         )
     }
 

@@ -6,6 +6,18 @@ enum LifeCastRuntimeConfig {
     private static let fallbackAPIBaseURL = "https://lifecast-backend-850272145975.us-west1.run.app"
 
     static var apiBaseURL: URL {
+        if let envRaw = ProcessInfo.processInfo.environment["LIFECAST_API_BASE_URL"],
+           !envRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let url = URL(string: envRaw) {
+            return url
+        }
+#if targetEnvironment(simulator)
+        // Default simulator traffic to local backend during development.
+        if ProcessInfo.processInfo.environment["LIFECAST_FORCE_REMOTE_API"] != "1",
+           let localURL = URL(string: "http://127.0.0.1:8080") {
+            return localURL
+        }
+#endif
         if let raw = Bundle.main.object(forInfoDictionaryKey: "LIFECAST_API_BASE_URL") as? String,
            !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            let url = URL(string: raw) {

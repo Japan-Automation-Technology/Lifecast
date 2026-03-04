@@ -186,7 +186,7 @@ async function loadViewerProjectSupportContext(
   }>(
     `
       select
-        coalesce(sum(st.amount_minor), 0) as committed_amount_minor,
+        coalesce(max(pp.price_minor), 0) as committed_amount_minor,
         coalesce(max(pp.price_minor), 0) as supported_plan_price_minor
       from support_transactions st
       inner join project_plans pp on pp.id = st.plan_id
@@ -257,25 +257,47 @@ async function loadSupportedProjects(client: PoolClient, supporterUserId: string
     creator_display_name: string | null;
   }>(
     `
+      with supporter_projects as (
+        select distinct on (st.project_id)
+          st.id as support_id,
+          st.project_id,
+          coalesce(st.succeeded_at, st.confirmed_at, st.created_at) as supported_at,
+          pp.price_minor as amount_minor,
+          pp.currency as currency
+        from support_transactions st
+        inner join project_plans pp on pp.id = st.plan_id
+        where st.supporter_user_id = $1
+          and st.status = 'succeeded'
+        order by
+          st.project_id,
+          pp.price_minor desc,
+          coalesce(st.succeeded_at, st.confirmed_at, st.created_at) desc,
+          st.created_at desc
+      )
       select
-        st.id as support_id,
-        st.project_id,
-        coalesce(st.succeeded_at, st.confirmed_at, st.created_at) as supported_at,
-        st.amount_minor,
-        st.currency,
+        sp.support_id,
+        sp.project_id,
+        sp.supported_at,
+        sp.amount_minor,
+        sp.currency,
         p.title as project_title,
         p.subtitle as project_subtitle,
         p.cover_image_url as project_image_url,
         p.goal_amount_minor as project_goal_amount_minor,
         coalesce((
-          select sum(st_sum.amount_minor)
-          from support_transactions st_sum
-          where st_sum.project_id = p.id
-            and st_sum.status = 'succeeded'
+          select sum(by_supporter.supported_plan_price_minor)
+          from (
+            select max(pp_sum.price_minor) as supported_plan_price_minor
+            from support_transactions st_sum
+            inner join project_plans pp_sum on pp_sum.id = st_sum.plan_id
+            where st_sum.project_id = p.id
+              and st_sum.status = 'succeeded'
+            group by st_sum.supporter_user_id
+          ) by_supporter
         ), 0) as project_funded_amount_minor,
         p.currency as project_currency,
         (
-          select count(*)
+          select count(distinct st2.supporter_user_id)
           from support_transactions st2
           where st2.project_id = p.id
             and st2.status = 'succeeded'
@@ -283,13 +305,11 @@ async function loadSupportedProjects(client: PoolClient, supporterUserId: string
         p.creator_user_id,
         coalesce(cp.username, u.username, 'user_' || left(u.id::text, 8)) as creator_username,
         coalesce(cp.display_name, u.display_name) as creator_display_name
-      from support_transactions st
-      join projects p on p.id = st.project_id
+      from supporter_projects sp
+      join projects p on p.id = sp.project_id
       join users u on u.id = p.creator_user_id
       left join creator_profiles cp on cp.creator_user_id = u.id
-      where st.supporter_user_id = $1
-        and st.status = 'succeeded'
-      order by coalesce(st.succeeded_at, st.confirmed_at, st.created_at) desc
+      order by sp.supported_at desc
       limit $2
     `,
     [supporterUserId, limit],
@@ -439,9 +459,15 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
           coalesce(min_plan.price_minor, 0) as min_plan_price_minor,
           p.goal_amount_minor,
           coalesce((
-            select sum(st.amount_minor)
-            from support_transactions st
-            where st.project_id = p.id and st.status = 'succeeded'
+            select sum(by_supporter.supported_plan_price_minor)
+            from (
+              select max(pp.price_minor) as supported_plan_price_minor
+              from support_transactions st
+              inner join project_plans pp on pp.id = st.plan_id
+              where st.project_id = p.id
+                and st.status = 'succeeded'
+              group by st.supporter_user_id
+            ) by_supporter
           ), 0) as funded_amount_minor,
           greatest(
             0,
@@ -509,7 +535,7 @@ export async function registerDiscoverRoutes(app: FastifyInstance) {
         ) min_plan on true
         left join lateral (
           select
-            coalesce(sum(st_viewer.amount_minor), 0) as committed_amount_minor,
+            coalesce(max(pp_viewer.price_minor), 0) as committed_amount_minor,
             coalesce(max(pp_viewer.price_minor), 0) as supported_plan_price_minor
           from support_transactions st_viewer
           inner join project_plans pp_viewer on pp_viewer.id = st_viewer.plan_id

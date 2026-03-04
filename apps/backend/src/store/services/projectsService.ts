@@ -92,14 +92,21 @@ export class ProjectsService {
           description,
           external_urls,
           coalesce((
-            select sum(st.amount_minor)
-            from support_transactions st
-            where st.project_id = projects.id and st.status = 'succeeded'
+            select sum(supporter_snapshot.supported_plan_price_minor)
+            from (
+              select max(pp.price_minor) as supported_plan_price_minor
+              from support_transactions st
+              inner join project_plans pp on pp.id = st.plan_id
+              where st.project_id = projects.id
+                and st.status = 'succeeded'
+              group by st.supporter_user_id
+            ) supporter_snapshot
           ), 0) as funded_amount_minor,
           coalesce((
-            select count(*)
+            select count(distinct st.supporter_user_id)
             from support_transactions st
-            where st.project_id = projects.id and st.status = 'succeeded'
+            where st.project_id = projects.id
+              and st.status = 'succeeded'
           ), 0) as supporter_count,
           coalesce((
             select count(*)
@@ -220,14 +227,21 @@ export class ProjectsService {
           description,
           external_urls,
           coalesce((
-            select sum(st.amount_minor)
-            from support_transactions st
-            where st.project_id = projects.id and st.status = 'succeeded'
+            select sum(supporter_snapshot.supported_plan_price_minor)
+            from (
+              select max(pp.price_minor) as supported_plan_price_minor
+              from support_transactions st
+              inner join project_plans pp on pp.id = st.plan_id
+              where st.project_id = projects.id
+                and st.status = 'succeeded'
+              group by st.supporter_user_id
+            ) supporter_snapshot
           ), 0) as funded_amount_minor,
           coalesce((
-            select count(*)
+            select count(distinct st.supporter_user_id)
             from support_transactions st
-            where st.project_id = projects.id and st.status = 'succeeded'
+            where st.project_id = projects.id
+              and st.status = 'succeeded'
           ), 0) as supporter_count,
           coalesce((
             select count(*)
